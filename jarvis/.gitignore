@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+renderer/dist/
+
+# Runtime logs & artifacts
+renderer_errors.log
+*.log
+security_audit.log
+
+# Screenshots committed accidentally
+screenshot_*.png
+
+# Electron cache
+.webpack/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

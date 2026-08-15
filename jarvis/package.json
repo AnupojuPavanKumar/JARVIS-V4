@@ -1,0 +1,32 @@
+{
+  "name": "jarvis-ai-os",
+  "version": "2.0.0",
+  "description": "JARVIS — Just A Rather Very Intelligent System. Advanced AI Operating System powered by Ollama.",
+  "main": "main.js",
+  "scripts": {
+    "start": "npm run build && electron .",
+    "dev": "NODE_ENV=development electron .",
+    "ollama:gpu": "powershell -ExecutionPolicy Bypass -File ./start-ollama-gpu.ps1",
+    "start:gpu": "powershell -ExecutionPolicy Bypass -Command \"$env:CUDA_VISIBLE_DEVICES='0'; $env:OLLAMA_NUM_GPU='99'; $env:OLLAMA_FLASH_ATTENTION='1'; electron .\"",
+    "build": "node build.js"
+  },
+  "keywords": [
+    "jarvis",
+    "ai",
+    "ollama",
+    "electron",
+    "llm"
+  ],
+  "author": "JARVIS Systems",
+  "license": "MIT",
+  "dependencies": {
+    "electron": "^28.3.3"
+  },
+  "devDependencies": {
+    "acorn": "^8.17.0",
+    "electron-rebuild": "^3.2.9",
+    "esbuild": "^0.28.0",
+    "highlight.js": "^11.9.0",
+    "marked": "^9.1.6"
+  }
+}

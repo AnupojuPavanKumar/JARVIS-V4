@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self' 'unsafe-inline'; media-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:*; font-src 'self' https://fonts.gstatic.com data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:;">
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JARVIS — AI Operating System</title>
+  <meta name="description"
+    content="Just A Rather Very Intelligent System — Elite AI Operating System powered by Ollama">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&family=Exo+2:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&display=swap"
+    rel="stylesheet">
+
+  <link rel="stylesheet" href="dist/github-dark.min.css">
+  <link rel="stylesheet" href="dist/style.css">
+</head>
+
+<body>
+
+  <!-- ═══ AUTH LOCK SCREEN ════════════════════════════════════ -->
+  <div id="auth-screen" class="hidden">
+    <div id="auth-bg"></div>
+    <div id="auth-container">
+      <div id="auth-logo">
+        <div class="auth-hex-ring auth-ring-1"></div>
+        <div class="auth-hex-ring auth-ring-2"></div>
+        <div class="auth-core">◈</div>
+      </div>
+      <div id="auth-title">J.A.R.V.I.S</div>
+      <div id="auth-subtitle" class="auth-state-msg">IDENTITY VERIFICATION REQUIRED</div>
+      <div id="auth-pin-display">
+        <span class="pin-dot" id="pin-d1"></span>
+        <span class="pin-dot" id="pin-d2"></span>
+        <span class="pin-dot" id="pin-d3"></span>
+        <span class="pin-dot" id="pin-d4"></span>
+      </div>
+      <div id="auth-keypad">
+        <button class="keypad-btn" onclick="authKey('1')">1</button>
+        <button class="keypad-btn" onclick="authKey('2')">2</button>
+        <button class="keypad-btn" onclick="authKey('3')">3</button>
+        <button class="keypad-btn" onclick="authKey('4')">4</button>
+        <button class="keypad-btn" onclick="authKey('5')">5</button>
+        <button class="keypad-btn" onclick="authKey('6')">6</button>
+        <button class="keypad-btn" onclick="authKey('7')">7</button>
+        <button class="keypad-btn" onclick="authKey('8')">8</button>
+        <button class="keypad-btn" onclick="authKey('9')">9</button>
+        <button class="keypad-btn keypad-clear" onclick="authKey('clear')">⌫</button>
+        <button class="keypad-btn" onclick="authKey('0')">0</button>
+        <button class="keypad-btn keypad-enter" onclick="authKey('enter')">↵</button>
+      </div>
+      <div id="auth-hint">Enter your 4-digit PIN to access JARVIS</div>
+      <div id="auth-keyboard-hint"
+        style="font-size:9px;letter-spacing:0.12em;color:rgba(0,212,255,0.4);margin-top:4px;">KEYBOARD · NUMPAD ·
+        BACKSPACE · ENTER</div>
+      <input type="password" id="auth-hidden-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" autofocus
+        style="position:absolute; opacity:0; pointer-events:none; z-index:-1;">
+      <div id="auth-error" class="hidden">Incorrect PIN. Access denied.</div>
+      <div id="auth-setup" class="hidden">
+        <div class="auth-setup-msg">First time? Set a 4-digit PIN to secure JARVIS.</div>
+        <button class="auth-skip-btn" onclick="authSkip()">Skip — No PIN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cinematic Boot Sequence -->
+  <div id="boot-screen">
+    <div id="boot-terminal"></div>
+    <div id="boot-core-flash">
+      <div class="boot-data-grid"></div>
+      <div class="boot-ring boot-ring-1"></div>
+      <div class="boot-ring boot-ring-2"></div>
+      <div class="boot-ring boot-ring-3"></div>
+      <div class="boot-hex boot-hex-outer"></div>
+      <div class="boot-hex boot-hex-inner"></div>
+    </div>
+  </div>
+
+  <!-- Cinematic Shutdown Sequence -->
+  <div id="shutdown-screen" class="hidden">
+    <div class="shutdown-text">SYSTEMS OFFLINE.</div>
+  </div>
+
+  <!-- HUD Background -->
+  <div id="hud-bg" aria-hidden="true">
+    <div id="grid-overlay"></div>
+    <div id="scanline"></div>
+    <div id="corner-tl" class="corner-deco"></div>
+    <div id="corner-tr" class="corner-deco"></div>
+    <div id="corner-bl" class="corner-deco"></div>
+    <div id="corner-br" class="corner-deco"></div>
+  </div>
+
+  <!-- Title Bar -->
+  <header id="titlebar">
+    <div id="titlebar-drag">
+      <div id="titlebar-brand">
+        <span class="tb-hex">⬡</span>
+        <span class="tb-name">J.A.R.V.I.S</span>
+        <span class="tb-version">OS v2.0</span>
+      </div>
+    </div>
+    <div id="titlebar-controls">
+      <button id="btn-min" onclick="window.jarvis.minimize()" title="Minimize">─</button>
+      <button id="btn-max" onclick="window.jarvis.maximize()" title="Maximize">□</button>
+      <button id="btn-close" onclick="window.jarvis.close()" title="Close">✕</button>
+    </div>
+  </header>
+
+  <!-- App Shell -->
+  <div id="app">
+
+    <!-- Sidebar -->
+    <nav id="sidebar" aria-label="Mode Navigation">
+      <div id="sidebar-logo">
+        <div id="arc-reactor" class="cyber-hex-container">
+          <div class="hex-ring hex-outer"></div>
+          <div class="hex-ring hex-inner"></div>
+          <div class="arc-core">◈</div>
+        </div>
+      </div>
+      <div id="sidebar-modes"></div>
+      <div id="sidebar-bottom">
+        <button class="sb-btn" id="btn-diagnostics" title="Diagnostics" onclick="openDiagnosticsModal()"><span
+            class="sb-icon">⚡</span><span class="sb-label">DIAG</span></button>
+        <button class="sb-btn" id="btn-scheduler" title="Scheduler" onclick="openSchedulerModal()"><span
+            class="sb-icon">⏱</span><span class="sb-label">TASKS</span></button>
+        <button class="sb-btn" id="btn-history" title="History"><span class="sb-icon">📜</span><span
+            class="sb-label">HISTORY</span></button>
+        <button class="sb-btn" id="btn-settings" title="Settings"><span class="sb-icon">⚙</span><span
+            class="sb-label">CONFIG</span></button>
+        <div class="sb-divider"></div>
+        <button class="sb-btn sb-btn-power" id="btn-poweroff" title="Power Off — Quit JARVIS &amp; Ollama"
+          onclick="confirmPowerOff()">
+          <span class="sb-icon power-icon">⏻</span>
+          <span class="sb-label">POWER</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main id="main-content">
+
+      <!-- Top Status Bar -->
+      <header id="top-bar">
+        <div id="top-left">
+          <div id="ollama-status-badge" class="status-badge checking">
+            <span class="status-dot-sm" id="ollama-dot"></span>
+            <span id="ollama-label">CONNECTING</span>
+          </div>
+          <div id="mode-badge">
+            <span id="active-mode-icon">⬡</span>
+            <span id="active-mode-name">GENERAL</span>
+          </div>
+        </div>
+        <div id="top-center">
+          <div id="top-title">J.A.R.V.I.S</div>
+          <div id="top-subtitle">Just A Rather Very Intelligent System</div>
+        </div>
+        <div id="top-right">
+          <div id="web-search-indicator" title="Web search active">
+            <span class="web-dot"></span>
+            <span>SEARCHING</span>
+          </div>
+          <div id="wake-indicator" title="Hey JARVIS wake word is active">
+            <span id="wake-dot"></span>
+            <span>LISTENING</span>
+          </div>
+          <div id="hud-clock-display">
+            <div id="hud-time">──:──:──</div>
+            <div id="hud-date-str">──────────</div>
+          </div>
+          <div id="model-badge" title="Click to switch active model"
+            onclick="refreshModels(); openModal('models-modal')" class="interactive-badge">
+            <span class="model-icon">◈</span>
+            <span id="active-model-label">llama3.2</span>
+          </div>
+
+          <!-- Hamburger Menu -->
+          <div id="hamburger-wrap">
+            <button id="btn-hamburger" title="Options" onclick="toggleHamburger()">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+
+            <!-- Anchored dropdown -->
+            <div id="hamburger-menu" class="ham-menu" hidden>
+
+              <div class="ham-section-title">🔀 GIT</div>
+
+              <button class="ham-item" onclick="gitAction('status')">
+                <span class="ham-icon">📋</span>
+                <span>Status</span>
+                <span class="ham-badge safe">SAFE</span>
+              </button>
+              <button class="ham-item" onclick="gitAction('log')">
+                <span class="ham-icon">📜</span>
+                <span>Log</span>
+                <span class="ham-badge safe">SAFE</span>
+              </button>
+              <button class="ham-item" onclick="gitAction('diff')">
+                <span class="ham-icon">📝</span>
+                <span>Diff</span>
+                <span class="ham-badge safe">SAFE</span>
+              </button>
+              <button class="ham-item" onclick="gitAction('branch')">
+                <span class="ham-icon">🌿</span>
+                <span>Branches</span>
+                <span class="ham-badge safe">SAFE</span>
+              </button>
+
+              <div class="ham-divider"></div>
+
+              <button class="ham-item" onclick="gitAction('pull')">
+                <span class="ham-icon">⬇️</span>
+                <span>Pull</span>
+                <span class="ham-badge warn">CONFIRM</span>
+              </button>
+              <button class="ham-item" onclick="gitAction('add-commit')">
+                <span class="ham-icon">✅</span>
+                <span>Add &amp; Commit</span>
+                <span class="ham-badge warn">CONFIRM</span>
+              </button>
+              <button class="ham-item" onclick="gitAction('push')">
+                <span class="ham-icon">⬆️</span>
+                <span>Push</span>
+                <span class="ham-badge warn">CONFIRM</span>
+              </button>
+
+              <div class="ham-divider"></div>
+
+              <div class="ham-section-title" style="margin-top:2px">⚙️ QUICK</div>
+              <button class="ham-item" onclick="openModal('memory-modal'); renderMemory(); closeHamburger()">
+                <span class="ham-icon">🧠</span>
+                <span>Memory</span>
+              </button>
+              <button class="ham-item" id="ham-wake-btn" onclick="toggleWakeWord(); closeHamburger()">
+                <span class="ham-icon">🎤</span>
+                <span>Wake Word</span>
+                <span class="ham-badge" id="ham-wake-badge">OFF</span>
+              </button>
+              <button class="ham-item" onclick="window.loadProject(); closeHamburger()">
+                <span class="ham-icon">📦</span>
+                <span>Load Project</span>
+              </button>
+              <button class="ham-item" onclick="window.clearProject(); closeHamburger()">
+                <span class="ham-icon">🗑️</span>
+                <span>Clear Project</span>
+              </button>
+              <button class="ham-item" onclick="openTerminalModal(); closeHamburger()">
+                <span class="ham-icon">⌨️</span>
+                <span>Terminal</span>
+              </button>
+              <button class="ham-item" onclick="quickAction('models'); closeHamburger()">
+                <span class="ham-icon">◈</span>
+                <span>Scan Models</span>
+              </button>
+              <button class="ham-item" onclick="exportChat(); closeHamburger()">
+                <span class="ham-icon">↓</span>
+                <span>Export Chat</span>
+              </button>
+
+              <div class="ham-divider"></div>
+
+              <div class="ham-section-title" style="margin-top:2px">🎨 THEME</div>
+              <div style="padding: 4px 10px 8px; display:grid; grid-template-columns: repeat(5,1fr); gap:6px">
+                <button class="theme-swatch" id="ham-theme-ironman" onclick="applyTheme('ironman'); closeHamburger()"
+                  title="Iron Man">
+                  <div class="theme-dot" style="background: radial-gradient(circle, #00d4ff, #020c18)">⬡</div>
+                  <span class="theme-name">IRON MAN</span>
+                </button>
+                <button class="theme-swatch" id="ham-theme-phantom" onclick="applyTheme('phantom'); closeHamburger()"
+                  title="Phantom">
+                  <div class="theme-dot" style="background: radial-gradient(circle, #ff2244, #070005)">☠</div>
+                  <span class="theme-name">PHANTOM</span>
+                </button>
+                <button class="theme-swatch" id="ham-theme-matrix" onclick="applyTheme('matrix'); closeHamburger()"
+                  title="Matrix">
+                  <div class="theme-dot" style="background: radial-gradient(circle, #00ff41, #000800)">⊞</div>
+                  <span class="theme-name">MATRIX</span>
+                </button>
+                <button class="theme-swatch" id="ham-theme-nova" onclick="applyTheme('nova'); closeHamburger()"
+                  title="Nova">
+                  <div class="theme-dot" style="background: radial-gradient(circle, #b86bff, #05020e)">✦</div>
+                  <span class="theme-name">NOVA</span>
+                </button>
+                <button class="theme-swatch" id="ham-theme-ghost" onclick="applyTheme('ghost'); closeHamburger()"
+                  title="Ghost">
+                  <div class="theme-dot"
+                    style="background: radial-gradient(circle, #0057ff, #f0f4f8); border-color: rgba(0,87,255,0.3)">◈
+                  </div>
+                  <span class="theme-name">GHOST</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Workspace: Dashboard + Chat Panel side by side -->
+      <div id="workspace-body">
+
+        <!-- LEFT: Mode-Specific Dashboard (always visible) -->
+        <div id="dashboard-area">
+          <!-- Injected by JS per mode -->
+        </div>
+
+        <!-- RIGHT: Chat Panel -->
+        <div id="chat-panel">
+          <div id="chat-panel-hdr">
+            <div class="cph-left">
+              <span class="cph-icon" id="chat-mode-icon">⬡</span>
+              <span class="cph-label">JARVIS CHAT</span>
+            </div>
+            <div class="cph-right">
+              <button class="micro-btn" onclick="newSession()" title="New session">NEW</button>
+              <button class="micro-btn" onclick="clearCurrentChat()" title="Clear">CLEAR</button>
+              <button class="micro-btn" onclick="exportChat()" title="Export">EXPORT</button>
+            </div>
+          </div>
+
+          <!-- Messages -->
+          <section id="chat-area" aria-label="Conversation" aria-live="polite">
+            <div id="chat-messages"></div>
+            <div id="chat-empty-hint">
+              <span class="ceh-icon">◈</span>
+              <span>Ask JARVIS anything…</span>
+            </div>
+            <div id="scroll-anchor"></div>
+          </section>
+
+          <!-- Input -->
+          <footer id="input-bar">
+            <div id="input-row">
+              <button id="voice-btn" class="icon-btn" title="Voice Input" aria-label="Voice Input">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+              </button>
+              <div id="input-wrap">
+
+                <textarea id="user-input" placeholder="Awaiting your command, sir…" rows="1"
+                  aria-label="Message input"></textarea>
+              </div>
+              <div id="input-right-controls">
+                <button id="tts-btn" class="icon-btn active" title="Toggle Voice Output" aria-pressed="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  </svg>
+                </button>
+                <button id="send-btn" title="Send (Enter)" aria-label="Send message">
+                  <span>SEND</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+                <!-- Issue 12 & 14: stream cancel button — shown only while streaming -->
+                <button id="stream-cancel-btn" title="Cancel generation (Esc)" aria-label="Cancel stream"
+                  onclick="cancelStream()"
+                  style="display:none; align-items:center; gap:6px; background:rgba(255,60,60,0.15); border:1px solid rgba(255,60,60,0.4); color:#ff6b6b; padding:0 14px; border-radius:8px; font-size:11px; font-weight:700; letter-spacing:.08em; cursor:pointer; transition:background .2s;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                    style="width:14px;height:14px;">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                  </svg>
+                  STOP
+                </button>
+              </div>
+            </div>
+            <div id="input-hints">
+              <span>ENTER send</span>
+              <span>SHIFT+ENTER newline</span>
+              <span id="char-count"></span>
+            </div>
+          </footer>
+        </div>
+
+      </div><!-- /#workspace-body -->
+
+    </main><!-- /#main-content -->
+
+    <!-- Right HUD Panels -->
+    <aside id="hud-panels" aria-label="System Panels">
+
+      <div class="hud-panel" id="panel-system">
+        <div class="panel-hdr"><span class="panel-hdr-icon">◈</span>SYSTEM STATUS</div>
+        <div class="panel-body">
+          <div class="stat-row"><span class="stat-lbl">OLLAMA</span><span class="stat-val" id="p-ollama">—</span></div>
+          <div class="stat-row"><span class="stat-lbl">MODEL</span><span class="stat-val" id="p-model">—</span></div>
+          <div class="stat-row"><span class="stat-lbl">PLATFORM</span><span class="stat-val" id="p-platform">—</span>
+          </div>
+          <div class="stat-row"><span class="stat-lbl">CPU</span><span class="stat-val" id="p-cpu">—</span></div>
+          <div class="stat-row"><span class="stat-lbl">MEMORY</span><span class="stat-val" id="p-mem">—</span></div>
+          <div class="stat-row"><span class="stat-lbl">SESSIONS</span><span class="stat-val" id="p-sessions">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud-panel" id="panel-actions">
+        <div class="panel-hdr"><span class="panel-hdr-icon">▶</span>QUICK ACTIONS</div>
+        <div class="panel-body">
+          <button class="qa-btn" onclick="quickAction('terminal')">⌨ TERMINAL</button>
+          <button class="qa-btn" onclick="quickAction('models')">◉ SCAN MODELS</button>
+          <button class="qa-btn" onclick="exportChat()">↓ EXPORT CHAT</button>
+        </div>
+      </div>
+
+      <div class="hud-panel" id="panel-gpu">
+        <div class="panel-hdr"><span class="panel-hdr-icon">📊</span>PERFORMANCE MONITOR</div>
+        <div class="panel-body" id="gpu-panel-body">
+          <div class="gpu-bar-wrap">
+            <div class="gpu-bar-label"><span>CPU USAGE</span><span class="gpu-bar-val" id="gpu-util-val">—</span></div>
+            <div class="gpu-bar-track">
+              <div class="gpu-bar-fill" id="gpu-util-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="gpu-bar-wrap">
+            <div class="gpu-bar-label"><span>RAM USED</span><span class="gpu-bar-val" id="gpu-mem-val">—</span></div>
+            <div class="gpu-bar-track">
+              <div class="gpu-bar-fill" id="gpu-mem-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="gpu-bar-wrap">
+            <div class="gpu-bar-label"><span>GPU USAGE</span><span class="gpu-bar-val" id="gpu-hw-util-val">—</span>
+            </div>
+            <div class="gpu-bar-track">
+              <div class="gpu-bar-fill" id="gpu-hw-util-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="gpu-bar-wrap">
+            <div class="gpu-bar-label"><span>VRAM USED</span><span class="gpu-bar-val" id="gpu-hw-mem-val">—</span>
+            </div>
+            <div class="gpu-bar-track">
+              <div class="gpu-bar-fill" id="gpu-hw-mem-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="stat-row" style="padding:4px 8px">
+            <span class="stat-lbl">UPTIME</span>
+            <span class="stat-val" id="gpu-uptime-val" style="font-size:10px">—</span>
+          </div>
+          <div class="stat-row" style="padding:4px 8px">
+            <span class="stat-lbl">GPU NAME</span>
+            <span class="stat-val" id="gpu-name-val" style="font-size:8px">LOCAL HOST</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud-panel" id="panel-activity">
+        <div class="panel-hdr"><span class="panel-hdr-icon">≋</span>ACTIVITY</div>
+        <canvas id="waveform-canvas" width="160" height="60" aria-hidden="true"></canvas>
+        <div id="waveform-label">STANDBY</div>
+      </div>
+
+      <div class="hud-panel" id="panel-models">
+        <div class="panel-hdr"><span class="panel-hdr-icon">◉</span>MODELS</div>
+        <div class="panel-body" id="models-list">
+          <div class="panel-placeholder">Scan to detect models</div>
+        </div>
+      </div>
+
+    </aside>
+
+  </div><!-- /#app -->
+
+  <!-- ═══ MODALS ════════════════════════════════════════════════ -->
+
+  <!-- History Modal -->
+  <div id="history-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('history-modal')"></div>
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <span>⏱ CONVERSATION HISTORY</span>
+        <button class="modal-close-btn" onclick="closeModal('history-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="history-search-row">
+          <input type="text" id="history-search" placeholder="Search sessions…">
+        </div>
+        <div id="history-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('settings-modal')"></div>
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <span>⚙ JARVIS CONFIGURATION</span>
+        <button class="modal-close-btn" onclick="closeModal('settings-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="cfg-section">
+          <label class="cfg-label" for="cfg-model">AI MODEL</label>
+          <select id="cfg-model" class="cfg-select">
+            <option value="llama3.2">Llama 3.2 3B ⚡ Fastest · Chat &amp; Automations</option>
+            <option value="llama3.2:1b">Llama 3.2 1B 🔋 Ultra-light</option>
+            <option value="llama3.1:8b">Llama 3.1 8B ★ Balanced (RTX 4050)</option>
+            <option value="qwen2.5-coder:7b">Qwen 2.5 Coder 7B 💻 Best for Code</option>
+            <option value="qwen2.5-coder:3b">Qwen 2.5 Coder 3B 💻 Coder (Fast)</option>
+            <option value="qwen2.5:7b">Qwen 2.5 7B 🌐 General Purpose</option>
+            <option value="mistral:7b">Mistral 7B — Fast &amp; capable</option>
+            <option value="gemma2:9b">Gemma 2 9B — High quality</option>
+            <option value="phi3:mini">Phi-3 Mini — Ultra fast</option>
+            <option value="codellama:7b">CodeLlama 7B — Code specialist</option>
+            <option value="deepseek-coder:6.7b">DeepSeek Coder 6.7B</option>
+          </select>
+          <div class="model-presets" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+            <button class="model-preset-btn" onclick="quickSwitchModel('llama3.2')"
+              title="Fastest · Chat &amp; Automations">⚡ Llama 3.2</button>
+            <button class="model-preset-btn" onclick="quickSwitchModel('llama3.1:8b')" title="Balanced performance">★
+              Llama 3.1</button>
+            <button class="model-preset-btn" onclick="quickSwitchModel('qwen2.5-coder:7b')" title="Best for code">💻
+              Qwen Coder 7B</button>
+            <button class="model-preset-btn" onclick="quickSwitchModel('qwen2.5-coder:3b')" title="Coder, fast">💻 Qwen
+              Coder 3B</button>
+            <button class="model-preset-btn" onclick="quickSwitchModel('phi3:mini')" title="Ultra fast">🔋 Phi-3
+              Mini</button>
+          </div>
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label" for="cfg-endpoint">OLLAMA ENDPOINT</label>
+          <input type="text" id="cfg-endpoint" class="cfg-input" value="http://localhost:11434">
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label" for="cfg-temperature">TEMPERATURE <span id="cfg-temp-val">0.7</span></label>
+          <input type="range" id="cfg-temperature" class="cfg-range" min="0" max="1" step="0.05" value="0.7">
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label">VOICE OUTPUT</label>
+          <label class="toggle-row">
+            <input type="checkbox" id="cfg-tts" checked>
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span>Enable text-to-speech</span>
+          </label>
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label" for="cfg-speech-rate">SPEECH RATE <span id="cfg-rate-val">1.0×</span></label>
+          <input type="range" id="cfg-speech-rate" class="cfg-range" min="0.5" max="2" step="0.1" value="1.0">
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label" for="cfg-speech-pitch">SPEECH PITCH <span id="cfg-pitch-val">1.0</span></label>
+          <input type="range" id="cfg-speech-pitch" class="cfg-range" min="0.5" max="2" step="0.1" value="1.0">
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label">CONTEXT WINDOW</label>
+          <select id="cfg-context" class="cfg-select">
+            <option value="10">Last 10 messages</option>
+            <option value="20" selected>Last 20 messages</option>
+            <option value="40">Last 40 messages</option>
+            <option value="0">Full history</option>
+          </select>
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label">🎨 INTERFACE THEME</label>
+          <div class="theme-grid" id="theme-grid">
+            <button class="theme-swatch" id="cfg-theme-ironman" onclick="applyTheme('ironman')"
+              title="Iron Man — Default cyan HUD">
+              <div class="theme-dot" style="background: radial-gradient(circle, #00d4ff 30%, #020c18)">⬡</div>
+              <span class="theme-name">IRON MAN</span>
+            </button>
+            <button class="theme-swatch" id="cfg-theme-phantom" onclick="applyTheme('phantom')"
+              title="Phantom — Blood red dark">
+              <div class="theme-dot" style="background: radial-gradient(circle, #ff2244 30%, #070005)">☠</div>
+              <span class="theme-name">PHANTOM</span>
+            </button>
+            <button class="theme-swatch" id="cfg-theme-matrix" onclick="applyTheme('matrix')"
+              title="Matrix — Terminal green">
+              <div class="theme-dot" style="background: radial-gradient(circle, #00ff41 30%, #000800)">⊞</div>
+              <span class="theme-name">MATRIX</span>
+            </button>
+            <button class="theme-swatch" id="cfg-theme-nova" onclick="applyTheme('nova')"
+              title="Nova — Deep space purple">
+              <div class="theme-dot" style="background: radial-gradient(circle, #b86bff 30%, #05020e)">✦</div>
+              <span class="theme-name">NOVA</span>
+            </button>
+            <button class="theme-swatch" id="cfg-theme-ghost" onclick="applyTheme('ghost')"
+              title="Ghost — Light military">
+              <div class="theme-dot"
+                style="background: radial-gradient(circle, #0057ff 30%, #f0f4f8); border-color: rgba(0,87,255,0.3)">◈
+              </div>
+              <span class="theme-name">GHOST</span>
+            </button>
+          </div>
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label">🔤 INTERFACE FONT SIZE</label>
+          <div class="font-size-row" id="font-size-row">
+            <button class="font-size-btn" data-size="font-sm" onclick="setFontSize('font-sm')" title="Small">SM</button>
+            <button class="font-size-btn active" data-size="font-md" onclick="setFontSize('font-md')"
+              title="Medium (default)">MD</button>
+            <button class="font-size-btn" data-size="font-lg" onclick="setFontSize('font-lg')" title="Large">LG</button>
+            <button class="font-size-btn" data-size="font-xl" onclick="setFontSize('font-xl')"
+              title="Extra Large">XL</button>
+          </div>
+        </div>
+        <div class="cfg-actions">
+          <button class="cfg-btn-primary" onclick="saveSettings()">◈ SAVE CONFIGURATION</button>
+          <button class="cfg-btn-secondary" onclick="resetSettings()">⊘ RESET DEFAULTS</button>
+          <button class="cfg-btn-secondary" onclick="openChangePinModal()"
+            style="border-color:var(--cyan);color:var(--cyan);">🔒 CHANGE PIN</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Change PIN Modal -->
+  <div id="change-pin-modal" class="modal" hidden>
+    <div class="modal-backdrop" onclick="closeModal('change-pin-modal')"></div>
+    <div class="modal-box" style="width:360px;">
+      <div class="modal-hdr">
+        <span>🔒 CHANGE PIN</span>
+        <button class="modal-close-btn" onclick="closeModal('change-pin-modal')">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="cfg-section" style="margin-bottom:0">
+          <label class="cfg-label">CURRENT PIN</label>
+          <input id="chpin-current" type="password" maxlength="4" inputmode="numeric" pattern="[0-9]*"
+            placeholder="••••" class="cfg-input" style="letter-spacing:0.4em;font-size:20px;text-align:center;">
+        </div>
+        <div class="cfg-section" style="margin-bottom:0">
+          <label class="cfg-label">NEW PIN</label>
+          <input id="chpin-new" type="password" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="••••"
+            class="cfg-input" style="letter-spacing:0.4em;font-size:20px;text-align:center;">
+        </div>
+        <div class="cfg-section" style="margin-bottom:0">
+          <label class="cfg-label">CONFIRM NEW PIN</label>
+          <input id="chpin-confirm" type="password" maxlength="4" inputmode="numeric" pattern="[0-9]*"
+            placeholder="••••" class="cfg-input" style="letter-spacing:0.4em;font-size:20px;text-align:center;">
+        </div>
+        <div id="chpin-error" class="hidden"
+          style="font-size:11px;color:var(--orange);letter-spacing:0.08em;text-align:center;"></div>
+        <div class="cfg-actions" style="margin-top:4px;">
+          <button class="cfg-btn-primary" onclick="submitChangePin()">◈ UPDATE PIN</button>
+          <button class="cfg-btn-secondary" onclick="closeModal('change-pin-modal')">CANCEL</button>
+        </div>
+        <p style="font-size:9px;color:var(--text-muted);text-align:center;letter-spacing:0.08em;margin:0;">PIN is hashed
+          with SHA-256 before storage.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminal Modal -->
+  <div id="terminal-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('terminal-modal')"></div>
+    <div class="modal-box terminal-box">
+      <div class="modal-hdr">
+        <span>⌨ JARVIS TERMINAL</span>
+        <div class="term-hdr-right">
+          <button class="term-action-btn" onclick="clearTerminal()">CLEAR</button>
+          <button class="modal-close-btn" onclick="closeModal('terminal-modal')">✕</button>
+        </div>
+      </div>
+      <div class="modal-body terminal-body">
+        <div id="terminal-output" aria-live="polite"></div>
+        <div id="terminal-input-row">
+          <span class="term-prompt">JARVIS $&gt;</span>
+          <input type="text" id="terminal-input" class="term-input" placeholder="Enter command…" autocomplete="off"
+            spellcheck="false">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Models Modal -->
+  <div id="models-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('models-modal')"></div>
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <span>◉ INSTALLED MODELS</span>
+        <button class="modal-close-btn" onclick="closeModal('models-modal')">✕</button>
+      </div>
+      <div class="modal-body" id="models-modal-body">
+        <div class="panel-placeholder">Scanning Ollama…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Power-Off Confirm Modal -->
+  <div id="poweroff-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('poweroff-modal')"></div>
+    <div class="modal-box modal-box-sm">
+      <div class="modal-hdr power-modal-hdr">
+        <span>⏻ POWER OFF</span>
+        <button class="modal-close-btn" onclick="closeModal('poweroff-modal')">✕</button>
+      </div>
+      <div class="modal-body power-modal-body">
+        <div class="power-icon-lg">⏻</div>
+        <div class="power-confirm-title">Shut down JARVIS?</div>
+        <div class="power-confirm-sub">This will stop JARVIS and Ollama completely.<br>All unsaved sessions will be
+          preserved.</div>
+        <div class="power-confirm-btns">
+          <button class="power-btn-cancel" onclick="closeModal('poweroff-modal')">✕ Cancel</button>
+          <button class="power-btn-confirm" onclick="executePowerOff()">⏻ Shut Down</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⌨️ Command Palette (Ctrl+K) -->
+  <div id="cmd-palette" hidden>
+    <div id="cmd-backdrop" onclick="closeCmdPalette()"></div>
+    <div id="cmd-box">
+      <div id="cmd-search-row">
+        <span id="cmd-search-icon">⌘</span>
+        <input id="cmd-input" type="text" placeholder="Type a command…" autocomplete="off" spellcheck="false">
+        <span id="cmd-kbd">ESC</span>
+      </div>
+      <div id="cmd-results"></div>
+    </div>
+  </div>
+
+  <!-- 🧠 Memory Modal -->
+  <div id="memory-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('memory-modal')"></div>
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <span>🧠 JARVIS MEMORY</span>
+        <button class="modal-close-btn" onclick="closeModal('memory-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="mem-desc">Facts stored here are injected into every conversation as persistent context. JARVIS will
+          always know these things about you.</p>
+        <div id="mem-list"></div>
+        <div id="mem-add-row">
+          <input id="mem-input" class="mem-input" type="text"
+            placeholder="Add a fact… e.g. My name is Pavan, I use Python" maxlength="200">
+          <button class="mem-add-btn" onclick="memoryAdd()">＋ Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ DIAGNOSTICS MODAL ════════════════════════════════════ -->
+  <div id="diag-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('diag-modal')"></div>
+    <div class="modal-box" style="max-width:700px">
+      <div class="modal-hdr">
+        <span class="modal-title">⚡ RUNTIME DIAGNOSTICS</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="micro-btn" onclick="refreshDiagnostics()">↻ REFRESH</button>
+          <button class="modal-close-btn" onclick="closeModal('diag-modal')">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="diag-body">
+        <div class="diag-grid" id="diag-grid">
+          <div class="panel-placeholder">Loading diagnostics…</div>
+        </div>
+        <div class="diag-section-title">SKILLS REGISTRY</div>
+        <div id="diag-skills-list" class="diag-skills-list">
+          <div class="panel-placeholder">Loading skills…</div>
+        </div>
+        <div class="diag-section-title">TASK QUEUE</div>
+        <div id="diag-queue-list" class="diag-queue-list">
+          <div class="panel-placeholder">Queue empty.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ TASK QUEUE HUD INDICATOR ════════════════════════════ -->
+  <div id="task-queue-hud" class="hidden" title="Pending tasks in queue">
+    <span class="tq-icon">⏳</span>
+    <span id="tq-count">0</span>
+    <span class="tq-label">QUEUED</span>
+  </div>
+
+  <!-- ═══ SKILLS HUD INDICATOR ════════════════════════════════ -->
+  <div id="skills-hud" title="Active skills">
+    <span class="sk-icon">⬡</span>
+    <span id="skills-count">0</span>
+    <span class="sk-label">SKILLS</span>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" role="alert" aria-live="assertive"></div>
+
+  <!-- ═══ PROMPT LIBRARY MODAL ════════════════════════════════ -->
+  <div id="prompts-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('prompts-modal')"></div>
+    <div class="modal-box" style="max-width:700px">
+      <div class="modal-hdr">
+        <span class="modal-title">📝 PROMPT LIBRARY</span>
+        <button class="modal-close-btn" onclick="closeModal('prompts-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="prompt-lib-toolbar">
+          <input id="prompts-search" class="prompt-lib-search" type="text" placeholder="Search prompts…"
+            oninput="renderPrompts(this.value)">
+          <button class="prompt-lib-add-btn" onclick="togglePromptAddForm()">+ NEW</button>
+        </div>
+        <div class="prompt-lib-grid" id="prompts-grid"></div>
+        <div class="prompt-add-form" id="prompt-add-form" hidden>
+          <div class="prompt-form-row">
+            <input id="prompt-new-title" class="prompt-form-input" type="text" placeholder="Prompt title…">
+            <input id="prompt-new-cat" class="prompt-form-input" type="text" placeholder="Category…"
+              style="max-width:130px">
+          </div>
+          <textarea id="prompt-new-body" class="prompt-form-textarea"
+            placeholder="Prompt text… use {placeholder} for variables"></textarea>
+          <button class="prompt-form-save" onclick="saveNewPrompt()">💾 SAVE PROMPT</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SNIPPET MANAGER MODAL ════════════════════════════════ -->
+  <div id="snippets-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('snippets-modal')"></div>
+    <div class="modal-box" style="max-width:680px">
+      <div class="modal-hdr">
+        <span class="modal-title">⧉ SNIPPET MANAGER</span>
+        <button class="modal-close-btn" onclick="closeModal('snippets-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="snip-toolbar">
+          <input id="snippets-search" class="snip-search" type="text" placeholder="Search snippets…"
+            oninput="renderSnippets(this.value)">
+          <button class="snip-add-btn" onclick="toggleSnipAddForm()">+ NEW</button>
+        </div>
+        <div class="snip-list" id="snippets-list"></div>
+        <div class="snip-add-form" id="snip-add-form" hidden>
+          <div class="prompt-form-row">
+            <input id="snip-new-title" class="prompt-form-input" type="text" placeholder="Snippet title…">
+            <select id="snip-new-lang" class="dash-select" style="min-width:120px">
+              <option value="python">Python</option>
+              <option value="javascript">JavaScript</option>
+              <option value="bash">Bash</option>
+              <option value="powershell">PowerShell</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <textarea id="snip-new-code" class="prompt-form-textarea"
+            style="min-height:120px;font-family:var(--font-mono);font-size:11px"
+            placeholder="Paste code here…"></textarea>
+          <button class="prompt-form-save" onclick="saveNewSnippet()">💾 SAVE SNIPPET</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ NOTES SCRATCHPAD MODAL ════════════════════════════════ -->
+  <div id="notes-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('notes-modal')"></div>
+    <div class="modal-box" style="max-width:680px">
+      <div class="modal-hdr">
+        <span class="modal-title">📓 NOTES SCRATCHPAD</span>
+        <button class="modal-close-btn" onclick="closeModal('notes-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="notes-toolbar">
+          <button class="notes-tool-btn" title="Bold" onclick="notesInsert('**{}**')"><b>B</b></button>
+          <button class="notes-tool-btn" title="Italic" onclick="notesInsert('*{}*')"><i>I</i></button>
+          <button class="notes-tool-btn" title="Code" onclick="notesInsert('\`{}\`')">⌘</button>
+          <button class="notes-tool-btn" title="Heading" onclick="notesInsert('## {}')">H</button>
+          <button class="notes-tool-btn" title="List" onclick="notesInsert('- {}')">≡</button>
+          <button class="notes-tool-btn" title="Checkbox" onclick="notesInsert('- [ ] {}')">☑</button>
+          <div class="notes-tool-sep"></div>
+          <button class="notes-save-btn" onclick="saveNotes()">💾 SAVE</button>
+        </div>
+        <textarea id="notes-editor" class="notes-editor" placeholder="Your notes here… supports Markdown"
+          oninput="updateNotesStatus()"></textarea>
+        <div class="notes-status" id="notes-status-bar">0 chars · 0 words · 1 lines</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ API TESTER MODAL ════════════════════════════════════ -->
+  <div id="api-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('api-modal')"></div>
+    <div class="modal-box" style="max-width:720px">
+      <div class="modal-hdr">
+        <span class="modal-title">🌐 API TESTER</span>
+        <button class="modal-close-btn" onclick="closeModal('api-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="api-tester-wrap">
+          <div class="api-url-row">
+            <select id="api-method" class="api-method-select">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>PATCH</option>
+              <option>DELETE</option>
+            </select>
+            <input id="api-url-inp" class="api-url-input" type="text" placeholder="https://api.example.com/endpoint">
+            <button id="api-send-btn" class="api-send-btn" onclick="sendApiRequest()">▶ SEND</button>
+          </div>
+          <div class="api-tabs">
+            <button class="api-tab active" data-tab="body" onclick="switchApiTab('body')">BODY</button>
+            <button class="api-tab" data-tab="headers" onclick="switchApiTab('headers')">HEADERS</button>
+          </div>
+          <div class="api-tab-panel active" id="api-tab-body">
+            <textarea id="api-body-inp" class="api-textarea" placeholder='{"key": "value"}'></textarea>
+          </div>
+          <div class="api-tab-panel" id="api-tab-headers">
+            <textarea id="api-headers-inp" class="api-textarea"
+              placeholder='{"Authorization": "Bearer token"}'></textarea>
+          </div>
+          <div class="api-response-hdr" id="api-response-hdr"></div>
+          <div class="api-response-body" id="api-response-body">Response will appear here…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ IMAGE ANALYSIS MODAL ════════════════════════════════ -->
+  <div id="img-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('img-modal')"></div>
+    <div class="modal-box" style="max-width:560px">
+      <div class="modal-hdr">
+        <span class="modal-title">🖼 IMAGE ANALYSIS</span>
+        <button class="modal-close-btn" onclick="closeModal('img-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="img-analysis-wrap">
+          <div class="img-drop-zone" id="img-drop-zone" onclick="pickImage()">
+            <div id="img-drop-zone-inner">
+              <div class="img-drop-icon">🖼</div>
+              <div class="img-drop-text">Click to select an image<br><small>PNG, JPG, WEBP supported</small></div>
+            </div>
+          </div>
+          <div class="img-preview-wrap" id="img-preview-wrap" hidden>
+            <img id="img-preview" src="" alt="Preview">
+            <div class="img-preview-overlay">
+              <button class="img-clear-btn" onclick="clearImg()">✕ CLEAR</button>
+            </div>
+          </div>
+          <input id="img-prompt-inp" class="prompt-form-input" type="text"
+            placeholder="What do you want to know about this image?" style="width:100%">
+          <button id="img-analyze-btn" class="img-analyze-btn" onclick="analyzeImage()" disabled>⬡ ANALYZE WITH
+            JARVIS</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ═══ SCHEDULER MODAL ════════════════════════════════════ -->
+  <div id="scheduler-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" onclick="closeModal('scheduler-modal')"></div>
+    <div class="modal-box" style="max-width:720px">
+      <div class="modal-hdr">
+        <span class="modal-title">⏱ BACKGROUND TASKS & SCHEDULER</span>
+        <button class="modal-close-btn" onclick="closeModal('scheduler-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="scheduler-wrap">
+          <div class="scheduler-toolbar">
+            <button class="scheduler-add-btn" onclick="toggleSchedulerAddForm()">+ NEW TASK</button>
+            <button class="scheduler-refresh-btn" onclick="renderSchedulerJobs()">⟳ REFRESH</button>
+          </div>
+
+          <div class="scheduler-add-form" id="scheduler-add-form" hidden
+            style="margin-bottom: 12px; padding: 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(0,212,255,0.2); border-radius: 4px;">
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+              <input id="sched-name" class="prompt-form-input" type="text" placeholder="Task name..." style="flex:1">
+              <select id="sched-type" class="dash-select" style="width:120px"
+                onchange="document.getElementById('sched-oneoff').hidden=(this.value==='recurring');document.getElementById('sched-recurring').hidden=(this.value==='one-off')">
+                <option value="one-off">One-off</option>
+                <option value="recurring">Recurring</option>
+              </select>
+            </div>
+            <div id="sched-oneoff" style="margin-bottom:10px; display:flex; gap:10px; align-items:center;">
+              <span style="color:var(--text-dim); font-size:12px;">Trigger at:</span>
+              <input type="datetime-local" id="sched-datetime" class="prompt-form-input"
+                style="flex:1; max-width:200px;">
+            </div>
+            <div id="sched-recurring" hidden style="margin-bottom:10px; display:flex; gap:10px; align-items:center;">
+              <span style="color:var(--text-dim); font-size:12px;">Interval (seconds):</span>
+              <input type="number" id="sched-interval" class="prompt-form-input" min="1" value="60"
+                style="width:100px;">
+            </div>
+            <textarea id="sched-payload" class="prompt-form-textarea" style="min-height:60px;"
+              placeholder="Command or prompt to execute..."></textarea>
+            <div style="margin-top:10px; text-align:right;">
+              <button class="prompt-form-save" onclick="addSchedulerJob()">CREATE TASK</button>
+            </div>
+          </div>
+
+          <div class="scheduler-list" id="scheduler-list" style="max-height: 400px; overflow-y: auto;">
+            <!-- Jobs injected here -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calculator panel (inside right sidebar, injected by JS) -->
+  <script src="dist/marked.min.js"></script>
+  <script src="dist/highlight.min.js"></script>
+  <script>if (typeof hljs !== 'undefined') hljs.highlightAll && document.addEventListener('DOMContentLoaded', () => hljs.highlightAll());</script>
+
+  <!-- ═══ JARVIS MODULES — loaded before renderer.js ════════════ -->
+  <!-- Core modules: expose helpers used by renderer.js            -->
+  <script src="modules/ollama.js"></script>
+  <!-- Agentic loop: tool/skill calling system                     -->
+  <script src="modules/toolExecutor.js"></script>
+  <!-- Feature modules: productivity widgets and UI tools          -->
+  <script src="modules/productivity.js"></script>
+  <script src="modules/uiFeatures.js"></script>
+  <!-- Dashboard panels (mode-specific dashboards)                 -->
+  <script src="modules/dashboards.js"></script>
+  <!-- Voice: wake word, Whisper, TTS — canonical implementation -->
+  <script src="modules/voice.js"></script>
+
+
+  <!-- Main renderer — references all module globals above -->
+  <script src="dist/renderer.js"></script>
+
+  <script>
+    // Hidden passcode input fallback to ensure reliable keyboard capture
+    document.addEventListener('DOMContentLoaded', () => {
+      const authInput = document.getElementById('auth-hidden-input');
+      const authScreen = document.getElementById('auth-screen');
+      if (authInput && authScreen) {
+
+        // Force focus to hidden input if screen is active and user clicks anywhere
+        document.addEventListener('click', () => {
+          if (!authScreen.classList.contains('hidden')) {
+            authInput.focus();
+          }
+        });
+
+        // Also auto focus whenever window gains focus
+        window.addEventListener('focus', () => {
+          if (!authScreen.classList.contains('hidden')) {
+            authInput.focus();
+          }
+        });
+      }
+    });
+  </script>
+</body>
+
+</html>
