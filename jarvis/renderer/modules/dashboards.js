@@ -142,7 +142,13 @@ function initOrbCanvas() {
     phase: Math.random() * Math.PI * 2,
   }));
 
-  function draw() {
+  let lastTime = 0;
+  function draw(timestamp) {
+    timestamp = timestamp || performance.now();
+    const fps = state.isStreaming ? 60 : (!state.isFocused ? 2 : 10);
+    if (timestamp - lastTime < 1000 / fps) { animFrame = requestAnimationFrame(draw); return; }
+    lastTime = timestamp;
+
     ctx.clearRect(0, 0, W, H);
 
     const accentHex = getAccentColor();
@@ -259,7 +265,7 @@ function initOrbCanvas() {
     animFrame = requestAnimationFrame(draw);
   }
 
-  draw();
+  animFrame = requestAnimationFrame(draw);
   return () => { if (animFrame) cancelAnimationFrame(animFrame); };
 }
 

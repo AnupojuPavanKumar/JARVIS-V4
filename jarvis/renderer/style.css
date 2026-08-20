@@ -58,8 +58,9 @@
   --inputbar-h:    88px;
 
   /* Typography */
-  --font-ui:   'Rajdhani', 'Exo 2', 'Segoe UI', sans-serif;
-  --font-mono: 'Share Tech Mono', 'Consolas', 'Courier New', monospace;
+  --font-ui:   system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  --font-heading: 'Space Grotesk', system-ui, -apple-system, sans-serif;
 
   /* Motion */
   --ease:   cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -1978,8 +1979,8 @@ input, textarea, select { font-family: inherit; }
   50%       { opacity: 1.0; }
 }
 @keyframes scanLine {
-  0%   { top: -180px; }
-  100% { top: 100vh;  }
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(calc(100vh + 180px)); }
 }
 @keyframes arcSpin1 {
   from { transform: rotate(0deg);   }
@@ -3460,21 +3461,21 @@ input, textarea, select { font-family: inherit; }
   75% { transform: rotate(270deg); } 
   100% { transform: rotate(360deg); } 
 }
-@keyframes hudPulse { 0% { transform: scale(0.98); filter: drop-shadow(0 0 10px var(--cyan-glow)); } 100% { transform: scale(1.02); filter: drop-shadow(0 0 25px var(--cyan)); } }
+@keyframes hudPulse { 0% { transform: scale(0.98); opacity: 0.8; } 100% { transform: scale(1.02); opacity: 1; } }
 @keyframes hudFlicker {
   0%, 19.99%, 22%, 62.99%, 64%, 64.99%, 70%, 100% { opacity: 0.7; }
   20%, 21.99%, 63%, 63.99%, 65%, 69.99% { opacity: 0.1; }
 }
 @keyframes hudScan {
-  0% { top: 0%; opacity: 0; }
-  10% { opacity: 0.8; box-shadow: 0 0 25px var(--cyan-glow); }
-  45% { opacity: 0.8; box-shadow: 0 0 15px var(--cyan); }
-  50% { top: 100%; opacity: 0; box-shadow: none; }
-  60% { top: 100%; opacity: 0; }
-  61% { top: 0%; opacity: 0; }
-  70% { opacity: 0.8; box-shadow: 0 0 25px var(--cyan-glow); }
-  90% { opacity: 0.8; box-shadow: 0 0 15px var(--cyan); }
-  100% { top: 100%; opacity: 0; }
+  0% { transform: translateY(0); opacity: 0; }
+  10% { opacity: 0.5; }
+  45% { opacity: 0.5; }
+  50% { transform: translateY(1000px); opacity: 0; }
+  60% { transform: translateY(1000px); opacity: 0; }
+  61% { transform: translateY(0); opacity: 0; }
+  70% { opacity: 0.5; }
+  90% { opacity: 0.5; }
+  100% { transform: translateY(1000px); opacity: 0; }
 }
 
 @keyframes hudDataStream {
@@ -3490,9 +3491,9 @@ input, textarea, select { font-family: inherit; }
 }
 
 @keyframes hudRingBreathe {
-  0% { transform: scale(0.98); opacity: 0.4; box-shadow: 0 0 10px var(--cyan-soft) inset; }
-  50% { transform: scale(1.02); opacity: 0.8; box-shadow: 0 0 30px var(--cyan) inset, 0 0 15px var(--cyan-glow); }
-  100% { transform: scale(0.98); opacity: 0.4; box-shadow: 0 0 10px var(--cyan-soft) inset; }
+  0% { transform: scale(0.98); opacity: 0.4; }
+  50% { transform: scale(1.02); opacity: 0.8; }
+  100% { transform: scale(0.98); opacity: 0.4; }
 }
 @keyframes hudRippleAnim {
   0% { transform: scale(0.8); opacity: 0.8; }

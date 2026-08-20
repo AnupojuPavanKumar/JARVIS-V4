@@ -125,9 +125,10 @@ function searchWorkspace(args) {
 }
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
-const [,, command, rawArgs] = process.argv;
+const rawArgs = process.argv[2];
 let args = {};
 try { args = rawArgs ? JSON.parse(rawArgs) : {}; } catch (e) { args = {}; }
+const command = args.command || 'list-dir';
 
 const commands = { 'list-dir': listDir, 'read-file': readFile, 'search-workspace': searchWorkspace };
 const handler = commands[command];

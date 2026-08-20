@@ -1,6 +1,6 @@
 // read_url.js — JARVIS skill: Scrape and extract text from a URL
 // args: { url: string }
-const args = JSON.parse(process.argv[3] || '{}');
+const args = JSON.parse(process.argv[2] || '{}');
 const url = (args.url || '').trim();
 
 if (!url) {

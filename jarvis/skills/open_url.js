@@ -1,6 +1,6 @@
-﻿// open_url.js — JARVIS skill: open a URL in the default browser
+// open_url.js — JARVIS skill: open a URL in the default browser
 // args: { url: string }
-const args = JSON.parse(process.argv[3] || '{}');
+const args = JSON.parse(process.argv[2] || '{}');
 let url = (args.url || '').trim();
 if (!url) { console.log(JSON.stringify({ ok: false, error: 'No URL provided.' })); process.exit(0); }
 if (!/^https?:\/\//i.test(url)) url = 'https://' + url;

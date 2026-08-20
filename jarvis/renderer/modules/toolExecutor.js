@@ -15,24 +15,19 @@
 const ToolExecutor = (() => {
   const XML_RE = /<tool_call>([\s\S]*?)<\/tool_call>/i;
 
-  // ── Check streamed text for a tool call ────────────────────
   function detectToolCall(text) {
-    const m = text.match(XML_RE);
-    if (m) {
-      try {
-        const parsed = JSON.parse(m[1].trim());
-        if (parsed && typeof parsed.tool === 'string') return parsed;
-      } catch (_) {}
-    }
-
-    const match = text.match(/\{\s*"tool"\s*:/);
-    if (match) {
-      const possibleJson = text.slice(match.index);
-      const lastBrace = possibleJson.lastIndexOf('}');
-      if (lastBrace !== -1) {
+    const matches = [...text.matchAll(/<tool_call>([\s\S]*?)<\/tool_call>/gi)];
+    if (matches.length > 0) {
+      for (let i = matches.length - 1; i >= 0; i--) {
         try {
-          const parsed = JSON.parse(possibleJson.slice(0, lastBrace + 1).trim());
-          if (parsed && typeof parsed.tool === 'string') return parsed;
+          const parsed = JSON.parse(matches[i][1].trim());
+          if (parsed && typeof parsed.tool === 'string') {
+            const textBefore = text.slice(0, matches[i].index).trim().toLowerCase();
+            if (textBefore.endsWith('example:') || textBefore.includes('example:\n') || textBefore.includes('command should be:')) {
+              continue;
+            }
+            return parsed;
+          }
         } catch (_) {}
       }
     }
@@ -121,10 +116,11 @@ Available tools:
 ${toolDefs}
 
 Rules:
+- CRITICAL: You MUST wrap your JSON inside <tool_call> and </tool_call> tags.
 - CRITICAL: After outputting the <tool_call> block, STOP GENERATING IMMEDIATELY. DO NOT output the result yourself.
 - NEVER hallucinate, fake, or invent tool results. You MUST wait for the system to inject the [TOOL_RESULT] data.
-- Supply ALL required args. Optional args should only be included when the user explicitly provides that information.
-- If no tool is needed, respond normally without any tool call block.
+- Supply ALL required args.
+- DO NOT provide examples of tool calls in your conversation.
 [END TOOL SYSTEM]
 `.trim();
   }

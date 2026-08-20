@@ -1,6 +1,6 @@
-﻿// open_app.js — JARVIS skill: open a local application
+// open_app.js — JARVIS skill: open a local application
 // args: { app: string }
-const args = JSON.parse(process.argv[3] || '{}');
+const args = JSON.parse(process.argv[2] || '{}');
 const app = (args.app || '').trim();
 if (!app) { console.log(JSON.stringify({ ok: false, error: 'No app name provided.' })); process.exit(0); }
 
@@ -11,6 +11,8 @@ const aliases = {
   code: 'code', vscode: 'code', 'vs code': 'code',
   explorer: 'explorer', terminal: 'wt', wt: 'wt',
   powershell: 'powershell', cmd: 'cmd', paint: 'mspaint',
+  youtube: 'https://youtube.com', github: 'https://github.com',
+  gamma: 'https://gamma.app',
 };
 const exe = aliases[app.toLowerCase()] || app;
 const { exec } = require('child_process');

@@ -4,7 +4,7 @@
 
 'use strict';
 
-const args = JSON.parse(process.argv[3] || '{}');
+const args = JSON.parse(process.argv[2] || '{}');
 const name = (args.name || '').trim();
 
 if (!name) {

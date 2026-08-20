@@ -1496,6 +1496,9 @@ function getCpuUsage() {
   return (10000 - Math.round(10000 * idleDiff / totalDiff)) / 100;
 }
 
+let lastGpuPayload = {};
+let lastGpuFetchTime = 0;
+
 function startTelemetryBroadcast() {
   setInterval(() => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1512,19 +1515,32 @@ function startTelemetryBroadcast() {
         uptime: `${hours}h ${mins}m`
       };
 
-      exec('nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name --format=csv,noheader,nounits', (err, stdout) => {
-        if (!err && stdout) {
-          const parts = stdout.trim().split(',').map(s => s.trim());
-          if (parts.length >= 5) {
-            payload.gpuUsage = parts[0];
-            payload.gpuMemUsed = parts[1];
-            payload.gpuMemTotal = parts[2];
-            payload.gpuTemp = parts[3];
-            payload.gpuName = parts[4];
+      const now = Date.now();
+      if (now - lastGpuFetchTime >= 10000) {
+        lastGpuFetchTime = now;
+        // Run nvidia-smi asynchronously
+        exec('nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name --format=csv,noheader,nounits', (err, stdout) => {
+          if (!err && stdout) {
+            const parts = stdout.trim().split(',').map(s => s.trim());
+            if (parts.length >= 5) {
+              lastGpuPayload = {
+                gpuUsage: parts[0],
+                gpuMemUsed: parts[1],
+                gpuMemTotal: parts[2],
+                gpuTemp: parts[3],
+                gpuName: parts[4]
+              };
+            }
           }
-        }
+          Object.assign(payload, lastGpuPayload);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('telemetry', payload);
+          }
+        });
+      } else {
+        Object.assign(payload, lastGpuPayload);
         mainWindow.webContents.send('telemetry', payload);
-      });
+      }
     }
   }, 2000);
 }

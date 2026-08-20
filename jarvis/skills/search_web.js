@@ -1,6 +1,6 @@
-﻿// search_web.js — JARVIS skill: search the web via the default browser
+// search_web.js — JARVIS skill: search the web via the default browser
 // args: { query: string }
-const args = JSON.parse(process.argv[3] || '{}');
+const args = JSON.parse(process.argv[2] || '{}');
 const query = (args.query || '').trim();
 if (!query) { console.log(JSON.stringify({ ok: false, error: 'No search query provided.' })); process.exit(0); }
 const url = 'https://www.google.com/search?q=' + encodeURIComponent(query);

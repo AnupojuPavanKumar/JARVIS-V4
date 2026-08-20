@@ -146,7 +146,9 @@
       "script": "workspace_navigator.js",
       "type": "js",
       "params": {
-        "path": { "type": "string", "required": false, "description": "Directory or file path to inspect" }
+        "command": { "type": "string", "enum": ["list-dir", "read-file", "search-workspace"], "required": true, "description": "Command to run" },
+        "path": { "type": "string", "required": false, "description": "Directory or file path to inspect" },
+        "query": { "type": "string", "required": false, "description": "Query to search for (if command is search-workspace)" }
       }
     },
     {
