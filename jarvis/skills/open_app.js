@@ -10,6 +10,8 @@ const aliases = {
   spotify: 'spotify', notepad: 'notepad', calculator: 'calc', calc: 'calc',
   code: 'code', vscode: 'code', 'vs code': 'code',
   explorer: 'explorer', terminal: 'wt', wt: 'wt', paint: 'mspaint',
+  powershell: 'powershell', cmd: 'cmd', zoom: 'zoom', 'zoom app': 'zoom',
+
   youtube: 'https://youtube.com', github: 'https://github.com',
   gamma: 'https://gamma.app',
 };
