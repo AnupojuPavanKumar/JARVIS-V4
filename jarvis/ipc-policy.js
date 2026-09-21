@@ -66,6 +66,14 @@ function classifyCommand(cmdStr) {
 
   const readOnlyPattern = /^\s*(whoami|hostname|ver|dir|ipconfig|systeminfo|tasklist|where|node\s+-v|python\s+--version)(\s+.*)?$/i;
   if (readOnlyPattern.test(c)) return 'safe';
+  
+  if (/^git\s+(status|log|branch|diff|show|rev-parse|remote)(\s|$)/i.test(c)) {
+    if (/^[A-Za-z0-9._\/=:@~^ %-]+$/.test(c)) {
+      if (!/(?:^|\s)(-c|--output|--exec-path|--upload-pack|--receive-pack|--ext-diff|--textconv|--open-files-in-pager)\b/.test(c)) {
+        return 'safe';
+      }
+    }
+  }
 
   return 'confirm';
 }

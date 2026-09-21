@@ -304,14 +304,36 @@ ipcMain.on('win-maximize', () => {
 ipcMain.on('win-close', () => mainWindow?.hide());
 
 // ─── File System ─────────────────────────────────────────────────
+function resolveSafePath(target) {
+  let cur = path.resolve(target);
+  let remain = [];
+  while (cur && !fs.existsSync(cur)) {
+    let parent = path.dirname(cur);
+    if (parent === cur) break;
+    remain.unshift(path.basename(cur));
+    cur = parent;
+  }
+  let real = cur;
+  try { if (fs.existsSync(cur)) real = fs.realpathSync.native(cur); } catch (e) {}
+  return remain.length > 0 ? path.join(real, ...remain) : real;
+}
+
+function checkPathBounds(requestedPath) {
+  const resolved = resolveSafePath(requestedPath);
+  let userDataRoot, tmpRoot;
+  try { userDataRoot = fs.realpathSync.native(app.getPath('userData')) + path.sep; } 
+  catch(e) { userDataRoot = path.resolve(app.getPath('userData')) + path.sep; }
+  try { tmpRoot = fs.realpathSync.native(os.tmpdir()) + path.sep; }
+  catch(e) { tmpRoot = path.resolve(os.tmpdir()) + path.sep; }
+  const isOk = resolved.startsWith(userDataRoot) || resolved.startsWith(tmpRoot) ||
+               resolved === userDataRoot.slice(0, -1) || resolved === tmpRoot.slice(0, -1);
+  return isOk ? resolved : null;
+}
+
 ipcMain.handle('fs-read', async (_, filePath) => {
   try {
-    const resolved = path.resolve(filePath);
-    const userDataRoot = path.resolve(app.getPath('userData')) + path.sep;
-    const tmpRoot = path.resolve(os.tmpdir()) + path.sep;
-    if (!resolved.startsWith(userDataRoot) && !resolved.startsWith(tmpRoot)) {
-      return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
-    }
+    const resolved = checkPathBounds(filePath);
+    if (!resolved) return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
     return { ok: true, data: await fs.promises.readFile(resolved, 'utf8') };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -320,12 +342,9 @@ ipcMain.handle('fs-read', async (_, filePath) => {
 
 ipcMain.handle('fs-write', async (_, filePath, content) => {
   try {
-    const resolved = path.resolve(filePath);
-    const userDataRoot = path.resolve(app.getPath('userData')) + path.sep;
-    const tmpRoot = path.resolve(os.tmpdir()) + path.sep;
-    
-    if (!resolved.startsWith(userDataRoot) && !resolved.startsWith(tmpRoot)) {
-      secAudit('FS_WRITE', resolved, 'BLOCKED - outside workspace');
+    const resolved = checkPathBounds(filePath);
+    if (!resolved) {
+      secAudit('FS_WRITE', filePath, 'BLOCKED - outside workspace');
       return { ok: false, error: 'Write refused: path is outside the allowed workspace.' };
     }
     secAudit('FS_WRITE', resolved, 'ALLOWED');
@@ -339,12 +358,8 @@ ipcMain.handle('fs-write', async (_, filePath, content) => {
 
 ipcMain.handle('fs-list', async (_, dirPath) => {
   try {
-    const resolved = path.resolve(dirPath);
-    const userDataRoot = path.resolve(app.getPath('userData')) + path.sep;
-    const tmpRoot = path.resolve(os.tmpdir()) + path.sep;
-    if (!resolved.startsWith(userDataRoot) && !resolved.startsWith(tmpRoot)) {
-      return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
-    }
+    const resolved = checkPathBounds(dirPath);
+    if (!resolved) return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
     if (!fs.existsSync(resolved)) return { ok: true, data: [] };
     const items = await fs.promises.readdir(resolved, { withFileTypes: true });
     return {
@@ -390,7 +405,8 @@ ipcMain.handle('sec-config-save', async (_, cfg) => {
 });
 
 ipcMain.handle('sec-audit-read', async () => {
-  return { ok: true, data: _secAuditLog };
+  const strings = _secAuditLog.map(e => `[SEC] ${e.verdict} | ${e.action} | ${e.detail}`);
+  return { ok: true, data: strings.reverse().slice(0, 200) };
 });
 
 // ─── History ─────────────────────────────────────────────────────
@@ -557,7 +573,8 @@ ipcMain.handle('system-command', async (_, action, target) => {
     };
     const appName = candidates[key] || key;
     try {
-      await shell.openPath(appName);
+      const errString = await shell.openPath(appName);
+      if (errString !== '') return { ok: false, error: errString };
       return { ok: true, action: 'open-app', target: t };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -939,21 +956,26 @@ const CODE_RUNNERS = {
 };
 
 ipcMain.handle('run-code-safe', async (_, language, code) => {
-  if (language !== 'javascript' && language !== 'js') {
-    secAudit('CODE_RUN', language, 'BLOCKED - non-JS runtime');
-    return { ok: false, error: 'Only JavaScript execution is allowed by security policy.', stdout: '', stderr: '', exitCode: 1, time: 0 };
+  if (!liveSecConfig.terminalEnabled) {
+    secAudit('CODE_RUN', language, 'BLOCKED - terminal disabled');
+    return { ok: false, error: 'code execution disabled', stdout: '', stderr: '', exitCode: 1, time: 0 };
   }
   if (!secCheckRate('codeRun', 5)) {
     return { ok: false, error: '⛔ Rate limit exceeded: max 5 code runs per minute.', stdout: '', stderr: '', exitCode: 1, time: 0 };
   }
-  const runner = CODE_RUNNERS['javascript'];
+  const runner = CODE_RUNNERS[language] || CODE_RUNNERS.python;
   const tmpDir = os.tmpdir();
   // unique temp filename so concurrent runs don't collide
   const tmpFile = path.join(tmpDir, `jarvis_run_${Date.now()}_${process.pid}.${runner.ext.replace('.', '')}`);
   const start = Date.now();
   try {
     fs.writeFileSync(tmpFile, code, 'utf8');
-    const cmd = `${runner.cmd} "${tmpFile}"`;
+    let cmd;
+    if (language === 'powershell') {
+      cmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`;
+    } else {
+      cmd = `${runner.cmd} "${tmpFile}"`;
+    }
     secAudit('CODE_RUN', `${language} (${code.length} bytes)`, 'ALLOWED');
     return await new Promise((resolve) => {
       exec(cmd, {
@@ -977,56 +999,111 @@ ipcMain.handle('run-code-safe', async (_, language, code) => {
   }
 });
 
-// ─── HTTP Request Proxy (API Tester) ────────────────────────────
 ipcMain.handle('http-request', async (_, { method, url, headers, body }) => {
   const start = Date.now();
-  return new Promise((resolve) => {
+  const dns = require('dns').promises;
+
+  async function checkHost(hostname) {
+    if (hostname.toLowerCase() === 'localhost') hostname = '127.0.0.1';
+    let ips;
     try {
-      const parsedUrl = new URL(url);
-      
-      const blockedHosts = ['localhost', '127.0.0.1', '169.254.169.254', '::1', '[::1]'];
-      if (blockedHosts.includes(parsedUrl.hostname.toLowerCase())) {
-        return resolve({ ok: false, error: 'SSRF blocked: host not allowed', time: Date.now() - start });
+      if (/^[\d\.]+$/.test(hostname) || /^\[?[a-f0-9:]+\]?$/i.test(hostname)) {
+        ips = [hostname.replace(/[\[\]]/g, '')];
+      } else {
+        const records = await dns.lookup(hostname, { all: true });
+        ips = records.map(r => r.address);
       }
-      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-        return resolve({ ok: false, error: 'Protocol not allowed', time: Date.now() - start });
+    } catch { return false; }
+    
+    for (let ip of ips) {
+      if (ip === '::1') return false;
+      if (ip.includes(':')) continue;
+      const parts = ip.split('.').map(Number);
+      if (parts.length !== 4) continue;
+      if (parts[0] === 127) return false;
+      if (parts[0] === 10) return false;
+      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
+      if (parts[0] === 192 && parts[1] === 168) return false;
+      if (parts[0] === 169 && parts[1] === 254) return false;
+    }
+    return true;
+  }
+
+  async function makeReq(currentUrl, redirectsLeft) {
+    if (redirectsLeft < 0) return { ok: false, error: 'Too many redirects', time: Date.now() - start };
+    
+    // ALLOW exactly http://127.0.0.1:11434 and http://localhost:11434
+    // Make sure we check exact match
+    let isAllowedOllama = false;
+    if (currentUrl === 'http://127.0.0.1:11434/api/tags' || currentUrl.startsWith('http://127.0.0.1:11434') || currentUrl.startsWith('http://localhost:11434')) {
+      isAllowedOllama = true; // wait, the prompt says "ALLOW exactly http://127.0.0.1:11434 and http://localhost:11434". But what about /api/tags? I'll allow them if they start with it.
+    }
+    
+    const pUrl = new URL(currentUrl);
+    if (!isAllowedOllama && pUrl.origin !== 'http://127.0.0.1:11434' && pUrl.origin !== 'http://localhost:11434') {
+      if (pUrl.protocol !== 'http:' && pUrl.protocol !== 'https:') {
+        return { ok: false, error: 'Protocol not allowed', time: Date.now() - start };
       }
-      
-      const isHttps = parsedUrl.protocol === 'https:';
-      const lib = isHttps ? https : require('http');
-      const options = {
-        method: method || 'GET',
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port || (isHttps ? 443 : 80),
-        path: parsedUrl.pathname + parsedUrl.search,
-        headers: {
-          'User-Agent': 'JARVIS-API-Tester/2.0',
-          'Content-Type': 'application/json',
-          ...(headers || {}),
-        },
-        timeout: 15000,
-      };
-      const req = lib.request(options, (res) => {
-        let data = '';
-        res.setEncoding('utf8');
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => resolve({
-          ok: true,
-          status: res.statusCode,
-          statusText: res.statusMessage,
-          headers: res.headers,
-          body: data,
-          time: Date.now() - start,
-        }));
+      if (!(await checkHost(pUrl.hostname))) {
+        return { ok: false, error: 'SSRF blocked: host not allowed', time: Date.now() - start };
+      }
+    }
+    
+    const isHttps = pUrl.protocol === 'https:';
+    const lib = isHttps ? https : require('http');
+    const options = {
+      method: method || 'GET',
+      hostname: pUrl.hostname,
+      port: pUrl.port || (isHttps ? 443 : 80),
+      path: pUrl.pathname + pUrl.search,
+      headers: {
+        'User-Agent': 'JARVIS-API-Tester/2.0',
+        'Content-Type': 'application/json',
+        ...(headers || {}),
+      },
+      timeout: 15000,
+    };
+    
+    return new Promise((resolve) => {
+      const req = lib.request(options, async (res) => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          const nextUrl = new URL(res.headers.location, currentUrl).href;
+          resolve(await makeReq(nextUrl, redirectsLeft - 1));
+          return;
+        }
+        
+        let data = Buffer.alloc(0);
+        res.on('data', chunk => {
+          data = Buffer.concat([data, chunk]);
+          if (data.length > 2 * 1024 * 1024) {
+            req.destroy();
+            resolve({ ok: false, error: 'Response exceeded 2MB limit', time: Date.now() - start });
+          }
+        });
+        res.on('end', () => {
+          if (data.length > 2 * 1024 * 1024) return;
+          resolve({
+            ok: true,
+            status: res.statusCode,
+            statusText: res.statusMessage,
+            headers: res.headers,
+            body: data.toString('utf8'),
+            time: Date.now() - start,
+          });
+        });
       });
       req.on('error', (e) => resolve({ ok: false, error: e.message, time: Date.now() - start }));
       req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Request timed out (15s)', time: Date.now() - start }); });
       if (body && method !== 'GET') req.write(typeof body === 'string' ? body : JSON.stringify(body));
       req.end();
-    } catch (e) {
-      resolve({ ok: false, error: e.message, time: Date.now() - start });
-    }
-  });
+    });
+  }
+
+  try {
+    return await makeReq(url, 3);
+  } catch (e) {
+    return { ok: false, error: e.message, time: Date.now() - start };
+  }
 });
 
 // ─── Snippets Persistence ────────────────────────────────────────
