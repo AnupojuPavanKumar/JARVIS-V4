@@ -14,9 +14,30 @@ const aliases = {
   youtube: 'https://youtube.com', github: 'https://github.com',
   gamma: 'https://gamma.app',
 };
-const exe = aliases[app.toLowerCase()] || app;
-const { exec } = require('child_process');
-exec(`start "" "${exe}"`, { shell: true }, (err) => {
-  if (err) console.log(JSON.stringify({ ok: false, error: err.message }));
-  else console.log(JSON.stringify({ ok: true, result: `Launched ${app}.` }));
-});
+const exe = aliases[app.toLowerCase()];
+if (!exe) {
+  console.log(JSON.stringify({ ok: false, error: 'App not in allowlist.' }));
+  process.exit(0);
+}
+
+const { spawn } = require('child_process');
+let child;
+if (exe.startsWith('http')) {
+  child = spawn('rundll32', ['url.dll,FileProtocolHandler', exe], {
+    shell: false,
+    windowsHide: true,
+    detached: true,
+    stdio: 'ignore'
+  });
+} else {
+  child = spawn(exe, [], {
+    shell: false,
+    windowsHide: true,
+    detached: true,
+    stdio: 'ignore'
+  });
+}
+
+child.on('error', () => {});
+child.unref();
+console.log(JSON.stringify({ ok: true, result: `Launched ${app}.` }));
