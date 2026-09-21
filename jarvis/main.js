@@ -15,8 +15,8 @@ const _url = require('url');
 const originalIpcHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, listener) => {
   originalIpcHandle(channel, async (event, ...args) => {
-    const allowed = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href;
-    if (!event.senderFrame || !event.senderFrame.url.startsWith(allowed)) {
+    const allowed = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href + '/';
+    if (!event.senderFrame || typeof event.senderFrame.url !== 'string' || !event.senderFrame.url.startsWith(allowed)) {
       return { ok: false, error: 'untrusted sender' };
     }
     return listener(event, ...args);
@@ -26,8 +26,8 @@ ipcMain.handle = (channel, listener) => {
 const originalIpcOn = ipcMain.on.bind(ipcMain);
 ipcMain.on = (channel, listener) => {
   originalIpcOn(channel, (event, ...args) => {
-    const allowed = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href;
-    if (!event.senderFrame || !event.senderFrame.url.startsWith(allowed)) {
+    const allowed = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href + '/';
+    if (!event.senderFrame || typeof event.senderFrame.url !== 'string' || !event.senderFrame.url.startsWith(allowed)) {
       event.returnValue = { ok: false, error: 'untrusted sender' };
       return;
     }
@@ -327,7 +327,21 @@ function checkPathBounds(requestedPath) {
   catch(e) { tmpRoot = path.resolve(os.tmpdir()) + path.sep; }
   const isOk = resolved.startsWith(userDataRoot) || resolved.startsWith(tmpRoot) ||
                resolved === userDataRoot.slice(0, -1) || resolved === tmpRoot.slice(0, -1);
-  return isOk ? resolved : null;
+  if (!isOk) return null;
+
+  const segments = resolved.toLowerCase().split(path.sep);
+  const isSensitive = segments.some(s => 
+    s === 'jarvis_auth.json' || 
+    s === 'sec-config.json' || 
+    s.startsWith('.env') || 
+    s.startsWith('id_rsa') || 
+    s === '.ssh' || 
+    s === '.aws' || 
+    s.startsWith('credentials')
+  );
+  if (isSensitive) return null;
+
+  return resolved;
 }
 
 ipcMain.handle('fs-read', async (_, filePath) => {
@@ -393,12 +407,33 @@ ipcMain.handle('sec-config-load', async () => {
 ipcMain.handle('sec-config-save', async (_, cfg) => {
   try {
     if (cfg && typeof cfg === 'object') {
-      if (typeof cfg.terminalEnabled === 'boolean') liveSecConfig.terminalEnabled = cfg.terminalEnabled;
-      if (typeof cfg.screenCaptureEnabled === 'boolean') liveSecConfig.screenCaptureEnabled = cfg.screenCaptureEnabled;
+      for (const key of ['terminalEnabled', 'screenCaptureEnabled']) {
+        if (typeof cfg[key] === 'boolean' && cfg[key] !== liveSecConfig[key]) {
+          if (cfg[key] === true) {
+            const typeName = key === 'terminalEnabled' ? 'terminal' : 'screen capture';
+            const { response } = await dialog.showMessageBox(mainWindow, {
+              type: 'warning', 
+              buttons: ['Enable', 'Cancel'], 
+              defaultId: 1, 
+              cancelId: 1, 
+              message: `Allow ${typeName}?`
+            });
+            if (response === 0) {
+              liveSecConfig[key] = true;
+              secAudit('SEC_CONFIG', key, 'ENABLED');
+            } else {
+              secAudit('SEC_CONFIG', key, 'ENABLE_CANCELLED');
+            }
+          } else {
+            liveSecConfig[key] = false;
+            secAudit('SEC_CONFIG', key, 'DISABLED');
+          }
+        }
+      }
     }
     const fp = path.join(app.getPath('userData'), 'sec-config.json');
     await fs.promises.writeFile(fp, JSON.stringify(liveSecConfig, null, 2));
-    return { ok: true };
+    return { ok: true, config: liveSecConfig };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -1003,6 +1038,26 @@ ipcMain.handle('http-request', async (_, { method, url, headers, body }) => {
   const start = Date.now();
   const dns = require('dns').promises;
 
+  function parseIPv4(ipStr) {
+    const p = ipStr.split('.');
+    return p.length === 4 ? p.map(Number) : null;
+  }
+
+  function isBlockedIPv4(parts) {
+    if (!parts) return false;
+    const [p0, p1] = parts;
+    if (p0 === 0) return true;
+    if (p0 === 10) return true;
+    if (p0 === 100 && p1 >= 64 && p1 <= 127) return true;
+    if (p0 === 127) return true;
+    if (p0 === 169 && p1 === 254) return true;
+    if (p0 === 172 && p1 >= 16 && p1 <= 31) return true;
+    if (p0 === 192 && p1 === 168) return true;
+    if (p0 >= 224 && p0 <= 239) return true;
+    if (p0 >= 240 && p0 <= 255) return true;
+    return false;
+  }
+
   async function checkHost(hostname) {
     if (hostname.toLowerCase() === 'localhost') hostname = '127.0.0.1';
     let ips;
@@ -1013,38 +1068,56 @@ ipcMain.handle('http-request', async (_, { method, url, headers, body }) => {
         const records = await dns.lookup(hostname, { all: true });
         ips = records.map(r => r.address);
       }
-    } catch { return false; }
+    } catch { return null; }
     
     for (let ip of ips) {
-      if (ip === '::1') return false;
-      if (ip.includes(':')) continue;
-      const parts = ip.split('.').map(Number);
-      if (parts.length !== 4) continue;
-      if (parts[0] === 127) return false;
-      if (parts[0] === 10) return false;
-      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
-      if (parts[0] === 192 && parts[1] === 168) return false;
-      if (parts[0] === 169 && parts[1] === 254) return false;
+      if (ip === '::' || ip === '::1') return null;
+      if (ip.includes(':')) {
+        const lower = ip.toLowerCase();
+        if (lower.startsWith('fc') || lower.startsWith('fd')) return null;
+        if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return null;
+        if (lower.startsWith('ff')) return null;
+        if (lower.startsWith('::ffff:')) {
+          const mapped = lower.substring(7);
+          if (mapped.includes('.')) {
+             if (isBlockedIPv4(parseIPv4(mapped))) return null;
+          } else {
+            const parts = mapped.split(':');
+            if (parts.length === 2) {
+              const num1 = parseInt(parts[0], 16);
+              const num2 = parseInt(parts[1], 16);
+              const p = [(num1 >> 8) & 0xff, num1 & 0xff, (num2 >> 8) & 0xff, num2 & 0xff];
+              if (isBlockedIPv4(p)) return null;
+            }
+          }
+        }
+        return ip;
+      }
+      const p = parseIPv4(ip);
+      if (isBlockedIPv4(p)) return null;
+      return ip;
     }
-    return true;
+    return null;
   }
 
   async function makeReq(currentUrl, redirectsLeft) {
     if (redirectsLeft < 0) return { ok: false, error: 'Too many redirects', time: Date.now() - start };
     
-    // ALLOW exactly http://127.0.0.1:11434 and http://localhost:11434
-    // Make sure we check exact match
+    let pUrl;
+    try { pUrl = new URL(currentUrl); } catch { return { ok: false, error: 'Invalid URL', time: Date.now() - start }; }
+    
     let isAllowedOllama = false;
-    if (currentUrl === 'http://127.0.0.1:11434/api/tags' || currentUrl.startsWith('http://127.0.0.1:11434') || currentUrl.startsWith('http://localhost:11434')) {
-      isAllowedOllama = true; // wait, the prompt says "ALLOW exactly http://127.0.0.1:11434 and http://localhost:11434". But what about /api/tags? I'll allow them if they start with it.
+    if (pUrl.protocol === 'http:' && (pUrl.hostname === '127.0.0.1' || pUrl.hostname === 'localhost') && pUrl.port === '11434') {
+      isAllowedOllama = true;
     }
     
-    const pUrl = new URL(currentUrl);
-    if (!isAllowedOllama && pUrl.origin !== 'http://127.0.0.1:11434' && pUrl.origin !== 'http://localhost:11434') {
+    let vettedIp = null;
+    if (!isAllowedOllama) {
       if (pUrl.protocol !== 'http:' && pUrl.protocol !== 'https:') {
         return { ok: false, error: 'Protocol not allowed', time: Date.now() - start };
       }
-      if (!(await checkHost(pUrl.hostname))) {
+      vettedIp = await checkHost(pUrl.hostname);
+      if (!vettedIp) {
         return { ok: false, error: 'SSRF blocked: host not allowed', time: Date.now() - start };
       }
     }
@@ -1063,6 +1136,12 @@ ipcMain.handle('http-request', async (_, { method, url, headers, body }) => {
       },
       timeout: 15000,
     };
+    
+    if (vettedIp) {
+      options.lookup = (hostname, opts, callback) => {
+         callback(null, vettedIp, vettedIp.includes(':') ? 6 : 4);
+      };
+    }
     
     return new Promise((resolve) => {
       const req = lib.request(options, async (res) => {
