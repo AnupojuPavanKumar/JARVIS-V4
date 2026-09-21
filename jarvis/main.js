@@ -32,6 +32,7 @@ let mainWindow = null;
 let tray = null;
 let ollamaProcess = null;   // reference to the spawned ollama serve process
 app.isQuitting = false;
+let liveSecConfig = { terminalEnabled: false, screenCaptureEnabled: false };
 
 // ─── Security Rate Limiting ──────────────────────────────────────────
 const rateLimits = {};
@@ -226,6 +227,15 @@ app.whenReady().then(() => {
   }
 
   // Load security config from disk at startup
+  try {
+    const fp = path.join(app.getPath('userData'), 'sec-config.json');
+    if (fs.existsSync(fp)) {
+      const cfg = JSON.parse(fs.readFileSync(fp, 'utf8'));
+      if (typeof cfg.terminalEnabled === 'boolean') liveSecConfig.terminalEnabled = cfg.terminalEnabled;
+      if (typeof cfg.screenCaptureEnabled === 'boolean') liveSecConfig.screenCaptureEnabled = cfg.screenCaptureEnabled;
+    }
+  } catch (e) { }
+
   // Auto-start Ollama with GPU before window opens
 
   createWindow();
@@ -327,18 +337,16 @@ ipcMain.handle('fs-dialog-save', async (_, defaultName, content) => {
 
 // ─── Security Boundary ───────────────────────────────────────────
 ipcMain.handle('sec-config-load', async () => {
-  try {
-    const fp = path.join(app.getPath('userData'), 'sec-config.json');
-    if (!fs.existsSync(fp)) return { ok: true, config: null };
-    return { ok: true, config: JSON.parse(await fs.promises.readFile(fp, 'utf8')) };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
+  return { ok: true, config: liveSecConfig };
 });
 ipcMain.handle('sec-config-save', async (_, cfg) => {
   try {
+    if (cfg && typeof cfg === 'object') {
+      if (typeof cfg.terminalEnabled === 'boolean') liveSecConfig.terminalEnabled = cfg.terminalEnabled;
+      if (typeof cfg.screenCaptureEnabled === 'boolean') liveSecConfig.screenCaptureEnabled = cfg.screenCaptureEnabled;
+    }
     const fp = path.join(app.getPath('userData'), 'sec-config.json');
-    await fs.promises.writeFile(fp, JSON.stringify(cfg, null, 2));
+    await fs.promises.writeFile(fp, JSON.stringify(liveSecConfig, null, 2));
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
