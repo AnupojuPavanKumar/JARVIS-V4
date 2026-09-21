@@ -955,6 +955,15 @@ ipcMain.handle('http-request', async (_, { method, url, headers, body }) => {
   return new Promise((resolve) => {
     try {
       const parsedUrl = new URL(url);
+      
+      const blockedHosts = ['localhost', '127.0.0.1', '169.254.169.254', '::1', '[::1]'];
+      if (blockedHosts.includes(parsedUrl.hostname.toLowerCase())) {
+        return resolve({ ok: false, error: 'SSRF blocked: host not allowed', time: Date.now() - start });
+      }
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return resolve({ ok: false, error: 'Protocol not allowed', time: Date.now() - start });
+      }
+      
       const isHttps = parsedUrl.protocol === 'https:';
       const lib = isHttps ? https : require('http');
       const options = {
