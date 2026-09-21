@@ -303,9 +303,14 @@ ipcMain.on('win-close', () => mainWindow?.hide());
 
 // ─── File System ─────────────────────────────────────────────────
 ipcMain.handle('fs-read', async (_, filePath) => {
-
   try {
-    return { ok: true, data: await fs.promises.readFile(filePath, 'utf8') };
+    const resolved = path.resolve(filePath);
+    const userDataRoot = path.resolve(app.getPath('userData')) + path.sep;
+    const tmpRoot = path.resolve(os.tmpdir()) + path.sep;
+    if (!resolved.startsWith(userDataRoot) && !resolved.startsWith(tmpRoot)) {
+      return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
+    }
+    return { ok: true, data: await fs.promises.readFile(resolved, 'utf8') };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -332,8 +337,14 @@ ipcMain.handle('fs-write', async (_, filePath, content) => {
 
 ipcMain.handle('fs-list', async (_, dirPath) => {
   try {
-    if (!fs.existsSync(dirPath)) return { ok: true, data: [] };
-    const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    const resolved = path.resolve(dirPath);
+    const userDataRoot = path.resolve(app.getPath('userData')) + path.sep;
+    const tmpRoot = path.resolve(os.tmpdir()) + path.sep;
+    if (!resolved.startsWith(userDataRoot) && !resolved.startsWith(tmpRoot)) {
+      return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
+    }
+    if (!fs.existsSync(resolved)) return { ok: true, data: [] };
+    const items = await fs.promises.readdir(resolved, { withFileTypes: true });
     return {
       ok: true,
       data: items.map(d => ({ name: d.name, isDir: d.isDirectory() }))
@@ -888,8 +899,14 @@ ipcMain.handle('open-image-dialog', async () => {
 // delayed during file I/O.
 ipcMain.handle('fs-read-binary', async (_, filePath) => {
   try {
-    const data = await fs.promises.readFile(filePath);
-    const ext = path.extname(filePath).toLowerCase().replace('.', '');
+    const resolved = path.resolve(filePath);
+    const userDataRoot = path.resolve(app.getPath('userData')) + path.sep;
+    const tmpRoot = path.resolve(os.tmpdir()) + path.sep;
+    if (!resolved.startsWith(userDataRoot) && !resolved.startsWith(tmpRoot)) {
+      return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
+    }
+    const data = await fs.promises.readFile(resolved);
+    const ext = path.extname(resolved).toLowerCase().replace('.', '');
     const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
     const mimeType = mimeMap[ext] || 'application/octet-stream';
     return { ok: true, data: data.toString('base64'), mimeType };
