@@ -430,14 +430,29 @@ ipcMain.handle('scheduler-list', async () => {
 
 
 ipcMain.handle('run-command', async (_, command, cwd) => {
-  // H-7 fix: rate-limit run-command just like run-code-safe.
   if (!secCheckRate('runCommand', 15)) {
     return { ok: false, stdout: '', stderr: '', exitCode: 1, error: '⛔ Rate limit: max 15 commands/minute.' };
   }
-  secAudit('RUN_COMMAND', String(command).slice(0, 200), 'ALLOWED');
+  
+  const cmdStr = String(command).trim();
+  const { classifyCommand, INTERNAL_ALLOWLIST } = require('./ipc-policy');
+  
+  if (!INTERNAL_ALLOWLIST.has(cmdStr)) {
+    if (!liveSecConfig.terminalEnabled) {
+      secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - terminal disabled');
+      return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Terminal execution is disabled' };
+    }
+    const verdict = classifyCommand(cmdStr);
+    if (verdict !== 'safe') {
+      secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - policy');
+      return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Command blocked by security policy' };
+    }
+  }
+
+  secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'ALLOWED');
   return new Promise((resolve) => {
     const { exec } = require('child_process');
-    exec(command, { cwd, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+    exec(cmdStr, { cwd, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
       resolve({
         ok: !error,
         stdout: stdout || '',
