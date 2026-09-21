@@ -1300,8 +1300,10 @@ ipcMain.handle('piper-tts', async (_, text) => {
   });
 });
 
+const { classifyCommand } = require('./ipc-policy');
+
 ipcMain.handle('sec-classify-command', async (_, cmd) => {
-  return { verdict: 'safe' };
+  return { verdict: classifyCommand(cmd) };
 });
 
 // ═══════════════════════════════════════════════════════════════
