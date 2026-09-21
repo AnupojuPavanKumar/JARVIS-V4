@@ -93,7 +93,9 @@ function stopOllama() {
 
 // ─── Screen Capture IPC ────────────────────────────────────────
 ipcMain.handle('capture-screen', async () => {
-
+  if (!liveSecConfig.screenCaptureEnabled) {
+    return { ok: false, error: 'Screen capture disabled' };
+  }
   try {
     const { desktopCapturer } = require('electron');
     const sources = await desktopCapturer.getSources({
