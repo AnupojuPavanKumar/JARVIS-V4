@@ -9,6 +9,32 @@ const {
   Tray, Menu, nativeImage, shell, dialog
 } = require('electron');
 
+const _path = require('path');
+const _url = require('url');
+
+const originalIpcHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, listener) => {
+  originalIpcHandle(channel, async (event, ...args) => {
+    const allowed = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href;
+    if (!event.senderFrame || !event.senderFrame.url.startsWith(allowed)) {
+      return { ok: false, error: 'untrusted sender' };
+    }
+    return listener(event, ...args);
+  });
+};
+
+const originalIpcOn = ipcMain.on.bind(ipcMain);
+ipcMain.on = (channel, listener) => {
+  originalIpcOn(channel, (event, ...args) => {
+    const allowed = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href;
+    if (!event.senderFrame || !event.senderFrame.url.startsWith(allowed)) {
+      event.returnValue = { ok: false, error: 'untrusted sender' };
+      return;
+    }
+    listener(event, ...args);
+  });
+};
+
 // ⚡ PERFORMANCE TUNING: Enforce aggressive garbage collection and hard-cap V8 memory to 2GB
 app.commandLine.appendSwitch('js-flags', '--expose_gc --max-old-space-size=2048');
 // Fix "GPU Cache Creation failed" — point disk cache to a writable user-data dir
