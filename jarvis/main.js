@@ -35,8 +35,8 @@ ipcMain.on = (channel, listener) => {
   });
 };
 
-// ⚡ PERFORMANCE TUNING: Enforce aggressive garbage collection and hard-cap V8 memory to 2GB
-app.commandLine.appendSwitch('js-flags', '--expose_gc --max-old-space-size=2048');
+// LOW-02 fix: --expose_gc removed (was leaking V8 internals to renderer context)
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048');
 // Fix "GPU Cache Creation failed" — point disk cache to a writable user-data dir
 app.commandLine.appendSwitch('disk-cache-dir', require('path').join(require('os').homedir(), '.jarvis-cache'));
 // Force high performance dedicated GPU instead of integrated graphics
@@ -125,7 +125,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: false,
+      // CRIT-01 fix: webSecurity restored. Ollama API is called via IPC not
+      // directly from the renderer, so this will not break core functionality.
+      webSecurity: true,
     },
     show: false,
   });
@@ -141,11 +143,12 @@ function createWindow() {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' 'unsafe-inline' https: data: blob:; " +
+          "default-src 'self'; " +
           "connect-src 'self' http://localhost:* http://127.0.0.1:* https:; " +
           "font-src 'self' https://fonts.gstatic.com data:; " +
           "img-src 'self' data: https:; " +
-          "script-src 'self' 'unsafe-inline';"
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+          "script-src 'self';"
         ]
       }
     });
@@ -517,9 +520,31 @@ ipcMain.handle('run-command', async (_, command, cwd) => {
       return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Terminal execution is disabled' };
     }
     const verdict = classifyCommand(cmdStr);
-    if (verdict !== 'safe') {
+    if (verdict === 'blocked') {
       secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - policy');
       return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Command blocked by security policy' };
+    }
+    // MED-01 fix: 'confirm' verdict routes to a native main-process dialog.
+    // Fail closed: if the window is not available, block the command.
+    if (verdict === 'confirm') {
+      if (!mainWindow) {
+        secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - no window for confirm');
+        return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Command requires confirmation but no window available' };
+      }
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Run Command', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'JARVIS — Command Confirmation Required',
+        message: 'This command requires your approval before running.',
+        detail: `Command:\n${cmdStr.slice(0, 500)}`,
+      });
+      if (response !== 0) {
+        secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - user cancelled confirm');
+        return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Command cancelled by user' };
+      }
+      secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'ALLOWED - user confirmed');
     }
   }
 
@@ -593,6 +618,14 @@ ipcMain.handle('system-command', async (_, action, target) => {
 
   const a = action.toLowerCase();
 
+  // CRIT-02 fix: kill/close requires terminal permission (same gate as run-command)
+  if (a === 'close' || a === 'kill') {
+    if (!liveSecConfig.terminalEnabled) {
+      secAudit('SYSTEM_CMD_KILL', t, 'BLOCKED - terminal disabled');
+      return { ok: false, error: 'Process termination is disabled (terminal permission required)' };
+    }
+  }
+
   // 1. open local app (allowlisted)
   if (a === 'open-app' || a === 'start-app') {
     const key = t.toLowerCase().split(/\s+/)[0];
@@ -652,14 +685,30 @@ ipcMain.handle('system-command', async (_, action, target) => {
   if (a === 'close' || a === 'kill') {
     if (t.length > 64) return { ok: false, error: 'Name too long' };
     if (!/^[A-Za-z0-9_.\- ]+$/.test(t)) return { ok: false, error: 'Invalid process name' };
-    const PROTECTED = /^(csrss|winlogon|lsass|smss|wininit|services|svchost|system|registry|dwm|explorer|audiodg|winrt\.exe)$/i;
-    if (PROTECTED.test(t)) {
+    // CRIT-02 fix: align protected list with ipc-policy.js
+    const PROTECTED = /^(csrss|winlogon|lsass|smss|wininit|services|svchost|system|registry|dwm|explorer|audiodg|winrt\.exe|ntoskrnl|spoolsv|taskhost|taskhostw|sihost|fontdrvhost)$/i;
+    if (PROTECTED.test(t.replace(/\.exe$/i, ''))) {
+      secAudit('SYSTEM_CMD_KILL', t, 'BLOCKED - protected process');
       return { ok: false, error: `Refusing to terminate protected process: ${t}` };
     }
-    const cmd = `powershell -NoProfile -Command "Stop-Process -Name '${t}' -Force -ErrorAction SilentlyContinue"`;
+    // CRIT-02 fix: spawn with shell:false — no cmd.exe interpolation
     return await new Promise(resolve => {
-      exec(cmd, { timeout: 5000, shell: 'cmd.exe', windowsHide: true }, (err, stdout, stderr) => {
-        resolve({ ok: !err || err.code === 0, action: 'kill', target: t, error: err?.message });
+      const child = spawn('taskkill', ['/IM', t.endsWith('.exe') ? t : t + '.exe', '/F'], {
+        shell: false,
+        windowsHide: true,
+      });
+      const timer = setTimeout(() => {
+        child.kill();
+        resolve({ ok: false, action: 'kill', target: t, error: 'Timed out' });
+      }, 5000);
+      child.on('close', code => {
+        clearTimeout(timer);
+        secAudit('SYSTEM_CMD_KILL', t, code === 0 ? 'KILLED' : `EXIT_${code}`);
+        resolve({ ok: code === 0 || code === 128, action: 'kill', target: t });
+      });
+      child.on('error', err => {
+        clearTimeout(timer);
+        resolve({ ok: false, action: 'kill', target: t, error: err.message });
       });
     });
   }
@@ -798,8 +847,65 @@ ipcMain.handle('memory-save', async (_, facts) => {
 
 // ─── Web Search ──────────────────────────────────────────────────
 
-/** Generic HTTPS GET with redirect follow and timeout */
-function httpsGet(url, timeoutMs = 8000) {
+/** Shared private-IP SSRF check used by httpsGet (see also checkHost inside http-request handler) */
+function _isPrivateHost(hostname) {
+  // Block loopback and link-local hostnames directly before DNS lookup
+  const h = hostname.toLowerCase();
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+  // Block metadata/169.254.x.x via hostname pattern (numeric form handled via DNS)
+  return false;
+}
+
+function _isBlockedIPv4Simple(ip) {
+  const p = ip.split('.').map(Number);
+  if (p.length !== 4) return false;
+  const [p0, p1] = p;
+  if (p0 === 0) return true;
+  if (p0 === 10) return true;
+  if (p0 === 100 && p1 >= 64 && p1 <= 127) return true;
+  if (p0 === 127) return true;
+  if (p0 === 169 && p1 === 254) return true;
+  if (p0 === 172 && p1 >= 16 && p1 <= 31) return true;
+  if (p0 === 192 && p1 === 168) return true;
+  if (p0 >= 224) return true;
+  return false;
+}
+
+/**
+ * HIGH-04 / MED-03 fix: Generic HTTPS GET with:
+ *  - redirect depth cap (max 3 hops)
+ *  - per-hop host validation (blocks private/loopback/link-local IPs)
+ *  - 4 MB response size cap
+ */
+async function httpsGet(url, timeoutMs = 8000, _redirectsLeft = 3) {
+  if (_redirectsLeft < 0) throw new Error('Too many redirects');
+
+  let pUrl;
+  try { pUrl = new URL(url); } catch { throw new Error('Invalid URL in httpsGet'); }
+
+  if (pUrl.protocol !== 'https:') throw new Error('httpsGet: only https:// URLs allowed');
+  if (_isPrivateHost(pUrl.hostname)) throw new Error('httpsGet: SSRF blocked (private host)');
+
+  // DNS resolution check for the target hostname
+  try {
+    const dns = require('dns').promises;
+    const records = await dns.lookup(pUrl.hostname, { all: true });
+    for (const r of records) {
+      if (r.address.includes(':')) {
+        const lo = r.address.toLowerCase();
+        if (lo === '::1' || lo.startsWith('fc') || lo.startsWith('fd') || lo.startsWith('fe8')) {
+          throw new Error('httpsGet: SSRF blocked (private IPv6)');
+        }
+      } else if (_isBlockedIPv4Simple(r.address)) {
+        throw new Error('httpsGet: SSRF blocked (private IPv4: ' + r.address + ')');
+      }
+    }
+  } catch (dnsErr) {
+    if (dnsErr.message.startsWith('httpsGet:')) throw dnsErr;
+    // DNS lookup failed — block rather than allow (fail closed)
+    throw new Error('httpsGet: DNS resolution failed for ' + pUrl.hostname);
+  }
+
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: {
@@ -808,13 +914,26 @@ function httpsGet(url, timeoutMs = 8000) {
       },
       timeout: timeoutMs,
     }, (res) => {
-      // Follow redirects
+      // Follow redirects with decrement counter and re-validate destination
       if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
-        return httpsGet(res.headers.location, timeoutMs).then(resolve).catch(reject);
+        res.resume(); // drain and discard redirect body
+        httpsGet(res.headers.location, timeoutMs, _redirectsLeft - 1)
+          .then(resolve).catch(reject);
+        return;
       }
       let data = '';
+      let size = 0;
+      const SIZE_CAP = 4 * 1024 * 1024; // 4 MB
       res.setEncoding('utf8');
-      res.on('data', chunk => data += chunk);
+      res.on('data', chunk => {
+        size += Buffer.byteLength(chunk, 'utf8');
+        if (size > SIZE_CAP) {
+          req.destroy();
+          reject(new Error('httpsGet: response exceeded 4 MB size cap'));
+          return;
+        }
+        data += chunk;
+      });
       res.on('end', () => resolve(data));
     });
     req.on('error', reject);
@@ -966,10 +1085,10 @@ ipcMain.handle('open-image-dialog', async () => {
 // delayed during file I/O.
 ipcMain.handle('fs-read-binary', async (_, filePath) => {
   try {
-    const resolved = path.resolve(filePath);
-    const userDataRoot = path.resolve(app.getPath('userData')) + path.sep;
-    const tmpRoot = path.resolve(os.tmpdir()) + path.sep;
-    if (!resolved.startsWith(userDataRoot) && !resolved.startsWith(tmpRoot)) {
+    // HIGH-01 fix: use checkPathBounds (which calls realpathSync) instead of path.resolve()
+    // to prevent symlink-based path-bound escape.
+    const resolved = checkPathBounds(filePath);
+    if (!resolved) {
       return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
     }
     const data = await fs.promises.readFile(resolved);
@@ -1279,13 +1398,15 @@ async function loadVerifiedSkillsManifest() {
   if (!fs.existsSync(manifestPath)) return { ok: true, skills: [], manifestRaw: '' };
   const manifestRaw = await fs.promises.readFile(manifestPath, 'utf8');
 
+  // Fix: fail CLOSED — manifest.json without a valid .sig is rejected, not silently loaded.
   const sigPath = path.join(skillsDir, 'manifest.sig');
-  if (fs.existsSync(sigPath)) {
-    const sigRaw = await fs.promises.readFile(sigPath, 'utf8');
-    const v = verifyManifestSignature(manifestRaw, sigRaw);
-    if (!v.ok) {
-      return { ok: false, error: 'Skills manifest signature invalid. Refusing to load skills.' };
-    }
+  if (!fs.existsSync(sigPath)) {
+    return { ok: false, error: 'Skills manifest has no signature file (manifest.sig). Refusing to load skills.' };
+  }
+  const sigRaw = await fs.promises.readFile(sigPath, 'utf8');
+  const v = verifyManifestSignature(manifestRaw, sigRaw);
+  if (!v.ok) {
+    return { ok: false, error: 'Skills manifest signature invalid. Refusing to load skills.' };
   }
 
   const manifest = JSON.parse(manifestRaw);
@@ -1419,22 +1540,88 @@ ipcMain.handle('get-runtime-stats', async () => {
 // PIN AUTH PERSISTENCE IPC
 // =======================================================================
 
-var _authFilePath = function () { return path.join(app.getPath('userData'), 'jarvis_auth.json'); };
+// ─── Auth / PIN (MED-05 fix) ──────────────────────────────────────────────────
+// SECURITY NOTE: A 4-digit PIN is a convenience lock, NOT strong authentication.
+// It protects casual access but cannot resist a determined attacker with local
+// filesystem access (the PBKDF2 hash and salt are both stored locally).
+// PBKDF2/SHA-256 with 100k iterations makes offline brute force ~10s not <1ms.
+
+const { pbkdf2, randomBytes } = require('crypto');
+const _authFilePath = () => path.join(app.getPath('userData'), 'jarvis_auth.json');
+
+// Attempt limiting: max 5 attempts per 15-minute window
+const _pinAttempts = [];
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_WINDOW_MS = 15 * 60 * 1000;
+
+function _pinRateLimitOk() {
+  const now = Date.now();
+  const recent = _pinAttempts.filter(t => now - t < PIN_WINDOW_MS);
+  _pinAttempts.length = 0;
+  _pinAttempts.push(...recent);
+  return _pinAttempts.length < PIN_MAX_ATTEMPTS;
+}
+
+function _pbkdf2Hash(pin, salt) {
+  return new Promise((resolve, reject) => {
+    pbkdf2(pin, salt, 100000, 32, 'sha256', (err, key) => {
+      if (err) reject(err); else resolve(key.toString('hex'));
+    });
+  });
+}
 
 ipcMain.handle('auth-load', async () => {
   try {
-    var fp = _authFilePath();
+    const fp = _authFilePath();
     if (!fs.existsSync(fp)) return { ok: true, data: null };
-    return { ok: true, data: JSON.parse(await fs.promises.readFile(fp, 'utf8')) };
+    const data = JSON.parse(await fs.promises.readFile(fp, 'utf8'));
+    // Only return non-secret metadata to renderer (not the hash/salt)
+    return { ok: true, data: { hasPin: !!(data.hash && data.salt), skipPin: data.skipPin } };
   } catch (e) { return { ok: false, data: null }; }
 });
 
+// auth-save: renderer sends the RAW PIN (only at setup time); main hashes it.
+// For skip-PIN mode, renderer sends { skipPin: true }.
 ipcMain.handle('auth-save', async (_, data) => {
   try {
-    await fs.promises.writeFile(_authFilePath(), JSON.stringify(data, null, 2));
+    if (data && data.skipPin) {
+      await fs.promises.writeFile(_authFilePath(), JSON.stringify({ skipPin: true }, null, 2));
+      return { ok: true };
+    }
+    if (typeof data.pin !== 'string' || !/^\d{4}$/.test(data.pin)) {
+      return { ok: false, error: 'PIN must be exactly 4 digits' };
+    }
+    const salt = randomBytes(32).toString('hex');
+    const hash = await _pbkdf2Hash(data.pin, salt);
+    await fs.promises.writeFile(_authFilePath(), JSON.stringify({ hash, salt, skipPin: false }, null, 2));
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
+
+// auth-verify: main-process PIN check with rate limiting
+ipcMain.handle('auth-verify', async (_, pin) => {
+  if (!_pinRateLimitOk()) {
+    secAudit('AUTH_VERIFY', '***', 'RATE_LIMITED');
+    return { ok: false, error: 'Too many attempts. Try again in 15 minutes.', rateLimited: true };
+  }
+  try {
+    const fp = _authFilePath();
+    if (!fs.existsSync(fp)) return { ok: false, error: 'No auth file' };
+    const data = JSON.parse(await fs.promises.readFile(fp, 'utf8'));
+    if (data.skipPin) return { ok: true };
+    if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+      return { ok: false, error: 'Invalid PIN format' };
+    }
+    const hash = await _pbkdf2Hash(pin, data.salt);
+    const valid = hash === data.hash;
+    _pinAttempts.push(Date.now());
+    secAudit('AUTH_VERIFY', '***', valid ? 'SUCCESS' : 'FAIL');
+    if (!valid) return { ok: false, error: 'Incorrect PIN' };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+
 
 // ═══════════════════════════════════════════════════════════════
 // PIPER TTS ENGINE
@@ -1442,6 +1629,7 @@ ipcMain.handle('auth-save', async (_, data) => {
 
 let piperProcess = null;
 let piperCallbacks = {};
+let __piperSeq = 0; // LOW-04 fix: monotonic sequence eliminates collision risk
 
 function initPiperProcess() {
   if (piperProcess) return piperProcess;
@@ -1466,18 +1654,20 @@ function initPiperProcess() {
     for (let line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      if (piperCallbacks[trimmed]) {
-        const cb = piperCallbacks[trimmed];
-        delete piperCallbacks[trimmed];
+      // LOW-04 fix: callbacks are keyed by seqId; find by matching tmpFile path
+      const entry = Object.values(piperCallbacks).find(cb => cb.tmpFile === trimmed);
+      if (entry) {
+        const seqKey = Object.keys(piperCallbacks).find(k => piperCallbacks[k] === entry);
+        delete piperCallbacks[seqKey];
         try {
-          if (fs.existsSync(cb.tmpFile)) {
-            const wavBuffer = fs.readFileSync(cb.tmpFile);
-            fs.unlinkSync(cb.tmpFile);
-            cb.resolve({ ok: true, data: wavBuffer.toString('base64') });
+          if (fs.existsSync(entry.tmpFile)) {
+            const wavBuffer = fs.readFileSync(entry.tmpFile);
+            fs.unlinkSync(entry.tmpFile);
+            entry.resolve({ ok: true, data: wavBuffer.toString('base64') });
           } else {
-            cb.resolve({ ok: false, error: 'WAV not found' });
+            entry.resolve({ ok: false, error: 'WAV not found' });
           }
-        } catch (e) { cb.resolve({ ok: false, error: e.message }); }
+        } catch (e) { entry.resolve({ ok: false, error: e.message }); }
       }
     }
   });
@@ -1499,8 +1689,10 @@ ipcMain.handle('piper-tts', async (_, text) => {
       if (!p) {
         return resolve({ ok: false, error: 'Piper binary or model not found' });
       }
-      const tmpFile = path.join(app.getPath('temp'), `piper_${Date.now()}_${Math.floor(Math.random() * 10000)}.wav`);
-      piperCallbacks[tmpFile] = { resolve, tmpFile };
+      // LOW-04 fix: monotonic counter as unique key (no collision even under concurrent calls)
+      const seqId = String(++__piperSeq);
+      const tmpFile = path.join(app.getPath('temp'), `piper_${seqId}.wav`);
+      piperCallbacks[seqId] = { resolve, tmpFile };
       p.stdin.write(JSON.stringify({ text, output_file: tmpFile }) + '\n');
     } catch (e) {
       resolve({ ok: false, error: e.message });

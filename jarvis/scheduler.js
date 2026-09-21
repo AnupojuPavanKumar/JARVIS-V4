@@ -20,7 +20,17 @@ class JarvisScheduler {
   loadJobs() {
     try {
       if (fs.existsSync(this.schedulerFile)) {
-        this.jobs = JSON.parse(fs.readFileSync(this.schedulerFile, 'utf8'));
+        const raw = JSON.parse(fs.readFileSync(this.schedulerFile, 'utf8'));
+        // MED-04 fix: sanitize loaded jobs — reject any with invalid intervalMs
+        this.jobs = raw.filter(j => {
+          if (j.type === 'recurring') {
+            return typeof j.intervalMs === 'number' &&
+                   isFinite(j.intervalMs) &&
+                   j.intervalMs >= 10000 &&
+                   j.intervalMs <= 7 * 24 * 60 * 60 * 1000;
+          }
+          return true; // one-off jobs pass through
+        });
       }
     } catch (err) {
       console.error('[MAIN] Error loading jobs:', err);
@@ -78,7 +88,7 @@ class JarvisScheduler {
   addJob(jobData) {
     const newJob = {
       id: `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      name: jobData.name || 'Unnamed Job',
+      name: typeof jobData.name === 'string' ? jobData.name.slice(0, 200) : 'Unnamed Job',
       type: jobData.type, // 'one-off' or 'recurring'
       payload: jobData.payload || {},
       active: true,
@@ -86,10 +96,19 @@ class JarvisScheduler {
     };
 
     if (newJob.type === 'one-off') {
-      newJob.triggerTime = jobData.triggerTime; 
+      newJob.triggerTime = jobData.triggerTime;
     } else if (newJob.type === 'recurring') {
-      newJob.intervalMs = jobData.intervalMs;
-      newJob.nextRun = Date.now() + jobData.intervalMs;
+      // MED-04 fix: validate intervalMs — must be finite, >= 10s, <= 7 days
+      const MIN_INTERVAL = 10000;            // 10 seconds
+      const MAX_INTERVAL = 7 * 24 * 3600000; // 7 days
+      const ms = Number(jobData.intervalMs);
+      if (!isFinite(ms) || ms < MIN_INTERVAL || ms > MAX_INTERVAL) {
+        throw new Error(`intervalMs must be a finite number between ${MIN_INTERVAL} and ${MAX_INTERVAL} ms`);
+      }
+      newJob.intervalMs = ms;
+      newJob.nextRun = Date.now() + ms;
+    } else {
+      throw new Error(`Unknown job type: ${newJob.type}`);
     }
 
     this.jobs.push(newJob);

@@ -3,7 +3,7 @@
 
 <head>
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self' 'unsafe-inline'; media-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:*; font-src 'self' https://fonts.gstatic.com data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:;">
+    content="default-src 'self'; media-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:*; font-src 'self' https://fonts.gstatic.com data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; script-src 'self';">
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -36,19 +36,19 @@
         <span class="pin-dot" id="pin-d3"></span>
         <span class="pin-dot" id="pin-d4"></span>
       </div>
-      <div id="auth-keypad">
-        <button class="keypad-btn" onclick="authKey('1')">1</button>
-        <button class="keypad-btn" onclick="authKey('2')">2</button>
-        <button class="keypad-btn" onclick="authKey('3')">3</button>
-        <button class="keypad-btn" onclick="authKey('4')">4</button>
-        <button class="keypad-btn" onclick="authKey('5')">5</button>
-        <button class="keypad-btn" onclick="authKey('6')">6</button>
-        <button class="keypad-btn" onclick="authKey('7')">7</button>
-        <button class="keypad-btn" onclick="authKey('8')">8</button>
-        <button class="keypad-btn" onclick="authKey('9')">9</button>
-        <button class="keypad-btn keypad-clear" onclick="authKey('clear')">⌫</button>
-        <button class="keypad-btn" onclick="authKey('0')">0</button>
-        <button class="keypad-btn keypad-enter" onclick="authKey('enter')">↵</button>
+      <div id="auth-keypad" id="auth-keypad">
+        <button class="keypad-btn" data-key="1">1</button>
+        <button class="keypad-btn" data-key="2">2</button>
+        <button class="keypad-btn" data-key="3">3</button>
+        <button class="keypad-btn" data-key="4">4</button>
+        <button class="keypad-btn" data-key="5">5</button>
+        <button class="keypad-btn" data-key="6">6</button>
+        <button class="keypad-btn" data-key="7">7</button>
+        <button class="keypad-btn" data-key="8">8</button>
+        <button class="keypad-btn" data-key="9">9</button>
+        <button class="keypad-btn keypad-clear" data-key="clear">⌫</button>
+        <button class="keypad-btn" data-key="0">0</button>
+        <button class="keypad-btn keypad-enter" data-key="enter">↵</button>
       </div>
       <div id="auth-hint">Enter your 4-digit PIN to access JARVIS</div>
       <div id="auth-keyboard-hint"
@@ -59,7 +59,7 @@
       <div id="auth-error" class="hidden">Incorrect PIN. Access denied.</div>
       <div id="auth-setup" class="hidden">
         <div class="auth-setup-msg">First time? Set a 4-digit PIN to secure JARVIS.</div>
-        <button class="auth-skip-btn" onclick="authSkip()">Skip — No PIN</button>
+        <button class="auth-skip-btn" id="auth-skip-btn">Skip — No PIN</button>
       </div>
     </div>
   </div>

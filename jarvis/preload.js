@@ -43,8 +43,8 @@ contextBridge.exposeInMainWorld('jarvis', {
   readProject:      (rootPath) => ipcRenderer.invoke('read-project', rootPath),
   memoryLoad:       ()         => ipcRenderer.invoke('memory-load'),
   memorySave:       (facts)    => ipcRenderer.invoke('memory-save', facts),
-  chatMemoryRead:   (mode, limit) => ipcRenderer.invoke('chat-memory-read', { mode, limit }),
-  chatMemorySave:   (mode, role, content) => ipcRenderer.invoke('chat-memory-save', { mode, role, content }),
+  // HIGH-05 fix: chat-memory-read/save channels have no main-process handler
+  // and are never called in the renderer. Removed to eliminate dangling invoke() calls.
   webSearch:        (q, type)  => ipcRenderer.invoke('web-search', q, type),
 
   // ─── Safe Code Runner ────────────────────────────────────────
@@ -85,6 +85,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   // ─── Auth / PIN ──────────────────────────────────────────────
   authLoad:     ()       => ipcRenderer.invoke('auth-load'),
   authSave:     (data)   => ipcRenderer.invoke('auth-save', data),
+  authVerify:   (pin)    => ipcRenderer.invoke('auth-verify', pin),
 
   // ─ Security Boundary ──────────────────────────────────────
   secConfigLoad:   ()       => ipcRenderer.invoke('sec-config-load'),
