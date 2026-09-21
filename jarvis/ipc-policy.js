@@ -12,20 +12,44 @@ function classifyCommand(cmdStr) {
   if (/[&|;`><]/.test(c)) return 'blocked';
 
   const cLower = c.toLowerCase();
-  
+  if (/^\s*format\s+[a-z]:/i.test(cLower)) return 'blocked';
+
   const blockedPatterns = [
-    /\bformat\b/i,
     /\bdiskpart\b/i,
     /\b(?:del|rd|rmdir)\s+\/s\b/i,
     /\breg\s+(?:delete|add)\b/i,
     /\bbcdedit\b/i,
     /\bnet\s+user\b/i,
     /\bshutdown\b/i,
-    /\bcertutil\s+-urlcache\b/i
+    /\bcertutil\s+-urlcache\b/i,
+    /\btakeown\b/i,
+    /\bicacls\b/i,
+    /\bschtasks\b/i,
+    /\bwmic\b/i,
+    /\bmshta\b/i,
+    /\brundll32\b/i,
+    /\bregsvr32\b/i,
+    /\bbitsadmin\b/i,
+    /\bvssadmin\b/i,
+    /\bwevtutil\s+cl\b/i,
+    /\bcipher\s+\/w\b/i,
+    /\bnetsh\s+advfirewall\b/i,
+    /\bnet\s+localgroup\b/i,
+    /\bsc\s+(?:create|config)\b/i,
+    /\bstart-process\b/i,
+    /\binvoke-webrequest\b/i
   ];
-  
   for (const p of blockedPatterns) {
     if (p.test(cLower)) return 'blocked';
+  }
+
+  if (/\b(?:curl|wget)\b/i.test(cLower)) {
+    if (/(?:-o|-O|--output)\b/i.test(c)) return 'blocked';
+    if (/\|\s*(?:bash|sh|cmd|powershell|pwsh)\b/i.test(cLower)) return 'blocked';
+  }
+
+  if (/\b(?:del|erase)\b/i.test(cLower)) {
+    if (/[*?]/.test(c) || /\/q\b/i.test(cLower) || /\/f\b/i.test(cLower)) return 'blocked';
   }
 
   if (/\btaskkill\b/i.test(cLower) && /\/f\b/i.test(cLower)) {
@@ -35,14 +59,15 @@ function classifyCommand(cmdStr) {
   }
 
   if (/\b(?:powershell|pwsh)\b/i.test(cLower)) {
-    if (/(?:-enc|-encodedcommand|-e|iex|invoke-expression|downloadstring)\b/i.test(cLower)) return 'blocked';
+    if (/\s-e[a-z]*\b/i.test(cLower)) return 'blocked';
+    return 'confirm';
   }
+  if (/\bcmd\s+\/c\b/i.test(cLower)) return 'confirm';
 
-  if (/\b(?:curl|wget)\b/i.test(cLower) && /\|\s*(?:bash|sh|cmd|powershell|pwsh)\b/i.test(cLower)) {
-    return 'blocked';
-  }
+  const readOnlyPattern = /^\s*(whoami|hostname|ver|dir|ipconfig|systeminfo|tasklist|where|node\s+-v|python\s+--version)(\s+.*)?$/i;
+  if (readOnlyPattern.test(c)) return 'safe';
 
-  return 'safe';
+  return 'confirm';
 }
 
 module.exports = { classifyCommand, INTERNAL_ALLOWLIST };
