@@ -930,22 +930,21 @@ const CODE_RUNNERS = {
 };
 
 ipcMain.handle('run-code-safe', async (_, language, code) => {
+  if (language !== 'javascript' && language !== 'js') {
+    secAudit('CODE_RUN', language, 'BLOCKED - non-JS runtime');
+    return { ok: false, error: 'Only JavaScript execution is allowed by security policy.', stdout: '', stderr: '', exitCode: 1, time: 0 };
+  }
   if (!secCheckRate('codeRun', 5)) {
     return { ok: false, error: '⛔ Rate limit exceeded: max 5 code runs per minute.', stdout: '', stderr: '', exitCode: 1, time: 0 };
   }
-  const runner = CODE_RUNNERS[language] || CODE_RUNNERS.python;
+  const runner = CODE_RUNNERS['javascript'];
   const tmpDir = os.tmpdir();
   // unique temp filename so concurrent runs don't collide
   const tmpFile = path.join(tmpDir, `jarvis_run_${Date.now()}_${process.pid}.${runner.ext.replace('.', '')}`);
   const start = Date.now();
   try {
     fs.writeFileSync(tmpFile, code, 'utf8');
-    let cmd;
-    if (language === 'powershell') {
-      cmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`;
-    } else {
-      cmd = `${runner.cmd} "${tmpFile}"`;
-    }
+    const cmd = `${runner.cmd} "${tmpFile}"`;
     secAudit('CODE_RUN', `${language} (${code.length} bytes)`, 'ALLOWED');
     return await new Promise((resolve) => {
       exec(cmd, {
