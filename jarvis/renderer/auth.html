@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AEGIS // SYNTH-AUTH Terminal</title>
+<!-- Fonts: Space Grotesk & JetBrains Mono -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS with configuration -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-secondary-container": "#002955",
+            "on-secondary": "#003061",
+            "primary-fixed": "#7df4ff",
+            "inverse-surface": "#dce3f0",
+            "tertiary": "#faf3ff",
+            "on-tertiary-fixed-variant": "#5700c9",
+            "background": "#0d141d",
+            "on-surface": "#dce3f0",
+            "on-primary-fixed": "#002022",
+            "surface-tint": "#00dbe9",
+            "secondary-fixed": "#d5e3ff",
+            "error": "#ffb4ab",
+            "on-secondary-fixed-variant": "#004689",
+            "secondary-fixed-dim": "#a8c8ff",
+            "tertiary-fixed": "#e9ddff",
+            "on-error-container": "#ffdad6",
+            "surface-dim": "#0d141d",
+            "surface-container-high": "#242a34",
+            "surface-container": "#19202a",
+            "error-container": "#93000a",
+            "surface-container-low": "#151c26",
+            "on-tertiary": "#3c0090",
+            "surface": "#0d141d",
+            "tertiary-fixed-dim": "#d1bcff",
+            "surface-bright": "#333a44",
+            "on-surface-variant": "#b9cacb",
+            "outline": "#849495",
+            "on-secondary-fixed": "#001b3c",
+            "inverse-primary": "#006970",
+            "on-primary-fixed-variant": "#004f54",
+            "secondary": "#a8c8ff",
+            "on-primary": "#00363a",
+            "on-background": "#dce3f0",
+            "on-tertiary-fixed": "#23005b",
+            "primary-container": "#00f0ff",
+            "surface-variant": "#2e353f",
+            "surface-container-highest": "#2e353f",
+            "on-primary-container": "#006970",
+            "primary": "#dbfcff",
+            "inverse-on-surface": "#2a313b",
+            "on-tertiary-container": "#7213ff",
+            "outline-variant": "#3b494b",
+            "tertiary-container": "#e1d2ff",
+            "secondary-container": "#3491ff",
+            "on-error": "#690005",
+            "primary-fixed-dim": "#00dbe9",
+            "surface-container-lowest": "#080f18"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-md": "1rem",
+            "space-xl": "2.5rem",
+            "gutter": "1.5rem",
+            "margin": "2.5rem",
+            "gutter-mobile": "1rem",
+            "space-xs": "0.25rem",
+            "space-sm": "0.5rem",
+            "space-lg": "1.5rem",
+            "margin-mobile": "1rem"
+          },
+          "fontFamily": {
+            "headline-sm": ["Space Grotesk"],
+            "headline-md": ["Space Grotesk"],
+            "display-lg": ["Space Grotesk"],
+            "label-md": ["JetBrains Mono"],
+            "body-lg": ["Geist"],
+            "telemetry-data": ["JetBrains Mono"],
+            "label-lg": ["JetBrains Mono"],
+            "headline-lg-mobile": ["Space Grotesk"],
+            "label-sm": ["JetBrains Mono"],
+            "body-sm": ["Geist"],
+            "display-lg-mobile": ["Space Grotesk"],
+            "body-md": ["Geist"],
+            "headline-lg": ["Space Grotesk"]
+          },
+          "fontSize": {
+            "headline-sm": ["20px", { "lineHeight": "28px", "letterSpacing": "0.01em", "fontWeight": "500" }],
+            "headline-md": ["24px", { "lineHeight": "32px", "letterSpacing": "0em", "fontWeight": "600" }],
+            "display-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+            "label-md": ["12px", { "lineHeight": "16px", "letterSpacing": "0.08em", "fontWeight": "500" }],
+            "body-lg": ["16px", { "lineHeight": "26px", "letterSpacing": "0.01em", "fontWeight": "400" }],
+            "telemetry-data": ["11px", { "lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "400" }],
+            "label-lg": ["14px", { "lineHeight": "20px", "letterSpacing": "0.06em", "fontWeight": "600" }],
+            "headline-lg-mobile": ["26px", { "lineHeight": "34px", "letterSpacing": "0em", "fontWeight": "600" }],
+            "label-sm": ["10px", { "lineHeight": "14px", "letterSpacing": "0.1em", "fontWeight": "500" }],
+            "body-sm": ["12px", { "lineHeight": "18px", "letterSpacing": "0.02em", "fontWeight": "400" }],
+            "display-lg-mobile": ["36px", { "lineHeight": "44px", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "body-md": ["14px", { "lineHeight": "22px", "letterSpacing": "0.01em", "fontWeight": "400" }],
+            "headline-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    
+    /* HUD Cyber Scanlines & Grids */
+    .cyber-grid {
+      background-size: 32px 32px;
+      background-image: 
+        linear-gradient(to right, rgba(0, 240, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 240, 255, 0.04) 1px, transparent 1px);
+    }
+    
+    .chamfer-card {
+      clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
+    }
+
+    .chamfer-btn {
+      clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+    }
+
+    @keyframes pulseAura {
+      0%, 100% { transform: scale(1); opacity: 0.75; }
+      50% { transform: scale(1.05); opacity: 1; }
+    }
+
+    .pulse-glow {
+      animation: pulseAura 4s ease-in-out infinite;
+    }
+
+    @keyframes scanLine {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(300%); }
+    }
+
+    .scan-beam {
+      animation: scanLine 2.8s linear infinite;
+    }
+  </style>
+</head>
+<body class="bg-background text-on-background min-h-screen cyber-grid font-body-md overflow-x-hidden selection:bg-primary-container selection:text-surface-container-lowest">
+<!-- TOP APP BAR (Shared Component Anchor) -->
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-4 py-2 bg-surface-container-lowest/80 backdrop-blur-md border-b border-outline-variant shadow-[0_0_15px_rgba(0,240,255,0.15)]">
+<!-- Leading Identity -->
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary-container" data-icon="shield">shield</span>
+<div class="flex flex-col">
+<span class="text-headline-sm font-headline-sm tracking-widest text-primary-container uppercase">AEGIS // SYNTH-AUTH</span>
+<span class="text-telemetry-data font-telemetry-data text-outline">PROTOCOL: JARVIS-SEC-09 // LATENCY: 0.12ms</span>
+</div>
+</div>
+<!-- Desktop Global Nav State -->
+<div class="hidden md:flex items-center gap-6">
+<div class="text-primary-container border-b border-primary-container font-label-md py-1 px-2 flex items-center gap-1.5 cursor-pointer">
+<span class="material-symbols-outlined text-[16px]" data-icon="dialpad">dialpad</span>
+<span>Matrix PIN</span>
+</div>
+<div class="text-outline font-label-md py-1 px-2 hover:text-primary-fixed hover:bg-surface-container transition-all duration-150 rounded flex items-center gap-1.5 cursor-pointer">
+<span class="material-symbols-outlined text-[16px]" data-icon="fingerprint">fingerprint</span>
+<span>Biometric</span>
+</div>
+<div class="text-outline font-label-md py-1 px-2 hover:text-primary-fixed hover:bg-surface-container transition-all duration-150 rounded flex items-center gap-1.5 cursor-pointer">
+<span class="material-symbols-outlined text-[16px]" data-icon="settings_voice">settings_voice</span>
+<span>Voice Sync</span>
+</div>
+<div class="text-outline font-label-md py-1 px-2 hover:text-primary-fixed hover:bg-surface-container transition-all duration-150 rounded flex items-center gap-1.5 cursor-pointer">
+<span class="material-symbols-outlined text-[16px]" data-icon="tune">tune</span>
+<span>Diagnostics</span>
+</div>
+</div>
+<!-- Trailing Actions -->
+<div class="flex items-center gap-3">
+<button class="p-1.5 rounded hover:text-primary-fixed hover:bg-surface-container transition-all duration-150 active:scale-95 duration-100 text-primary-container flex items-center" title="Audio Waveform Telemetry">
+<span class="material-symbols-outlined" data-icon="graphic_eq">graphic_eq</span>
+</button>
+<button class="p-1.5 rounded hover:text-primary-fixed hover:bg-surface-container transition-all duration-150 active:scale-95 duration-100 text-primary-container flex items-center" title="Terminal Stream">
+<span class="material-symbols-outlined" data-icon="terminal">terminal</span>
+</button>
+<div class="h-4 w-px bg-outline-variant mx-1"></div>
+<div class="px-2 py-0.5 rounded border border-primary-container/40 bg-surface-container-lowest text-primary-container text-label-sm font-label-sm">
+        DEFENSE: OMEGA
+      </div>
+</div>
+</header>
+<!-- MAIN HUD VIEWPORT CONTAINER (12-Col Modular Layout) -->
+<main class="pt-20 pb-20 md:pb-12 max-w-[1440px] mx-auto px-4 md:px-6">
+<!-- Top System Telemetry Streamer -->
+<div class="w-full mb-6 bg-surface-container-low/70 border border-outline-variant/60 rounded-lg p-2.5 backdrop-blur-md flex flex-wrap items-center justify-between gap-4 text-telemetry-data font-telemetry-data">
+<div class="flex items-center gap-4 text-outline">
+<span class="flex items-center gap-1.5 text-primary-container">
+<span class="w-2 h-2 rounded-full bg-primary-container animate-ping"></span>
+          SYS.NODE // 192.88.0.44:SEC
+        </span>
+<span class="hidden sm:inline">CORE INTEGRITY: <span class="text-primary font-bold">99.84%</span></span>
+<span class="hidden md:inline">CRYPTO HANDSHAKE: <span class="text-secondary-fixed">RSA-8192-ECDSA</span></span>
+</div>
+<!-- Real-time audio waveform animation simulation -->
+<div class="flex items-center gap-1 h-3 px-2">
+<span class="w-0.5 h-full bg-primary-container animate-pulse"></span>
+<span class="w-0.5 h-2 bg-primary-container/70"></span>
+<span class="w-0.5 h-3.5 bg-primary-container"></span>
+<span class="w-0.5 h-1.5 bg-primary-container/40"></span>
+<span class="w-0.5 h-3 bg-primary-container"></span>
+<span class="w-0.5 h-2 bg-primary-container/80"></span>
+<span class="w-0.5 h-1 bg-primary-container/50"></span>
+</div>
+<div class="text-outline flex items-center gap-3">
+<span>SESSION: #SEC-9921</span>
+<span class="text-primary-container">UTC: 2184-04-12 // 03:42:19</span>
+</div>
+</div>
+<!-- 12-Column Grid Cockpit Structure -->
+<div class="grid grid-cols-1 md:grid-cols-8 lg:grid-cols-12 gap-6 items-start">
+<!-- LEFT FLANK (Cols 1-3): Telemetry, Cipher Stream, Biometrics Preview -->
+<aside class="order-2 lg:order-1 lg:col-span-3 space-y-5">
+<!-- Neural Sync Status Card -->
+<div class="chamfer-card bg-surface-container-low/80 border border-outline-variant/80 p-4 rounded backdrop-blur-md relative overflow-hidden shadow-[inset_0_0_15px_rgba(0,240,255,0.05)]">
+<div class="flex items-center justify-between mb-3 border-b border-outline-variant/40 pb-2">
+<span class="text-label-sm font-label-sm text-primary-container uppercase tracking-wider flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]" data-icon="memory">memory</span>
+              NEURAL MATRIX SYNC
+            </span>
+<span class="text-label-sm font-label-sm px-1.5 py-0.5 bg-primary-container/10 border border-primary-container/40 text-primary-container rounded">ACTIVE</span>
+</div>
+<div class="space-y-2.5 text-telemetry-data font-telemetry-data">
+<div>
+<div class="flex justify-between text-outline mb-1">
+<span>SYNTH-VECTOR PARITY</span>
+<span class="text-primary-container">98.2%</span>
+</div>
+<div class="w-full bg-surface-container-highest h-1.5 rounded overflow-hidden">
+<div class="bg-primary-container h-full w-[98%] shadow-[0_0_8px_#00f0ff]"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-outline mb-1">
+<span>MEM-BUFFER DRIFT</span>
+<span class="text-secondary-fixed">0.004 rad</span>
+</div>
+<div class="w-full bg-surface-container-highest h-1.5 rounded overflow-hidden">
+<div class="bg-secondary-container h-full w-[12%]"></div>
+</div>
+</div>
+<div class="pt-2 text-outline flex justify-between border-t border-outline-variant/30 text-[10px]">
+<span>QUANTUM FLUX: OPTIMAL</span>
+<span class="text-primary-container">λ=438nm</span>
+</div>
+</div>
+</div>
+<!-- Live Hexadecimal Quantum Cipher Stream -->
+<div class="chamfer-card bg-surface-container-low/80 border border-outline-variant/80 p-4 rounded backdrop-blur-md">
+<div class="flex items-center justify-between mb-2">
+<span class="text-label-sm font-label-sm text-primary-container flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]" data-icon="lock">lock</span>
+              CIPHER FEED [0x7F-STREAM]
+            </span>
+<span class="text-outline text-label-sm font-label-sm">LIVE</span>
+</div>
+<div class="bg-surface-container-lowest/90 p-2.5 rounded border border-outline-variant/40 font-telemetry-data text-telemetry-data text-outline leading-tight h-28 overflow-hidden space-y-1">
+<div class="text-primary-fixed-dim">0x7FA29B :: DECRYPT_VECTOR_INIT</div>
+<div>0x4A108C :: HASH_CHECK [SHA3-512] PASS</div>
+<div class="text-primary-container">0x00F41D :: NONCE_EVAL: 9940129-AK</div>
+<div>0x89BC11 :: ROTATION_LOCK STABLE</div>
+<div class="text-outline/70">0xE83912 :: STREAM_PULSE ACK_OK</div>
+<div class="text-primary-fixed-dim">0x99A801 :: SYNCHRONIZING_KEYPAD...</div>
+</div>
+</div>
+<!-- Biometric Scan Viewport Preview -->
+<div class="chamfer-card bg-surface-container-low/80 border border-outline-variant/80 p-4 rounded backdrop-blur-md">
+<div class="flex items-center justify-between mb-2">
+<span class="text-label-sm font-label-sm text-primary-container flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]" data-icon="center_focus_strong">center_focus_strong</span>
+              RETINAL SCANNER PREVIEW
+            </span>
+<span class="text-telemetry-data font-telemetry-data text-outline">STBY</span>
+</div>
+<div class="relative w-full h-24 bg-surface-container-lowest rounded border border-outline-variant/60 flex items-center justify-center overflow-hidden">
+<div class="absolute inset-0 scan-beam h-8 bg-gradient-to-b from-transparent via-primary-container/20 to-transparent pointer-events-none"></div>
+<!-- Target crosshairs -->
+<div class="w-16 h-16 rounded-full border border-dashed border-primary-container/50 flex items-center justify-center">
+<div class="w-8 h-8 rounded-full border border-primary-container/80 flex items-center justify-center">
+<div class="w-1.5 h-1.5 rounded-full bg-primary-container shadow-[0_0_6px_#00f0ff]"></div>
+</div>
+</div>
+<span class="absolute bottom-1 right-2 text-[9px] font-label-sm text-outline">STANDBY: READY</span>
+</div>
+</div>
+</aside>
+<!-- CENTRAL VERIFICATION NEXUS (Cols 4-9): Core AI + PIN Keypad Display -->
+<section class="order-1 lg:order-2 lg:col-span-6 flex flex-col items-center">
+<!-- Glowing JARVIS AI Core Hologram Element -->
+<div class="relative flex flex-col items-center justify-center mb-6">
+<div class="relative w-40 h-40 md:w-48 md:h-48 flex items-center justify-center">
+<!-- Atmospheric backlights & glow rings -->
+<div class="absolute inset-0 rounded-full bg-primary-container/10 blur-2xl pulse-glow"></div>
+<div class="absolute -inset-2 rounded-full border border-primary-container/20 border-dashed animate-[spin_30s_linear_infinite]"></div>
+<div class="absolute inset-2 rounded-full border border-primary-fixed-dim/30 animate-[spin_20s_linear_infinite_reverse]"></div>
+<!-- Reference Image Placeholder as Core -->
+<img alt="Jarvis Core Hologram" class="w-32 h-32 md:w-36 md:h-36 object-contain z-10 relative drop-shadow-[0_0_20px_rgba(0,240,255,0.6)]" src="https://lh3.googleusercontent.com/aida/AEtjO1VPaAaN3qSPT5HblQe_3R0lM6E3-e_472iJrkGr4DI_2BzJw1_jr6G3tIzFXAXQgaOIcQ_nQ4wbThblArHtB9GDcnlcjDKtzJHdbJP7ZcoMrkbuAC-oMwQghyhvbIKy-k239hbZSta5QEoExj7BMMV7mAELJcKr0qlfD7ZGbPMcsbXjSUkoXg0jQ_WcnaHpkKct7ertnLyLF4yIEm8-NCJ2wbueLY-r2CjFtldD3Vci_vKneevqB8WfzLc"/>
+</div>
+<!-- Dynamic Status Hologram Label -->
+<div class="mt-2 text-center">
+<h2 class="text-headline-sm font-headline-sm tracking-widest text-primary uppercase drop-shadow-[0_0_10px_rgba(0,240,255,0.4)]">
+              A.I. CORE ONLINE
+            </h2>
+<div class="text-telemetry-data font-telemetry-data text-primary-fixed flex items-center justify-center gap-2 mt-0.5">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>
+              AWAITING AUTHORIZATION // CLEARANCE LVL-04
+            </div>
+</div>
+</div>
+<!-- CENTER PASSCODE HUD CONTAINER -->
+<div class="w-full max-w-md bg-surface-container-low/90 border border-primary-container/40 p-6 rounded-lg backdrop-blur-xl shadow-[0_0_25px_rgba(0,240,255,0.15),inset_0_0_20px_rgba(0,240,255,0.05)] relative">
+<!-- Corner Bracket Accents -->
+<div class="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-primary-container"></div>
+<div class="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-primary-container"></div>
+<div class="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-primary-container"></div>
+<div class="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-primary-container"></div>
+<!-- Passcode Header Prompt -->
+<div class="text-center mb-5">
+<p class="text-label-md font-label-md text-outline tracking-wider uppercase">
+              ENTER 4-DIGIT OVERRIDE PASSCODE
+            </p>
+<div class="text-telemetry-data font-telemetry-data text-primary-container/70 mt-0.5">
+              ENCRYPTED INPUT MATRIX :: ENIGMA_V8
+            </div>
+</div>
+<!-- 4-Digit Slot Nodes Display -->
+<div class="flex justify-center items-center gap-4 mb-6">
+<!-- Node 1: Filled -->
+<div class="w-12 h-14 rounded bg-surface-container-lowest border-2 border-primary-container flex items-center justify-center shadow-[0_0_15px_rgba(0,240,255,0.4)] transition-all">
+<div class="w-4 h-4 rounded-full bg-primary-container shadow-[0_0_10px_#00f0ff]"></div>
+</div>
+<!-- Node 2: Filled -->
+<div class="w-12 h-14 rounded bg-surface-container-lowest border-2 border-primary-container flex items-center justify-center shadow-[0_0_15px_rgba(0,240,255,0.4)] transition-all">
+<div class="w-4 h-4 rounded-full bg-primary-container shadow-[0_0_10px_#00f0ff]"></div>
+</div>
+<!-- Node 3: Active cursor -->
+<div class="w-12 h-14 rounded bg-surface-container-lowest border-2 border-primary-container/80 flex items-center justify-center relative shadow-[inset_0_0_10px_rgba(0,240,255,0.2)]">
+<span class="text-primary-container text-headline-sm font-label-md animate-pulse">▋</span>
+</div>
+<!-- Node 4: Empty -->
+<div class="w-12 h-14 rounded bg-surface-container-lowest border border-outline-variant/60 flex items-center justify-center">
+<div class="w-2 h-2 rounded-full bg-outline-variant/40"></div>
+</div>
+</div>
+<!-- Numeric Tactical Keypad (0-9 + PURGE + EXECUTE) -->
+<div class="grid grid-cols-3 gap-3">
+<!-- Key 1 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">1</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">SYS</div>
+</button>
+<!-- Key 2 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">2</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">NET</div>
+</button>
+<!-- Key 3 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">3</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">VOX</div>
+</button>
+<!-- Key 4 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">4</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">SHLD</div>
+</button>
+<!-- Key 5 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">5</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">SYNC</div>
+</button>
+<!-- Key 6 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">6</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">QUANT</div>
+</button>
+<!-- Key 7 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">7</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">WARP</div>
+</button>
+<!-- Key 8 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">8</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">CORE</div>
+</button>
+<!-- Key 9 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">9</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">FLUX</div>
+</button>
+<!-- Action: PURGE / BACKSPACE -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-error/40 hover:border-error hover:bg-error-container/30 text-error transition-all duration-150 active:scale-95">
+<div class="text-headline-sm font-headline-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]" data-icon="backspace">backspace</span>
+</div>
+<div class="text-telemetry-data font-telemetry-data">PURGE</div>
+</button>
+<!-- Key 0 -->
+<button class="chamfer-card group relative p-3 bg-surface-container-lowest/80 border border-primary-container/30 hover:border-primary-container hover:bg-surface-container-high transition-all duration-150 active:scale-95 shadow-[0_0_8px_rgba(0,240,255,0.08)]">
+<div class="text-headline-sm font-headline-sm text-primary group-hover:text-primary-container">0</div>
+<div class="text-telemetry-data font-telemetry-data text-outline group-hover:text-primary-fixed">NULL</div>
+</button>
+<!-- Action: OK / EXECUTE -->
+<button class="chamfer-card group relative p-3 bg-primary-container text-surface-container-lowest font-headline-sm hover:bg-primary-fixed transition-all duration-150 active:scale-95 shadow-[0_0_15px_rgba(0,240,255,0.6)]">
+<div class="text-headline-sm font-headline-sm font-bold flex items-center justify-center">OK</div>
+<div class="text-telemetry-data font-telemetry-data text-surface-container-lowest font-bold">EXEC</div>
+</button>
+</div>
+<!-- Auxiliary Terminal status footnote -->
+<div class="mt-5 pt-3 border-t border-outline-variant/40 flex justify-between items-center text-telemetry-data font-telemetry-data text-outline">
+<span class="flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>
+              CIPHERPAD ACTIVE
+            </span>
+<span class="text-primary-container">SEC-TOKEN: READY</span>
+</div>
+</div>
+</section>
+<!-- RIGHT FLANK (Cols 10-12): Security Modules, Firewall, Vocal Cadence -->
+<aside class="order-3 lg:col-span-3 space-y-5">
+<!-- Hardware Security Module & Lockout Timer -->
+<div class="chamfer-card bg-surface-container-low/80 border border-outline-variant/80 p-4 rounded backdrop-blur-md">
+<div class="flex items-center justify-between mb-3 border-b border-outline-variant/40 pb-2">
+<span class="text-label-sm font-label-sm text-primary-container uppercase tracking-wider flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]" data-icon="shield">shield</span>
+              SECURITY MODULE
+            </span>
+<span class="text-label-sm font-label-sm text-error bg-error-container/20 px-1.5 py-0.5 rounded border border-error/30">
+              3 ATTEMPTS
+            </span>
+</div>
+<div class="space-y-3 text-telemetry-data font-telemetry-data">
+<div class="flex justify-between items-center text-outline">
+<span>HARDWARE HSM</span>
+<span class="text-primary-container">TAMPER-LOCKED</span>
+</div>
+<div class="flex justify-between items-center text-outline">
+<span>ACTIVE FIREWALL</span>
+<span class="text-primary-container">LAYER-7 STEALTH</span>
+</div>
+<div class="flex justify-between items-center text-outline">
+<span>FAIL LOCKDOWN TIMER</span>
+<span class="text-secondary-fixed">00:04:59</span>
+</div>
+<div class="p-2 bg-surface-container-lowest rounded border border-outline-variant/40 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container text-[16px]" data-icon="verified_user">verified_user</span>
+<span class="text-[10px] text-on-surface-variant">AUTO-WIPE INITIATION AFTER 3 FAILED PIN MATRICES.</span>
+</div>
+</div>
+</div>
+<!-- Vocal Cadence Frequency Analyzer -->
+<div class="chamfer-card bg-surface-container-low/80 border border-outline-variant/80 p-4 rounded backdrop-blur-md">
+<div class="flex items-center justify-between mb-2">
+<span class="text-label-sm font-label-sm text-primary-container flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]" data-icon="graphic_eq">graphic_eq</span>
+              VOCAL CADENCE ANALYZER
+            </span>
+<span class="text-outline text-label-sm font-label-sm">44.1 kHz</span>
+</div>
+<div class="h-20 bg-surface-container-lowest p-2 rounded border border-outline-variant/40 flex items-end justify-between gap-1 overflow-hidden">
+<div class="w-full bg-primary-container/30 h-[20%] rounded-t"></div>
+<div class="w-full bg-primary-container/40 h-[45%] rounded-t"></div>
+<div class="w-full bg-primary-container/70 h-[75%] rounded-t"></div>
+<div class="w-full bg-primary-container h-[90%] rounded-t shadow-[0_0_6px_#00f0ff]"></div>
+<div class="w-full bg-primary-container/80 h-[60%] rounded-t"></div>
+<div class="w-full bg-primary-container/50 h-[30%] rounded-t"></div>
+<div class="w-full bg-primary-container/60 h-[50%] rounded-t"></div>
+<div class="w-full bg-primary-container/90 h-[85%] rounded-t shadow-[0_0_6px_#00f0ff]"></div>
+<div class="w-full bg-primary-container/40 h-[40%] rounded-t"></div>
+<div class="w-full bg-primary-container/20 h-[15%] rounded-t"></div>
+</div>
+<div class="mt-2 flex justify-between text-telemetry-data font-telemetry-data text-outline">
+<span>MIC: OMNI-BEAM-01</span>
+<span class="text-primary-container">NOISE: -82 dB</span>
+</div>
+</div>
+<!-- Emergency Diagnostics Summary Card -->
+<div class="chamfer-card bg-surface-container-low/80 border border-outline-variant/80 p-4 rounded backdrop-blur-md">
+<div class="flex items-center justify-between mb-2 text-label-sm font-label-sm text-primary-container">
+<span class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]" data-icon="terminal">terminal</span>
+              SECURE BUS STATUS
+            </span>
+<span class="text-secondary-fixed font-label-sm">0 ERROR</span>
+</div>
+<p class="text-body-sm font-body-sm text-outline">
+            Cryptographic tunnel bound to synthetic persona JARVIS-CORE. Override will dispatch telemetry to sovereign control grid.
+          </p>
+</div>
+</aside>
+</div>
+<!-- BOTTOM ACTION MODES: Alternative Authentication Protocols -->
+<div class="mt-10 max-w-4xl mx-auto border-t border-outline-variant/50 pt-6">
+<div class="text-center mb-3">
+<span class="text-label-sm font-label-sm text-outline tracking-widest uppercase">ALTERNATIVE AUTHENTICATION PROTOCOLS</span>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+<!-- Option 1: Biometric Retina -->
+<button class="chamfer-btn group flex items-center justify-center gap-2.5 px-4 py-2.5 bg-surface-container-low border border-primary-container/30 hover:border-primary-container hover:bg-surface-container transition-all duration-150 active:scale-95 shadow-[0_0_10px_rgba(0,240,255,0.05)]">
+<span class="material-symbols-outlined text-primary-container group-hover:scale-110 transition-transform" data-icon="center_focus_strong">center_focus_strong</span>
+<span class="text-label-md font-label-md text-primary group-hover:text-primary-container">BIOMETRIC RETINA SCAN</span>
+</button>
+<!-- Option 2: Voice Cadence -->
+<button class="chamfer-btn group flex items-center justify-center gap-2.5 px-4 py-2.5 bg-surface-container-low border border-primary-container/30 hover:border-primary-container hover:bg-surface-container transition-all duration-150 active:scale-95 shadow-[0_0_10px_rgba(0,240,255,0.05)]">
+<span class="material-symbols-outlined text-primary-container group-hover:scale-110 transition-transform" data-icon="settings_voice">settings_voice</span>
+<span class="text-label-md font-label-md text-primary group-hover:text-primary-container">VOICE CADENCE AUTH</span>
+</button>
+<!-- Option 3: Emergency Shutdown -->
+<button class="chamfer-btn group flex items-center justify-center gap-2.5 px-4 py-2.5 bg-surface-container-low border border-error/40 hover:border-error hover:bg-error-container/20 transition-all duration-150 active:scale-95">
+<span class="material-symbols-outlined text-error group-hover:scale-110 transition-transform" data-icon="power_settings_new">power_settings_new</span>
+<span class="text-label-md font-label-md text-error">EMERGENCY PROTOCOL SHUTDOWN</span>
+</button>
+</div>
+</div>
+</main>
+<!-- BOTTOM NAV BAR (Shared Component Anchor - Responsive on Mobile) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-2 py-2 bg-surface-container-lowest/90 backdrop-blur-md border-t border-outline-variant shadow-[0_-5px_20px_rgba(0,240,255,0.1)]">
+<!-- Matrix PIN (Active) -->
+<a class="flex flex-col items-center justify-center text-primary-container dark:text-primary-container font-label-sm py-1 border-t-2 border-primary-container" href="#">
+<span class="material-symbols-outlined" data-icon="dialpad">dialpad</span>
+<span class="text-label-sm font-label-sm">Matrix PIN</span>
+</a>
+<!-- Biometric -->
+<a class="flex flex-col items-center justify-center text-outline dark:text-outline font-label-sm py-1 hover:text-primary-fixed hover:bg-surface-container-high transition-colors duration-150 active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined" data-icon="fingerprint">fingerprint</span>
+<span class="text-label-sm font-label-sm">Biometric</span>
+</a>
+<!-- Voice Sync -->
+<a class="flex flex-col items-center justify-center text-outline dark:text-outline font-label-sm py-1 hover:text-primary-fixed hover:bg-surface-container-high transition-colors duration-150 active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined" data-icon="settings_voice">settings_voice</span>
+<span class="text-label-sm font-label-sm">Voice Sync</span>
+</a>
+<!-- Diagnostics -->
+<a class="flex flex-col items-center justify-center text-outline dark:text-outline font-label-sm py-1 hover:text-primary-fixed hover:bg-surface-container-high transition-colors duration-150 active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined" data-icon="tune">tune</span>
+<span class="text-label-sm font-label-sm">Diagnostics</span>
+</a>
+</nav>
+<!-- Micro-interaction Scripts -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Audio click acoustic simulation for tactical keypad buttons
+      const buttons = document.querySelectorAll('button');
+      buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.style.filter = 'brightness(1.25)';
+          setTimeout(() => {
+            btn.style.filter = 'none';
+          }, 120);
+        });
+      });
+    });
+  </script>
+</body></html>

@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+jarvis/renderer/dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Runtime logs & artifacts
+*.log
+jarvis/renderer_errors.log
+jarvis/security_audit.log
+
+# Screenshots committed accidentally
+screenshot_*.png
+
+# Electron cache
+.webpack/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo

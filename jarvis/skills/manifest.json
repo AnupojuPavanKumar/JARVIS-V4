@@ -1,0 +1,232 @@
+{
+  "version": "1.2",
+  "skills": [
+    {
+      "id": "get_datetime",
+      "name": "Get Date & Time",
+      "description": "Returns the current date, time, day of week, and timezone",
+      "trigger": ["what time", "what date", "current time", "today's date", "what day"],
+      "script": "get_datetime.js",
+      "type": "js",
+      "params": {}
+    },
+    {
+      "id": "calculator",
+      "name": "Calculator",
+      "description": "Evaluates mathematical expressions safely",
+      "trigger": ["calculate", "compute", "what is", "solve", "math"],
+      "script": "calculator.js",
+      "type": "js",
+      "params": {
+        "expression": { "type": "string", "required": true, "description": "Math expression to evaluate" }
+      }
+    },
+    {
+      "id": "system_status",
+      "name": "System Status",
+      "description": "Returns current system memory, uptime, and process info",
+      "trigger": ["system status", "memory usage", "how much ram", "system info"],
+      "script": "system_status.js",
+      "type": "js",
+      "params": {}
+    },
+
+    {
+      "id": "weather",
+      "name": "Weather",
+      "description": "Fetches current weather and 3-day forecast. If no location is given, uses the user's detected location. Supports explicit cities like 'London', 'New York', 'Hyderabad'.",
+      "trigger": ["weather", "forecast", "temperature", "humidity", "raining", "sunny"],
+      "script": "weather.js",
+      "type": "js",
+      "params": {
+        "location": { "type": "string", "required": false, "description": "City or location name (optional). If omitted, auto-detects from IP." }
+      }
+    },
+    {
+      "id": "news",
+      "name": "News Headlines",
+      "description": "Fetches the latest news headlines from BBC News. Supports topics: world, technology, business, science, health, sports, entertainment, politics, uk, us, asia, europe, africa.",
+      "trigger": ["news", "headlines", "latest news", "what's happening"],
+      "script": "news.js",
+      "type": "js",
+      "params": {
+        "topic": { "type": "string", "required": false, "description": "News topic (world/technology/business/science/health/sports/entertainment/politics/uk/us/asia/europe/africa). Default: world." },
+        "count": { "type": "number", "required": false, "description": "Number of headlines to return (1–10). Default: 5." }
+      }
+    },
+
+    {
+      "id": "wikipedia_summary",
+      "name": "Wikipedia Summary",
+      "description": "Searches Wikipedia and returns a plain-text summary, extract, and URL for a topic. Use this when the user asks 'what is X', 'tell me about X', or wants factual background on a person, place, concept, or event.",
+      "trigger": ["what is", "tell me about", "who is", "wikipedia", "explain", "define", "history of"],
+      "script": "wikipedia_summary.js",
+      "type": "js",
+      "params": {
+        "query": { "type": "string", "required": true, "description": "The topic or subject to look up on Wikipedia" }
+      }
+    },
+    {
+      "id": "crypto_price",
+      "name": "Cryptocurrency Price",
+      "description": "Returns the current price (USD), 24-hour percentage change, and market cap for a cryptocurrency. Uses CoinGecko (free, no API key). Supported: bitcoin, ethereum, solana, dogecoin, and many others.",
+      "trigger": ["crypto", "bitcoin", "ethereum", "coin price", "btc", "eth", "cryptocurrency", "token price"],
+      "script": "crypto_price.js",
+      "type": "js",
+      "params": {
+        "coin": { "type": "string", "required": true, "description": "Coin name or symbol (e.g. bitcoin, btc, ethereum, eth, solana, sol, dogecoin, doge)" }
+      }
+    },
+    {
+      "id": "unit_convert",
+      "name": "Unit Converter",
+      "description": "Converts values between units locally (no external API). Supports temperature (Celsius/Fahrenheit/Kelvin), length (mm/cm/m/km/inch/foot/yard/mile), weight (mg/g/kg/lb/oz/tonne), volume (ml/l/gallon/pint/cup/tbsp/tsp/fl oz), and speed (km/h/mph/m/s/knot).",
+      "trigger": ["convert", "in celsius", "in fahrenheit", "to kg", "to miles", "to km", "to liters", "to gallons", "unit conversion", "how many"],
+      "script": "unit_convert.js",
+      "type": "js",
+      "params": {
+        "value": { "type": "number", "required": true, "description": "The numeric value to convert" },
+        "from":  { "type": "string", "required": true, "description": "Source unit (e.g. celsius, kg, miles, mph, liters)" },
+        "to":    { "type": "string", "required": true, "description": "Target unit (e.g. fahrenheit, lb, km, m/s, gallons)" }
+      }
+    },
+    {
+      "id": "ip_lookup",
+      "name": "IP Lookup",
+      "description": "Returns geolocation and ISP information for an IP address (IPv4 or IPv6). If no IP is given, returns info for the user's own public IP.",
+      "trigger": ["ip lookup", "ip address", "my ip", "lookup ip", "who owns", "trace ip"],
+      "script": "ip_lookup.js",
+      "type": "js",
+      "params": {
+        "ip": { "type": "string", "required": false, "description": "IP address to look up. If omitted, returns the user's own public IP info." }
+      }
+    },
+    {
+      "id": "define_word",
+      "name": "Dictionary / Define Word",
+      "description": "Returns the definition, phonetic pronunciation, part of speech, example sentences, synonyms, and antonyms for an English word using the Free Dictionary API.",
+      "trigger": ["define", "definition", "what does", "meaning of", "synonym", "antonym", "dictionary"],
+      "script": "define_word.js",
+      "type": "js",
+      "params": {
+        "word": { "type": "string", "required": true, "description": "English word to look up" }
+      }
+    },
+    {
+      "id": "translate_text",
+      "name": "Translate Text",
+      "description": "Translates text between languages using the MyMemory API (free, up to 5000 characters/day). Supports 30+ languages including English, Spanish, French, German, Japanese, Chinese, Arabic, Hindi, and more.",
+      "trigger": ["translate", "in spanish", "in french", "in german", "in japanese", "how do you say", "what is this in"],
+      "script": "translate_text.js",
+      "type": "js",
+      "params": {
+        "text":  { "type": "string", "required": true, "description": "Text to translate" },
+        "to":    { "type": "string", "required": true, "description": "Target language name or BCP-47 tag (e.g. 'Spanish', 'fr', 'Japanese', 'zh')" },
+        "from":  { "type": "string", "required": false, "description": "Source language (optional). If omitted, auto-detects." }
+      }
+    },
+
+    {
+      "id": "process_manager",
+      "name": "Process Manager",
+      "description": "Lists running processes by memory usage. Can terminate processes with confirmation (system-critical processes are protected).",
+      "trigger": ["list processes", "running apps", "kill process", "what's running", "task manager", "memory hog"],
+      "script": "process_manager.js",
+      "type": "js",
+      "params": {
+        "action": { "type": "string", "enum": ["list", "kill"], "required": false },
+        "name":   { "type": "string", "required": false, "description": "Process name to kill" }
+      }
+    },
+    {
+      "id": "workspace_navigator",
+      "name": "Workspace Navigator",
+      "description": "Lists directories, reads files, and searches the workspace. Accepts a path argument and returns structured results.",
+      "trigger": ["list files", "show directory", "read file", "search workspace", "find in project", "what files"],
+      "script": "workspace_navigator.js",
+      "type": "js",
+      "params": {
+        "command": { "type": "string", "enum": ["list-dir", "read-file", "search-workspace"], "required": true, "description": "Command to run" },
+        "path": { "type": "string", "required": false, "description": "Directory or file path to inspect" },
+        "query": { "type": "string", "required": false, "description": "Query to search for (if command is search-workspace)" }
+      }
+    },
+    {
+      "id": "code_inspector",
+      "name": "Code Inspector",
+      "description": "Securely reads and inspects text files within the approved workspace. Blocks access to binaries and external paths.",
+      "trigger": ["inspect code", "read code file", "view source"],
+      "script": "code_inspector.js",
+      "type": "js",
+      "params": {
+        "targetPath": { "type": "string", "required": true, "description": "Relative path to the file or directory to inspect." }
+      }
+    },
+    {
+      "id": "open_app",
+      "name": "Open Application",
+      "description": "Opens a local application by name (e.g. chrome, spotify, notepad, calculator, vscode, explorer, terminal)",
+      "trigger": ["open", "start", "launch"],
+      "script": "open_app.js",
+      "type": "js",
+      "params": {
+        "app": { "type": "string", "required": true, "description": "Application name to open" }
+      }
+    },
+    {
+      "id": "open_url",
+      "name": "Open URL",
+      "description": "Opens a URL in the default browser",
+      "trigger": ["open url", "go to", "navigate to", "open website"],
+      "script": "open_url.js",
+      "type": "js",
+      "params": {
+        "url": { "type": "string", "required": true, "description": "URL to open" }
+      }
+    },
+    {
+      "id": "kill_process",
+      "name": "Kill Process",
+      "description": "Terminates a running process by name (with safety checks for critical system processes)",
+      "trigger": ["close", "kill", "stop process", "terminate"],
+      "script": "kill_process.js",
+      "type": "js",
+      "params": {
+        "name": { "type": "string", "required": true, "description": "Process name to terminate" }
+      }
+    },
+    {
+      "id": "search_web",
+      "name": "Search Web (browser)",
+      "description": "Opens the default browser and searches the web for a query",
+      "trigger": ["search the web for", "google", "bing"],
+      "script": "search_web.js",
+      "type": "js",
+      "params": {
+        "query": { "type": "string", "required": true, "description": "Search query" }
+      }
+    },
+    {
+      "id": "read_url",
+      "name": "Read URL",
+      "description": "Fetches a webpage URL and extracts its main text content for you to read. Use this to read articles, docs, or blogs.",
+      "trigger": ["read url", "scrape website", "summarize article"],
+      "script": "read_url.js",
+      "type": "js",
+      "params": {
+        "url": { "type": "string", "required": true, "description": "The full URL to read (e.g. https://...)" }
+      }
+    },
+    {
+      "id": "security_auditor",
+      "name": "Security Auditor",
+      "description": "Scans running processes and checks their Authenticode digital signatures to identify untrusted or unsigned binaries running on the system.",
+      "trigger": ["audit security", "check signatures", "scan processes", "is this safe", "security scan"],
+      "script": "security_auditor.js",
+      "type": "js",
+      "params": {
+        "processName": { "type": "string", "required": false, "description": "Specific process name to check. If omitted, checks top memory-consuming processes." }
+      }
+    }
+  ]
+}
