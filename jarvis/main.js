@@ -389,6 +389,10 @@ ipcMain.handle('sec-config-save', async (_, cfg) => {
   }
 });
 
+ipcMain.handle('sec-audit-read', async () => {
+  return { ok: true, data: _secAuditLog };
+});
+
 // ─── History ─────────────────────────────────────────────────────
 
 ipcMain.handle('history-save', async (_, sessionId, data) => {
