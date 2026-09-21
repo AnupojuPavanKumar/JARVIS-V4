@@ -312,16 +312,13 @@ ipcMain.handle('fs-read', async (_, filePath) => {
 });
 
 ipcMain.handle('fs-write', async (_, filePath, content) => {
-  // H-3 fix: block writes outside the allowed workspace boundaries.
-  // Allowed roots: userData directory and os.tmpdir().
   try {
     const resolved = path.resolve(filePath);
-    const userDataRoot = path.resolve(app.getPath('userData'));
-    const tmpRoot = path.resolve(os.tmpdir());
-    const inUserData = resolved.startsWith(userDataRoot + path.sep) || resolved === userDataRoot;
-    const inTmp = resolved.startsWith(tmpRoot + path.sep);
-    if (!inUserData && !inTmp) {
-      secAudit('FS_WRITE', resolved, 'BLOCKED — outside workspace');
+    const userDataRoot = path.resolve(app.getPath('userData')) + path.sep;
+    const tmpRoot = path.resolve(os.tmpdir()) + path.sep;
+    
+    if (!resolved.startsWith(userDataRoot) && !resolved.startsWith(tmpRoot)) {
+      secAudit('FS_WRITE', resolved, 'BLOCKED - outside workspace');
       return { ok: false, error: 'Write refused: path is outside the allowed workspace.' };
     }
     secAudit('FS_WRITE', resolved, 'ALLOWED');
