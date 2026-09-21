@@ -3,7 +3,14 @@
 const args = JSON.parse(process.argv[2] || '{}');
 let urlStr = (args.url || '').trim();
 if (!urlStr) { console.log(JSON.stringify({ ok: false, error: 'No URL provided.' })); process.exit(0); }
-if (!/^https?:\/\//i.test(urlStr)) urlStr = 'https://' + urlStr;
+const hasScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(urlStr);
+if (!hasScheme) {
+    if (/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}(:\d+)?([/?#].*)?$/.test(urlStr)) {
+        urlStr = 'https://' + urlStr;
+    } else {
+        console.log(JSON.stringify({ ok: false, error: 'Invalid URL.' })); process.exit(0);
+    }
+}
 
 let parsed;
 try {
