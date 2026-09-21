@@ -9,8 +9,7 @@ const aliases = {
   firefox: 'firefox', edge: 'msedge', msedge: 'msedge',
   spotify: 'spotify', notepad: 'notepad', calculator: 'calc', calc: 'calc',
   code: 'code', vscode: 'code', 'vs code': 'code',
-  explorer: 'explorer', terminal: 'wt', wt: 'wt',
-  powershell: 'powershell', cmd: 'cmd', paint: 'mspaint',
+  explorer: 'explorer', terminal: 'wt', wt: 'wt', paint: 'mspaint',
   youtube: 'https://youtube.com', github: 'https://github.com',
   gamma: 'https://gamma.app',
 };
@@ -30,7 +29,7 @@ if (exe.startsWith('http')) {
     stdio: 'ignore'
   });
 } else {
-  child = spawn(exe, [], {
+  child = spawn('cmd.exe', ['/d', '/c', 'start', '', exe], {
     shell: false,
     windowsHide: true,
     detached: true,
@@ -38,6 +37,10 @@ if (exe.startsWith('http')) {
   });
 }
 
-child.on('error', () => {});
-child.unref();
-console.log(JSON.stringify({ ok: true, result: `Launched ${app}.` }));
+child.on('error', (err) => {
+  console.log(JSON.stringify({ ok: false, error: err.message }));
+});
+child.on('spawn', () => {
+  console.log(JSON.stringify({ ok: true, result: `Launched ${app}.` }));
+  child.unref();
+});
