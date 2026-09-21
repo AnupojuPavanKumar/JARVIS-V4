@@ -450,8 +450,17 @@ ipcMain.handle('run-command', async (_, command, cwd) => {
   
   const cmdStr = String(command).trim();
   const { classifyCommand, INTERNAL_ALLOWLIST } = require('./ipc-policy');
+
+  let isAllowedGit = false;
+  if (/^git\s+(status|log|branch|diff|show|rev-parse|remote)(\s|$)/i.test(cmdStr)) {
+    if (/^[A-Za-z0-9._\/=:@~^ -]+$/.test(cmdStr)) {
+      if (!/(?:^|\s)(-c|--output|--exec-path|--upload-pack|--receive-pack|--ext-diff|--textconv|--open-files-in-pager)\b/.test(cmdStr)) {
+        isAllowedGit = true;
+      }
+    }
+  }
   
-  if (!INTERNAL_ALLOWLIST.has(cmdStr)) {
+  if (!INTERNAL_ALLOWLIST.has(cmdStr) && !isAllowedGit) {
     if (!liveSecConfig.terminalEnabled) {
       secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - terminal disabled');
       return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Terminal execution is disabled' };
