@@ -20,7 +20,7 @@ try {
 }
 
 if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-  console.log(JSON.stringify({ ok: false, error: 'Only http and https protocols are allowed.' })); process.exit(0);
+  console.log(JSON.stringify({ ok: false, error: 'Unsupported URL scheme.' })); process.exit(0);
 }
 
 if (parsed.username || parsed.password) {
