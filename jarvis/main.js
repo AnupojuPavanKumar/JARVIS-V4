@@ -12,28 +12,7 @@ const {
 const _path = require('path');
 const _url = require('url');
 
-const originalIpcHandle = ipcMain.handle.bind(ipcMain);
-ipcMain.handle = (channel, listener) => {
-  originalIpcHandle(channel, async (event, ...args) => {
-    const allowed = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href + '/';
-    if (!event.senderFrame || typeof event.senderFrame.url !== 'string' || !event.senderFrame.url.startsWith(allowed)) {
-      return { ok: false, error: 'untrusted sender' };
-    }
-    return listener(event, ...args);
-  });
-};
-
-const originalIpcOn = ipcMain.on.bind(ipcMain);
-ipcMain.on = (channel, listener) => {
-  originalIpcOn(channel, (event, ...args) => {
-    const allowed = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href + '/';
-    if (!event.senderFrame || typeof event.senderFrame.url !== 'string' || !event.senderFrame.url.startsWith(allowed)) {
-      event.returnValue = { ok: false, error: 'untrusted sender' };
-      return;
-    }
-    listener(event, ...args);
-  });
-};
+// IPC sender validation is installed later (lines ~95) after mainWindow is known.
 
 // LOW-02 fix: --expose_gc removed (was leaking V8 internals to renderer context)
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048');
@@ -91,6 +70,40 @@ function stopOllama() {
   }
 }
 
+// ─── Global IPC Sender Validation ──────────────────────────────────────────
+// Defense-in-depth: checks both senderFrame URL (origin) and webContents identity.
+// Fails closed if mainWindow is null or destroyed.
+const _allowedRendererBase = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href + '/';
+
+const originalIpcHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, listener) => {
+  originalIpcHandle(channel, async (event, ...args) => {
+    const senderOk = mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
+    const urlOk = event.senderFrame && typeof event.senderFrame.url === 'string' &&
+                  event.senderFrame.url.startsWith(_allowedRendererBase);
+    if (!senderOk || !urlOk) {
+      secAudit('IPC_BLOCK', channel, `BLOCKED sender=${senderOk} url=${urlOk}`);
+      return { ok: false, error: 'untrusted sender' };
+    }
+    return listener(event, ...args);
+  });
+};
+
+const originalIpcOn = ipcMain.on.bind(ipcMain);
+ipcMain.on = (channel, listener) => {
+  originalIpcOn(channel, (event, ...args) => {
+    const senderOk = mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
+    const urlOk = event.senderFrame && typeof event.senderFrame.url === 'string' &&
+                  event.senderFrame.url.startsWith(_allowedRendererBase);
+    if (!senderOk || !urlOk) {
+      secAudit('IPC_BLOCK', channel, `BLOCKED sender=${senderOk} url=${urlOk}`);
+      event.returnValue = { ok: false, error: 'untrusted sender' };
+      return;
+    }
+    listener(event, ...args);
+  });
+};
+
 // ─── Screen Capture IPC ────────────────────────────────────────
 ipcMain.handle('capture-screen', async () => {
   if (!liveSecConfig.screenCaptureEnabled) {
@@ -144,9 +157,10 @@ function createWindow() {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self'; " +
-          "connect-src 'self' http://localhost:* http://127.0.0.1:* https:; " +
+          "connect-src 'self' https:; " +
           "font-src 'self' https://fonts.gstatic.com data:; " +
           "img-src 'self' data: https:; " +
+          "media-src 'self' data: blob:; " +
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
           "script-src 'self';"
         ]
@@ -336,6 +350,9 @@ function checkPathBounds(requestedPath) {
   const isSensitive = segments.some(s => 
     s === 'jarvis_auth.json' || 
     s === 'sec-config.json' || 
+    s === 'scheduler.json' ||
+    s === 'manifest.json' ||
+    s === 'manifest.sig' ||
     s.startsWith('.env') || 
     s.startsWith('id_rsa') || 
     s === '.ssh' || 
@@ -1153,155 +1170,74 @@ ipcMain.handle('run-code-safe', async (_, language, code) => {
   }
 });
 
-ipcMain.handle('http-request', async (_, { method, url, headers, body }) => {
-  const start = Date.now();
-  const dns = require('dns').promises;
+const OLLAMA_HOST = '127.0.0.1';
+const OLLAMA_PORT = 11434;
+const OLLAMA_ALLOWED = ['/api/generate', '/api/chat', '/api/tags', '/api/embeddings'];
 
-  function parseIPv4(ipStr) {
-    const p = ipStr.split('.');
-    return p.length === 4 ? p.map(Number) : null;
-  }
-
-  function isBlockedIPv4(parts) {
-    if (!parts) return false;
-    const [p0, p1] = parts;
-    if (p0 === 0) return true;
-    if (p0 === 10) return true;
-    if (p0 === 100 && p1 >= 64 && p1 <= 127) return true;
-    if (p0 === 127) return true;
-    if (p0 === 169 && p1 === 254) return true;
-    if (p0 === 172 && p1 >= 16 && p1 <= 31) return true;
-    if (p0 === 192 && p1 === 168) return true;
-    if (p0 >= 224 && p0 <= 239) return true;
-    if (p0 >= 240 && p0 <= 255) return true;
-    return false;
-  }
-
-  async function checkHost(hostname) {
-    if (hostname.toLowerCase() === 'localhost') hostname = '127.0.0.1';
-    let ips;
-    try {
-      if (/^[\d\.]+$/.test(hostname) || /^\[?[a-f0-9:]+\]?$/i.test(hostname)) {
-        ips = [hostname.replace(/[\[\]]/g, '')];
-      } else {
-        const records = await dns.lookup(hostname, { all: true });
-        ips = records.map(r => r.address);
-      }
-    } catch { return null; }
-    
-    for (let ip of ips) {
-      if (ip === '::' || ip === '::1') return null;
-      if (ip.includes(':')) {
-        const lower = ip.toLowerCase();
-        if (lower.startsWith('fc') || lower.startsWith('fd')) return null;
-        if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return null;
-        if (lower.startsWith('ff')) return null;
-        if (lower.startsWith('::ffff:')) {
-          const mapped = lower.substring(7);
-          if (mapped.includes('.')) {
-             if (isBlockedIPv4(parseIPv4(mapped))) return null;
-          } else {
-            const parts = mapped.split(':');
-            if (parts.length === 2) {
-              const num1 = parseInt(parts[0], 16);
-              const num2 = parseInt(parts[1], 16);
-              const p = [(num1 >> 8) & 0xff, num1 & 0xff, (num2 >> 8) & 0xff, num2 & 0xff];
-              if (isBlockedIPv4(p)) return null;
-            }
-          }
-        }
-        return ip;
-      }
-      const p = parseIPv4(ip);
-      if (isBlockedIPv4(p)) return null;
-      return ip;
-    }
-    return null;
-  }
-
-  async function makeReq(currentUrl, redirectsLeft) {
-    if (redirectsLeft < 0) return { ok: false, error: 'Too many redirects', time: Date.now() - start };
-    
-    let pUrl;
-    try { pUrl = new URL(currentUrl); } catch { return { ok: false, error: 'Invalid URL', time: Date.now() - start }; }
-    
-    let isAllowedOllama = false;
-    if (pUrl.protocol === 'http:' && (pUrl.hostname === '127.0.0.1' || pUrl.hostname === 'localhost') && pUrl.port === '11434') {
-      isAllowedOllama = true;
-    }
-    
-    let vettedIp = null;
-    if (!isAllowedOllama) {
-      if (pUrl.protocol !== 'http:' && pUrl.protocol !== 'https:') {
-        return { ok: false, error: 'Protocol not allowed', time: Date.now() - start };
-      }
-      vettedIp = await checkHost(pUrl.hostname);
-      if (!vettedIp) {
-        return { ok: false, error: 'SSRF blocked: host not allowed', time: Date.now() - start };
-      }
-    }
-    
-    const isHttps = pUrl.protocol === 'https:';
-    const lib = isHttps ? https : require('http');
+ipcMain.handle('ollama-fetch', async (_, { path, method, body }) => {
+  if (!OLLAMA_ALLOWED.includes(path)) return { ok: false, error: 'Forbidden path' };
+  
+  return new Promise((resolve) => {
     const options = {
-      method: method || 'GET',
-      hostname: pUrl.hostname,
-      port: pUrl.port || (isHttps ? 443 : 80),
-      path: pUrl.pathname + pUrl.search,
-      headers: {
-        'User-Agent': 'JARVIS-API-Tester/2.0',
-        'Content-Type': 'application/json',
-        ...(headers || {}),
-      },
-      timeout: 15000,
+      hostname: OLLAMA_HOST, port: OLLAMA_PORT, path,
+      method: method || 'GET', headers: { 'Content-Type': 'application/json' },
+      timeout: 15000
     };
     
-    if (vettedIp) {
-      options.lookup = (hostname, opts, callback) => {
-         callback(null, vettedIp, vettedIp.includes(':') ? 6 : 4);
-      };
-    }
-    
-    return new Promise((resolve) => {
-      const req = lib.request(options, async (res) => {
-        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
-          const nextUrl = new URL(res.headers.location, currentUrl).href;
-          resolve(await makeReq(nextUrl, redirectsLeft - 1));
-          return;
-        }
-        
-        let data = Buffer.alloc(0);
-        res.on('data', chunk => {
-          data = Buffer.concat([data, chunk]);
-          if (data.length > 2 * 1024 * 1024) {
-            req.destroy();
-            resolve({ ok: false, error: 'Response exceeded 2MB limit', time: Date.now() - start });
-          }
-        });
-        res.on('end', () => {
-          if (data.length > 2 * 1024 * 1024) return;
-          resolve({
-            ok: true,
-            status: res.statusCode,
-            statusText: res.statusMessage,
-            headers: res.headers,
-            body: data.toString('utf8'),
-            time: Date.now() - start,
-          });
-        });
+    const req = http.request(options, (res) => {
+      let data = Buffer.alloc(0);
+      res.on('data', chunk => data = Buffer.concat([data, chunk]));
+      res.on('end', () => {
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body: data.toString('utf8') });
       });
-      req.on('error', (e) => resolve({ ok: false, error: e.message, time: Date.now() - start }));
-      req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Request timed out (15s)', time: Date.now() - start }); });
-      if (body && method !== 'GET') req.write(typeof body === 'string' ? body : JSON.stringify(body));
-      req.end();
     });
-  }
+    
+    req.on('error', e => resolve({ ok: false, error: e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Timeout' }); });
+    if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    req.end();
+  });
+});
 
-  try {
-    return await makeReq(url, 3);
-  } catch (e) {
-    return { ok: false, error: e.message, time: Date.now() - start };
+const activeOllamaStreams = new Map();
+
+ipcMain.on('ollama-stream-start', (event, { reqId, path, method, body }) => {
+  if (!OLLAMA_ALLOWED.includes(path)) {
+    event.sender.send('ollama-stream-error', { reqId, error: 'Forbidden path' });
+    return;
   }
+  
+  const options = {
+    hostname: OLLAMA_HOST, port: OLLAMA_PORT, path,
+    method: method || 'POST', headers: { 'Content-Type': 'application/json' },
+    timeout: 90000
+  };
+  
+  const req = http.request(options, (res) => {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      event.sender.send('ollama-stream-error', { reqId, error: `Ollama ${res.statusCode}` });
+      return;
+    }
+    res.on('data', chunk => event.sender.send('ollama-stream-chunk', { reqId, chunk: chunk.toString('utf8') }));
+    res.on('end', () => {
+      event.sender.send('ollama-stream-end', { reqId });
+      activeOllamaStreams.delete(reqId);
+    });
+  });
+  
+  req.on('error', e => {
+    event.sender.send('ollama-stream-error', { reqId, error: e.message });
+    activeOllamaStreams.delete(reqId);
+  });
+  
+  if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+  req.end();
+  activeOllamaStreams.set(reqId, req);
+});
+
+ipcMain.on('ollama-stream-abort', (event, { reqId }) => {
+  const req = activeOllamaStreams.get(reqId);
+  if (req) { req.destroy(); activeOllamaStreams.delete(reqId); }
 });
 
 // ─── Snippets Persistence ────────────────────────────────────────
@@ -1580,12 +1516,29 @@ ipcMain.handle('auth-load', async () => {
   } catch (e) { return { ok: false, data: null }; }
 });
 
-// auth-save: renderer sends the RAW PIN (only at setup time); main hashes it.
-// For skip-PIN mode, renderer sends { skipPin: true }.
 ipcMain.handle('auth-save', async (_, data) => {
   try {
+    const fp = _authFilePath();
+    let currentData = null;
+    if (fs.existsSync(fp)) {
+      currentData = JSON.parse(await fs.promises.readFile(fp, 'utf8'));
+    }
+    
+    // If a PIN is currently set and we are not skipping it, we must verify the old PIN
+    if (currentData && !currentData.skipPin && currentData.hash) {
+      if (!data.currentPin || typeof data.currentPin !== 'string') {
+        return { ok: false, error: 'Current PIN required' };
+      }
+      if (!_pinRateLimitOk()) return { ok: false, error: 'Too many attempts.' };
+      const oldHash = await _pbkdf2Hash(data.currentPin, currentData.salt);
+      if (oldHash !== currentData.hash) {
+        _pinAttempts.push(Date.now());
+        return { ok: false, error: 'Current PIN incorrect' };
+      }
+    }
+
     if (data && data.skipPin) {
-      await fs.promises.writeFile(_authFilePath(), JSON.stringify({ skipPin: true }, null, 2));
+      await fs.promises.writeFile(fp, JSON.stringify({ skipPin: true }, null, 2));
       return { ok: true };
     }
     if (typeof data.pin !== 'string' || !/^\d{4}$/.test(data.pin)) {
@@ -1593,7 +1546,7 @@ ipcMain.handle('auth-save', async (_, data) => {
     }
     const salt = randomBytes(32).toString('hex');
     const hash = await _pbkdf2Hash(data.pin, salt);
-    await fs.promises.writeFile(_authFilePath(), JSON.stringify({ hash, salt, skipPin: false }, null, 2));
+    await fs.promises.writeFile(fp, JSON.stringify({ hash, salt, skipPin: false }, null, 2));
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
@@ -1692,7 +1645,23 @@ ipcMain.handle('piper-tts', async (_, text) => {
       // LOW-04 fix: monotonic counter as unique key (no collision even under concurrent calls)
       const seqId = String(++__piperSeq);
       const tmpFile = path.join(app.getPath('temp'), `piper_${seqId}.wav`);
-      piperCallbacks[seqId] = { resolve, tmpFile };
+      
+      const timeoutId = setTimeout(() => {
+        if (piperCallbacks[seqId]) {
+          delete piperCallbacks[seqId];
+          try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+          resolve({ ok: false, error: 'TTS request timed out' });
+        }
+      }, 30000); // 30 second timeout
+
+      piperCallbacks[seqId] = { 
+        tmpFile,
+        resolve: (res) => {
+          clearTimeout(timeoutId);
+          resolve(res);
+        }
+      };
+      
       p.stdin.write(JSON.stringify({ text, output_file: tmpFile }) + '\n');
     } catch (e) {
       resolve({ ok: false, error: e.message });
