@@ -546,7 +546,7 @@ Do NOT say "How can I help", "I am ready", or anything generic. Make it feel ali
     const t = document.getElementById("models-list"); t && (t.innerHTML = "", e.length ? e.forEach(s => { const o = document.createElement("div"); o.className = `model-item ${s.name === state.model ? "current" : ""}`; const i = s.size ? (s.size / 1e9).toFixed(1) + " GB" : "?"; o.innerHTML = `<span>${s.name.split(":")[0]}</span><span class="model-size">${i}</span>`, o.onclick = () => selectModel(s.name), t.appendChild(o) }) : t.innerHTML = '<div class="panel-placeholder">No models found</div>'); const n = document.getElementById("models-modal-body"); n && (n.innerHTML = "", e.length ? e.forEach(s => {
       const o = s.size ? (s.size / 1e9).toFixed(2) + " GB" : "Unknown", i = document.createElement("div"); i.className = `models-modal-item ${s.name === state.model ? "active" : ""}`, i.innerHTML = `
         <div><div class="model-info-name">${s.name}</div><div class="model-info-meta">${o} \xB7 ${s.details?.parameter_size || ""} \xB7 ${s.details?.quantization_level || ""}</div></div>
-        <button class="model-select-btn ${s.name === state.model ? "active-model" : ""}" onclick="selectModel('${s.name}'); closeModal('models-modal')">${s.name === state.model ? "\u2713 ACTIVE" : "SELECT"}</button>`, n.appendChild(i)
+        <button class="model-select-btn ${s.name === state.model ? "active-model" : ""}" data-action="selectModelAndClose" data-arg="${s.name}">${s.name === state.model ? "\u2713 ACTIVE" : "SELECT"}</button>`, n.appendChild(i)
     }) : n.innerHTML = '<div class="panel-placeholder">No models found.<br>Run: <code>ollama pull llama3.1:8b</code></div>')
   } function selectModel(e) { quickSwitchModel(e), closeModal("models-modal") } window.selectModel = selectModel; async function openHistory() { const e = await window.jarvis.listHistory(), t = document.getElementById("history-list"); if (t.innerHTML = "", !e.ok || !e.data.length) { t.innerHTML = '<div class="panel-placeholder" style="padding:24px">No saved sessions yet, sir.</div>', openModal("history-modal"); return } e.data.forEach(s => { const o = MODES[s.mode] || MODES.general, i = new Date(s.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }), a = document.createElement("div"); a.className = "history-item", a.innerHTML = '<div class="hist-mode-icon" style="color:' + o.color + ";background:" + o.color + "22;border:1px solid " + o.color + '44">' + o.icon + '</div><div class="hist-info"><div class="hist-title">' + escHtml(s.title || "Untitled Session") + '</div><div class="hist-meta">' + o.name + " \xB7 " + s.messageCount + " messages \xB7 " + i + `</div></div><button class="hist-delete-btn" onclick="deleteSession('` + s.id + `', event)" title="Delete">\u2715</button>`, a.onclick = () => loadSession(s), t.appendChild(a) }); const n = document.getElementById("history-search"); n && (n.value = "", n.oninput = () => { const s = n.value.toLowerCase(); t.querySelectorAll(".history-item").forEach(o => { o.style.display = o.textContent.toLowerCase().includes(s) ? "" : "none" }) }), openModal("history-modal") } async function loadSession(e) { const t = await window.jarvis.loadHistory(e.id); if (!t.ok || !t.data) { showToast("Could not load session.", "error"); return } const n = t.data; state.conversations[n.mode] = n, closeModal("history-modal"), setMode(n.mode), renderConversation(n.mode), showToast("Session restored: " + (n.title || "Untitled"), "success") } async function deleteSession(e, t) { t.stopPropagation(), await window.jarvis.deleteHistory(e), showToast("Session deleted.", "info"), openHistory(), await updateSessionCount() } window.deleteSession = deleteSession; async function exportChat() {
     const e = state.conversations[state.mode]; if (!e || !e.messages.length) { showToast("Nothing to export.", "error"); return } let n = `# JARVIS Session Export
@@ -561,7 +561,7 @@ Do NOT say "How can I help", "I am ready", or anything generic. Make it feel ali
 `+ o.content + `
 ---
 `}); const s = await window.jarvis.saveDialog("jarvis-" + state.mode + "-" + Date.now() + ".md", n); s.ok && showToast("Exported to " + s.filePath, "success")
-  } const THEMES = { ironman: { name: "IRON MAN", attr: "", label: "Iron Man HUD \u2014 Default" }, phantom: { name: "PHANTOM", attr: "phantom", label: "Phantom \u2014 Blood Red" }, matrix: { name: "MATRIX", attr: "matrix", label: "Matrix \u2014 Terminal Green" }, nova: { name: "NOVA", attr: "nova", label: "Nova \u2014 Deep Space Purple" }, ghost: { name: "GHOST", attr: "ghost", label: "Ghost \u2014 Light Military" } }; function applyTheme(e) { const t = THEMES[e] || THEMES.ironman; state.theme = e, t.attr ? document.documentElement.setAttribute("data-theme", t.attr) : document.documentElement.removeAttribute("data-theme"), document.querySelectorAll(".theme-swatch").forEach(n => { const s = n.id.replace("cfg-theme-", "").replace("ham-theme-", ""); n.classList.toggle("active", s === e) }); try { const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.theme = e, localStorage.setItem("jarvis-settings", JSON.stringify(n)) } catch { } showToast("Theme: " + t.label, "info") } window.applyTheme = applyTheme; function loadSettings() { try { const e = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); state.endpoint = e.endpoint || "http://127.0.0.1:11434"; state.temperature = e.temperature ?? .7; state.ttsEnabled = e.ttsEnabled ?? !0; state.speechRate = e.speechRate ?? 1; state.speechPitch = e.speechPitch ?? 1; state.contextWindow = e.contextWindow ?? 20; if (e.model) { state.model = e.model; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); } else { state.model = "llama3.1:8b"; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); setTimeout(async () => { try { const res = await fetch(`${state.endpoint}/api/tags`, { signal: AbortSignal.timeout(3000) }); if (res.ok) { const data = await res.json(); if (data.models && data.models.length > 0) { const detected = data.models[0].name; state.model = detected; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.model = detected; localStorage.setItem("jarvis-settings", JSON.stringify(n)); showToast("Auto-detected LLM: " + detected, "success"); } } } catch (err) { } }, 1500); } if (e.theme && THEMES[e.theme]) { const t = THEMES[e.theme]; state.theme = e.theme; t.attr ? document.documentElement.setAttribute("data-theme", t.attr) : document.documentElement.removeAttribute("data-theme"); requestAnimationFrame(() => { document.querySelectorAll(".theme-swatch").forEach(n => { const s = n.id.replace("cfg-theme-", "").replace("ham-theme-", ""); n.classList.toggle("active", s === e.theme) }) }) } } catch { } } window.loadSettings = loadSettings; function saveSettings() { state.model = document.getElementById("cfg-model").value, state.endpoint = document.getElementById("cfg-endpoint").value.trim() || "http://127.0.0.1:11434", state.temperature = parseFloat(document.getElementById("cfg-temperature").value), state.ttsEnabled = document.getElementById("cfg-tts").checked, state.speechRate = parseFloat(document.getElementById("cfg-speech-rate").value), state.speechPitch = parseFloat(document.getElementById("cfg-speech-pitch").value), state.contextWindow = parseInt(document.getElementById("cfg-context").value), localStorage.setItem("jarvis-settings", JSON.stringify({ model: state.model, endpoint: state.endpoint, temperature: state.temperature, ttsEnabled: state.ttsEnabled, speechRate: state.speechRate, speechPitch: state.speechPitch, contextWindow: state.contextWindow, theme: state.theme || "ironman" })), $activeModelLabel && ($activeModelLabel.textContent = state.model), $pModel && ($pModel.textContent = state.model), $ttsBtn && $ttsBtn.classList.toggle("active", state.ttsEnabled), document.querySelectorAll(".model-preset-btn").forEach(e => { const t = e.getAttribute("onclick")?.match(/'([^']+)'/); e.classList.toggle("active", t && t[1] === state.model) }), closeModal("settings-modal"), showToast("Configuration saved, sir.", "success"), checkOllama() } window.saveSettings = saveSettings; function quickSwitchModel(e) { if (!e) return; state.model = e; try { const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.model = e, localStorage.setItem("jarvis-settings", JSON.stringify(n)) } catch { } $activeModelLabel && ($activeModelLabel.textContent = e), $pModel && ($pModel.textContent = e); const t = document.getElementById("cfg-model"); if (t) { let n = !1; for (const s of t.options) if (s.value === e) { t.value = e, n = !0; break } if (!n) { const s = document.createElement("option"); s.value = e, s.textContent = e + "  (custom)", t.appendChild(s), t.value = e } } document.querySelectorAll(".model-preset-btn").forEach(n => { const s = n.getAttribute("onclick")?.match(/'([^']+)'/); n.classList.toggle("active", s && s[1] === e) }), showToast(`\u25C8 Model \u2192 ${e}`, "success") } window.quickSwitchModel = quickSwitchModel; function resetSettings() { localStorage.removeItem("jarvis-settings"), window.loadSettings(), populateSettingsModal(), showToast("Defaults restored.", "info") } window.resetSettings = resetSettings; function populateSettingsModal() { const e = document.getElementById("cfg-model"); if (e) { let t = !1; for (const n of e.options) if (n.value === state.model) { t = !0; break } if (!t) { const n = document.createElement("option"); n.value = state.model, n.textContent = state.model + "  (custom)", e.appendChild(n) } e.value = state.model } document.getElementById("cfg-endpoint").value = state.endpoint, document.getElementById("cfg-temperature").value = state.temperature, document.getElementById("cfg-temp-val").textContent = state.temperature.toFixed(2), document.getElementById("cfg-tts").checked = state.ttsEnabled, document.getElementById("cfg-speech-rate").value = state.speechRate, document.getElementById("cfg-rate-val").textContent = `${state.speechRate.toFixed(1)}\xD7`, document.getElementById("cfg-speech-pitch").value = state.speechPitch, document.getElementById("cfg-pitch-val").textContent = state.speechPitch.toFixed(1), document.getElementById("cfg-context").value = state.contextWindow, document.getElementById("cfg-temperature").oninput = t => { document.getElementById("cfg-temp-val").textContent = parseFloat(t.target.value).toFixed(2) }, document.getElementById("cfg-speech-rate").oninput = t => { document.getElementById("cfg-rate-val").textContent = `${parseFloat(t.target.value).toFixed(1)}\xD7` }, document.getElementById("cfg-speech-pitch").oninput = t => { document.getElementById("cfg-pitch-val").textContent = parseFloat(t.target.value).toFixed(1) }, document.querySelectorAll(".model-preset-btn").forEach(t => { const n = t.getAttribute("onclick")?.match(/'([^']+)'/); t.classList.toggle("active", n && n[1] === state.model) }) } function openTerminalModal() { $termOutput.children.length || (termPrint("info", "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557"), termPrint("info", "\u2551       JARVIS TERMINAL v2.0           \u2551"), termPrint("info", "\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D"), termPrint("info", "Full system access. Type any command.")), openModal("terminal-modal"), setTimeout(() => $termInput.focus(), 100) } function termPrint(e, t) { const n = document.createElement("div"); n.className = `term-line ${e}`, n.textContent = t, $termOutput.appendChild(n), $termOutput.scrollTop = $termOutput.scrollHeight } async function runTerminalCommand(e) {
+  } const THEMES = { ironman: { name: "IRON MAN", attr: "", label: "Iron Man HUD \u2014 Default" }, phantom: { name: "PHANTOM", attr: "phantom", label: "Phantom \u2014 Blood Red" }, matrix: { name: "MATRIX", attr: "matrix", label: "Matrix \u2014 Terminal Green" }, nova: { name: "NOVA", attr: "nova", label: "Nova \u2014 Deep Space Purple" }, ghost: { name: "GHOST", attr: "ghost", label: "Ghost \u2014 Light Military" } }; function applyTheme(e) { const t = THEMES[e] || THEMES.ironman; state.theme = e, t.attr ? document.documentElement.setAttribute("data-theme", t.attr) : document.documentElement.removeAttribute("data-theme"), document.querySelectorAll(".theme-swatch").forEach(n => { const s = n.id.replace("cfg-theme-", "").replace("ham-theme-", ""); n.classList.toggle("active", s === e) }); try { const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.theme = e, localStorage.setItem("jarvis-settings", JSON.stringify(n)) } catch { } showToast("Theme: " + t.label, "info") } window.applyTheme = applyTheme; function loadSettings() { try { const e = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); state.endpoint = e.endpoint || "http://127.0.0.1:11434"; state.temperature = e.temperature ?? .7; state.ttsEnabled = e.ttsEnabled ?? !0; state.speechRate = e.speechRate ?? 1; state.speechPitch = e.speechPitch ?? 1; state.contextWindow = e.contextWindow ?? 20; if (e.model) { state.model = e.model; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); } else { state.model = "llama3.1:8b"; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); setTimeout(async () => { try { /* CSP FIX: replaced direct fetch() with IPC-proxied ollamaFetch */ const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' }); if (res && res.ok) { const data = JSON.parse(res.body); if (data.models && data.models.length > 0) { const detected = data.models[0].name; state.model = detected; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.model = detected; localStorage.setItem("jarvis-settings", JSON.stringify(n)); showToast("Auto-detected LLM: " + detected, "success"); } } } catch (err) { } }, 1500); } if (e.theme && THEMES[e.theme]) { const t = THEMES[e.theme]; state.theme = e.theme; t.attr ? document.documentElement.setAttribute("data-theme", t.attr) : document.documentElement.removeAttribute("data-theme"); requestAnimationFrame(() => { document.querySelectorAll(".theme-swatch").forEach(n => { const s = n.id.replace("cfg-theme-", "").replace("ham-theme-", ""); n.classList.toggle("active", s === e.theme) }) }) } } catch { } } window.loadSettings = loadSettings; function saveSettings() { state.model = document.getElementById("cfg-model").value, state.endpoint = document.getElementById("cfg-endpoint").value.trim() || "http://127.0.0.1:11434", state.temperature = parseFloat(document.getElementById("cfg-temperature").value), state.ttsEnabled = document.getElementById("cfg-tts").checked, state.speechRate = parseFloat(document.getElementById("cfg-speech-rate").value), state.speechPitch = parseFloat(document.getElementById("cfg-speech-pitch").value), state.contextWindow = parseInt(document.getElementById("cfg-context").value), localStorage.setItem("jarvis-settings", JSON.stringify({ model: state.model, endpoint: state.endpoint, temperature: state.temperature, ttsEnabled: state.ttsEnabled, speechRate: state.speechRate, speechPitch: state.speechPitch, contextWindow: state.contextWindow, theme: state.theme || "ironman" })), $activeModelLabel && ($activeModelLabel.textContent = state.model), $pModel && ($pModel.textContent = state.model), $ttsBtn && $ttsBtn.classList.toggle("active", state.ttsEnabled), document.querySelectorAll(".model-preset-btn").forEach(e => { const t = e.getAttribute("onclick")?.match(/'([^']+)'/); e.classList.toggle("active", t && t[1] === state.model) }), closeModal("settings-modal"), showToast("Configuration saved, sir.", "success"), checkOllama() } window.saveSettings = saveSettings; function quickSwitchModel(e) { if (!e) return; state.model = e; try { const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.model = e, localStorage.setItem("jarvis-settings", JSON.stringify(n)) } catch { } $activeModelLabel && ($activeModelLabel.textContent = e), $pModel && ($pModel.textContent = e); const t = document.getElementById("cfg-model"); if (t) { let n = !1; for (const s of t.options) if (s.value === e) { t.value = e, n = !0; break } if (!n) { const s = document.createElement("option"); s.value = e, s.textContent = e + "  (custom)", t.appendChild(s), t.value = e } } document.querySelectorAll(".model-preset-btn").forEach(n => { const s = n.getAttribute("onclick")?.match(/'([^']+)'/); n.classList.toggle("active", s && s[1] === e) }), showToast(`\u25C8 Model \u2192 ${e}`, "success") } window.quickSwitchModel = quickSwitchModel; function resetSettings() { localStorage.removeItem("jarvis-settings"), window.loadSettings(), populateSettingsModal(), showToast("Defaults restored.", "info") } window.resetSettings = resetSettings; function populateSettingsModal() { const e = document.getElementById("cfg-model"); if (e) { let t = !1; for (const n of e.options) if (n.value === state.model) { t = !0; break } if (!t) { const n = document.createElement("option"); n.value = state.model, n.textContent = state.model + "  (custom)", e.appendChild(n) } e.value = state.model } document.getElementById("cfg-endpoint").value = state.endpoint, document.getElementById("cfg-temperature").value = state.temperature, document.getElementById("cfg-temp-val").textContent = state.temperature.toFixed(2), document.getElementById("cfg-tts").checked = state.ttsEnabled, document.getElementById("cfg-speech-rate").value = state.speechRate, document.getElementById("cfg-rate-val").textContent = `${state.speechRate.toFixed(1)}\xD7`, document.getElementById("cfg-speech-pitch").value = state.speechPitch, document.getElementById("cfg-pitch-val").textContent = state.speechPitch.toFixed(1), document.getElementById("cfg-context").value = state.contextWindow, document.getElementById("cfg-temperature").oninput = t => { document.getElementById("cfg-temp-val").textContent = parseFloat(t.target.value).toFixed(2) }, document.getElementById("cfg-speech-rate").oninput = t => { document.getElementById("cfg-rate-val").textContent = `${parseFloat(t.target.value).toFixed(1)}\xD7` }, document.getElementById("cfg-speech-pitch").oninput = t => { document.getElementById("cfg-pitch-val").textContent = parseFloat(t.target.value).toFixed(1) }, document.querySelectorAll(".model-preset-btn").forEach(t => { const n = t.getAttribute("onclick")?.match(/'([^']+)'/); t.classList.toggle("active", n && n[1] === state.model) }) } function openTerminalModal() { $termOutput.children.length || (termPrint("info", "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557"), termPrint("info", "\u2551       JARVIS TERMINAL v2.0           \u2551"), termPrint("info", "\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D"), termPrint("info", "Full system access. Type any command.")), openModal("terminal-modal"), setTimeout(() => $termInput.focus(), 100) } function termPrint(e, t) { const n = document.createElement("div"); n.className = `term-line ${e}`, n.textContent = t, $termOutput.appendChild(n), $termOutput.scrollTop = $termOutput.scrollHeight } async function runTerminalCommand(e) {
     if (!e.trim()) return; let t = "safe"; try { t = (await window.jarvis.secClassifyCmd(e))?.verdict || "safe" } catch { } if (t === "blocked") { termPrint("cmd", `JARVIS $> ${e}`), termPrint("err", "\u26D4 BLOCKED \u2014 Command rejected by JARVIS Security Policy."), termPrint("err", "This command is classified as destructive or dangerous."), termPrint("info", "[exit BLOCKED]"), showToast("\u26D4 Command blocked by security policy.", "error"); return } if (t === "warn" && !await showTerminalConfirm(e)) { termPrint("info", "[\u26A0 Command cancelled by user]"); return } state.terminalHistory.unshift(e), state.termHistoryIdx = -1, termPrint("cmd", `JARVIS $> ${e}${t === "warn" ? " \u26A0 CAUTION" : ""}`); const s = await window.jarvis.runCommand(e); if (s.error && (s.error.includes("\u26D4") || s.error.includes("BLOCKED"))) { termPrint("err", s.error), termPrint("info", "[exit BLOCKED]"); return } s.stdout && s.stdout.split(`
 `).forEach(o => o && termPrint("out", o)), s.stderr && s.stderr.split(`
 `).forEach(o => o && termPrint("err", o)), s.error && !s.stdout && !s.stderr && termPrint("err", s.error), termPrint("info", `[exit ${s.exitCode ?? 0}]`)
@@ -601,7 +601,7 @@ Do NOT say "How can I help", "I am ready", or anything generic. Make it feel ali
         <div class="tech-label-sub">SYSTEMS INTEGRATED</div>
       </div>
     </div>
-    <div class="dash-gen-chips-new">${["What can you help me with today?", "Explain quantum computing simply", "Give me 5 productivity tips", "Help me write a professional email", "Debug my code \u2014 I'll paste it", "Generate a Python automation script", "Research the latest in AI", "Build a React component for me"].map(n => `<button class="welcome-chip" onclick="injectPrompt(${JSON.stringify(n)})">${escHtml(n)}</button>`).join("")}</div>
+    <div class="dash-gen-chips-new">${["What can you help me with today?", "Explain quantum computing simply", "Give me 5 productivity tips", "Help me write a professional email", "Debug my code \u2014 I'll paste it", "Generate a Python automation script", "Research the latest in AI", "Build a React component for me"].map(n => `<button class="welcome-chip" data-action="injectPrompt" data-arg-json="${JSON.stringify(n)}">${escHtml(n)}</button>`).join("")}</div>
   </div>`} function initOrbCanvas() {
     const e = document.getElementById("jarvis-orb-canvas");
     if (!e) return null;
@@ -652,18 +652,18 @@ Do NOT say "How can I help", "I am ready", or anything generic. Make it feel ali
     return `<div class="mode-dashboard dash-code">
     <div class="dash-code-topbar">
       <div class="dash-code-controls">
-        <select id="code-lang" class="dash-select" onchange="onCodeLangChange()">
+        <select id="code-lang" class="dash-select" data-change="onCodeLangChange">
           <option value="python">Python</option>
           <option value="javascript">JavaScript (Node)</option>
           <option value="powershell">PowerShell</option>
           <option value="bash">Bash / Shell</option>
         </select>
-        <button class="dash-btn dash-btn-green" onclick="runDashCode()">\u25B6 RUN</button>
-        <button class="dash-btn" onclick="clearDashCode()">\u2298 CLEAR</button>
+        <button class="dash-btn dash-btn-green" data-action="runDashCode">\u25B6 RUN</button>
+        <button class="dash-btn" data-action="clearDashCode">\u2298 CLEAR</button>
         <div class="dash-sep"></div>
-        <button class="dash-btn dash-btn-cyan" onclick="reviewWithJarvis()">\u2B21 REVIEW</button>
-        <button class="dash-btn" onclick="explainWithJarvis()">\u25CE EXPLAIN</button>
-        <button class="dash-btn" onclick="optimizeWithJarvis()">\u26A1 OPTIMIZE</button>
+        <button class="dash-btn dash-btn-cyan" data-action="reviewWithJarvis">\u2B21 REVIEW</button>
+        <button class="dash-btn" data-action="explainWithJarvis">\u25CE EXPLAIN</button>
+        <button class="dash-btn" data-action="optimizeWithJarvis">\u26A1 OPTIMIZE</button>
       </div>
       <span id="code-line-count" class="code-meta">0 lines \xB7 0 chars</span>
     </div>
@@ -685,7 +685,7 @@ print(now.strftime("%A, %d %B %Y  %H:%M:%S"))`}, {
         label: "JSON Parse", code: `import json
 data = '{"name": "JARVIS", "version": 2}'
 obj = json.loads(data)
-print(obj["name"], obj["version"])`}].map(n => `<button class="template-chip" onclick="loadCodeTemplate(${JSON.stringify(n.code)})">${n.label}</button>`).join("")}
+print(obj["name"], obj["version"])`}].map(n => `<button class="template-chip" data-action="loadCodeTemplate" data-arg-json="${JSON.stringify(n.code)}">${n.label}</button>`).join("")}
     </div>
     <div class="dash-code-workspace">
       <div class="code-editor-panel">
@@ -697,8 +697,8 @@ print(obj["name"], obj["version"])`}].map(n => `<button class="template-chip" on
         <div class="code-panel-hdr">
           <span>OUTPUT</span>
           <div class="phdr-actions">
-            <button class="micro-btn" onclick="clearCodeOutput()">CLEAR</button>
-            <button class="micro-btn" onclick="sendOutputToJarvis()">ASK JARVIS</button>
+            <button class="micro-btn" data-action="clearCodeOutput">CLEAR</button>
+            <button class="micro-btn" data-action="sendOutputToJarvis">ASK JARVIS</button>
           </div>
         </div>
         <div id="dash-code-output" class="dash-code-output">
@@ -747,8 +747,8 @@ ${e}
         <div class="debug-phdr">
           <span>\u26A0 PASTE ERROR / STACK TRACE</span>
           <div class="phdr-actions">
-            <button class="micro-btn" onclick="clearErrorInput()">CLEAR</button>
-            <button class="dash-btn dash-btn-orange" onclick="analyzeError()">\u26A0 ANALYZE</button>
+            <button class="micro-btn" data-action="clearErrorInput">CLEAR</button>
+            <button class="dash-btn dash-btn-orange" data-action="analyzeError">\u26A0 ANALYZE</button>
           </div>
         </div>
         <textarea id="debug-error-input" class="debug-textarea" spellcheck="false"
@@ -761,14 +761,14 @@ Traceback (most recent call last):
 KeyError: 'user_id'"></textarea>
         <div class="debug-patterns">
           <span class="pat-label">QUICK ANALYZE:</span>
-          <button class="pat-chip" onclick="debugPattern('memory leak')">Memory Leak</button>
-          <button class="pat-chip" onclick="debugPattern('null pointer / undefined reference')">Null Reference</button>
-          <button class="pat-chip" onclick="debugPattern('race condition / concurrency bug')">Race Condition</button>
-          <button class="pat-chip" onclick="debugPattern('infinite loop')">Infinite Loop</button>
-          <button class="pat-chip" onclick="debugPattern('CORS error')">CORS Error</button>
-          <button class="pat-chip" onclick="debugPattern('type mismatch / type error')">Type Error</button>
-          <button class="pat-chip" onclick="debugPattern('SQL injection vulnerability')">SQL Injection</button>
-          <button class="pat-chip" onclick="debugPattern('async/await / promise rejection')">Promise Error</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="memory leak">Memory Leak</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="null pointer / undefined reference">Null Reference</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="race condition / concurrency bug">Race Condition</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="infinite loop">Infinite Loop</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="CORS error">CORS Error</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="type mismatch / type error">Type Error</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="SQL injection vulnerability">SQL Injection</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="async/await / promise rejection">Promise Error</button>
         </div>
       </div>
       <div class="debug-proc-panel">
@@ -776,7 +776,7 @@ KeyError: 'user_id'"></textarea>
           <span>\u25C8 LIVE PROCESSES</span>
           <div class="phdr-actions">
             <span id="proc-refresh-time" class="meta-txt">\u2014</span>
-            <button class="micro-btn" onclick="refreshProcesses()">\u21BB</button>
+            <button class="micro-btn" data-action="refreshProcesses">\u21BB</button>
           </div>
         </div>
         <div class="proc-list-hdr"><span>PROCESS</span><span>CPU(s)</span><span>MEM(MB)</span></div>
@@ -786,7 +786,7 @@ KeyError: 'user_id'"></textarea>
     <div class="debug-footer">
       <div class="dbg-stat"><span class="dbg-stat-label">TOP PROCESS</span><span class="dbg-stat-val" id="dbg-top">\u2014</span></div>
       <div class="dbg-stat"><span class="dbg-stat-label">LAST REFRESH</span><span class="dbg-stat-val" id="dbg-time">\u2014</span></div>
-      <button class="dash-btn dash-btn-orange" onclick="analyzeSystem()">\u2B21 ANALYZE MY SYSTEM WITH JARVIS</button>
+      <button class="dash-btn dash-btn-orange" data-action="analyzeSystem">\u2B21 ANALYZE MY SYSTEM WITH JARVIS</button>
     </div>
   </div>`} function initDebugDash() { refreshProcesses(); const e = setInterval(() => { document.getElementById("debug-proc-list") ? refreshProcesses() : clearInterval(e) }, 3e4); return [() => clearInterval(e)] } window.refreshProcesses = async function () {
     if (!document.getElementById("debug-proc-list") || state.isStreaming) return; const t = await window.jarvis.runCommand("tasklist /FO CSV /NH"); if (!document.getElementById("debug-proc-list")) return; const n = document.getElementById("dbg-time"); if (n && (n.textContent = new Date().toLocaleTimeString()), t.stdout) {
@@ -798,14 +798,14 @@ KeyError: 'user_id'"></textarea>
 ${e}
 \`\`\``)
   }, window.clearErrorInput = function () { const e = document.getElementById("debug-error-input"); e && (e.value = "") }, window.debugPattern = function (e) { dashSend(`Explain what causes "${e}" bugs, how to detect them, and the best strategies to fix and prevent them. Include concrete code examples.`) }, window.analyzeSystem = function () { dashSend("Analyze common Windows performance issues, potential process bottlenecks, and system health checks I should run. Give me a diagnostic checklist.") }; function dashResearch() {
-    const e = localStorage.getItem("jarvis-research-notes") || "", t = JSON.parse(localStorage.getItem("jarvis-research-questions") || "[]"), n = JSON.parse(localStorage.getItem("jarvis-research-outline") || "[]"), s = t.map((i, a) => `<div class="list-item"><span class="li-bullet">\u25CE</span><span>${escHtml(i)}</span><button class="item-del" onclick="removeQuestion(${a})">\u2715</button></div>`).join("") || '<div class="list-ph">Add questions to guide your research</div>', o = n.map((i, a) => `<div class="list-item"><span class="li-bullet">\u203A</span><span>${escHtml(i)}</span><button class="item-del" onclick="removeOutlineItem(${a})">\u2715</button></div>`).join("") || '<div class="list-ph">Add outline items or ask JARVIS to generate one</div>'; return `<div class="mode-dashboard dash-research">
+    const e = localStorage.getItem("jarvis-research-notes") || "", t = JSON.parse(localStorage.getItem("jarvis-research-questions") || "[]"), n = JSON.parse(localStorage.getItem("jarvis-research-outline") || "[]"), s = t.map((i, a) => `<div class="list-item"><span class="li-bullet">\u25CE</span><span>${escHtml(i)}</span><button class="item-del" data-action="removeQuestion" data-arg-json="${a}">\u2715</button></div>`).join("") || '<div class="list-ph">Add questions to guide your research</div>', o = n.map((i, a) => `<div class="list-item"><span class="li-bullet">\u203A</span><span>${escHtml(i)}</span><button class="item-del" data-action="removeOutlineItem" data-arg-json="${a}">\u2715</button></div>`).join("") || '<div class="list-ph">Add outline items or ask JARVIS to generate one</div>'; return `<div class="mode-dashboard dash-research">
     <div class="research-topbar">
       <span class="res-icon">\u25CE</span>
       <input type="text" id="research-topic" class="research-topic-input" placeholder="Enter research topic, question, or domain\u2026"
-        onkeydown="if(event.key==='Enter') window.startResearch()">
-      <button class="dash-btn dash-btn-purple" onclick="window.startResearch()">\u2B21 RESEARCH</button>
-      <button class="dash-btn" onclick="window.generateOutline()">\u2261 OUTLINE</button>
-      <button class="dash-btn" onclick="window.findSources()">\u238B SOURCES</button>
+        data-keydown-enter="window.startResearch">
+      <button class="dash-btn dash-btn-purple" data-action="window.startResearch">\u2B21 RESEARCH</button>
+      <button class="dash-btn" data-action="window.generateOutline">\u2261 OUTLINE</button>
+      <button class="dash-btn" data-action="window.findSources">\u238B SOURCES</button>
     </div>
     <div class="research-workspace">
       <div class="research-notes-panel">
@@ -813,8 +813,8 @@ ${e}
           <span>\u{1F4C4} NOTES</span>
           <div class="phdr-actions">
             <span id="notes-saved" class="save-ind">\u2014</span>
-            <button class="micro-btn" onclick="window.clearResearchNotes()">CLEAR</button>
-            <button class="micro-btn" onclick="window.sendNotesToJarvis()">ASK JARVIS</button>
+            <button class="micro-btn" data-action="window.clearResearchNotes">CLEAR</button>
+            <button class="micro-btn" data-action="window.sendNotesToJarvis">ASK JARVIS</button>
           </div>
         </div>
         <textarea id="research-notes" class="research-notes-ta"
@@ -825,29 +825,29 @@ ${e}
           <div class="res-phdr">
             <span>\u2261 OUTLINE</span>
             <div class="phdr-actions">
-              <button class="micro-btn" onclick="window.addOutlineItem()">+ ADD</button>
-              <button class="micro-btn" onclick="window.clearOutline()">CLEAR</button>
+              <button class="micro-btn" data-action="window.addOutlineItem">+ ADD</button>
+              <button class="micro-btn" data-action="window.clearOutline">CLEAR</button>
             </div>
           </div>
           <div id="research-outline" class="res-list">${o}</div>
           <input type="text" id="outline-input" class="list-input" placeholder="Add outline item\u2026"
-            onkeydown="if(event.key==='Enter') window.addOutlineItem()">
+            data-keydown-enter="window.addOutlineItem">
         </div>
         <div class="research-questions-panel">
           <div class="res-phdr">
             <span>? KEY QUESTIONS</span>
             <div class="phdr-actions">
-              <button class="micro-btn" onclick="window.generateQuestions()">\u2B21 GENERATE</button>
-              <button class="micro-btn" onclick="window.clearQuestions()">CLEAR</button>
+              <button class="micro-btn" data-action="window.generateQuestions">\u2B21 GENERATE</button>
+              <button class="micro-btn" data-action="window.clearQuestions">CLEAR</button>
             </div>
           </div>
           <div id="research-questions" class="res-list">${s}</div>
           <input type="text" id="question-input" class="list-input" placeholder="Add research question\u2026"
-            onkeydown="if(event.key==='Enter') window.addQuestion()">
+            data-keydown-enter="window.addQuestion">
         </div>
       </div>
     </div>
-  </div>`} function initResearchDash() { const e = document.getElementById("research-notes"); let t = null; return e && e.addEventListener("input", () => { clearTimeout(t), t = setTimeout(() => { localStorage.setItem("jarvis-research-notes", e.value); const n = document.getElementById("notes-saved"); n && (n.textContent = "SAVED", setTimeout(() => { n && (n.textContent = "\u2014") }, 1500)) }, 1200) }), [() => clearTimeout(t)] } window.startResearch = function () { const e = document.getElementById("research-topic")?.value?.trim(); if (!e) { showToast("Enter a topic first.", "error"); return } dashSend(`Conduct comprehensive research on: "${e}"Provide: overview, key concepts, current state, important findings, contrasting viewpoints, and recommended resources.`) }, window.generateOutline = function () { const e = document.getElementById("research-topic")?.value?.trim() || "the research topic"; dashSend(`Generate a detailed research outline for: "${e}". Include main sections, subsections, and key questions.`) }, window.findSources = function () { const e = document.getElementById("research-topic")?.value?.trim() || "the research topic"; dashSend(`What are the best sources, books, papers, websites, and databases for researching: "${e}"?`) }, window.sendNotesToJarvis = function () { const e = document.getElementById("research-notes")?.value?.trim(); if (!e) { showToast("Add notes first.", "error"); return } dashSend(`Review my research notes. Provide insights, fill gaps, correct errors, and suggest areas to explore:${e}`) }, window.clearResearchNotes = function () { const e = document.getElementById("research-notes"); e && (e.value = "", localStorage.removeItem("jarvis-research-notes")) }, window.generateQuestions = function () { const e = document.getElementById("research-topic")?.value?.trim() || "the research topic"; dashSend(`Generate 8-10 deep research questions for: "${e}". Include fundamental and advanced questions.`) }, window.clearQuestions = function () { localStorage.removeItem("jarvis-research-questions"); const e = document.getElementById("research-questions"); e && (e.innerHTML = '<div class="list-ph">Add questions to guide your research</div>') }, window.clearOutline = function () { localStorage.removeItem("jarvis-research-outline"); const e = document.getElementById("research-outline"); e && (e.innerHTML = '<div class="list-ph">Add outline items or ask JARVIS to generate one</div>') }; function resRerender(e, t, n, s) { const o = JSON.parse(localStorage.getItem(e) || "[]"), i = document.getElementById(t); return i && (i.innerHTML = o.map(s).join("") || `<div class="list-ph">${n}</div>`), o } window.addQuestion = function () { const e = document.getElementById("question-input"); if (!e?.value?.trim()) return; const t = JSON.parse(localStorage.getItem("jarvis-research-questions") || "[]"); t.push(e.value.trim()), localStorage.setItem("jarvis-research-questions", JSON.stringify(t)), e.value = "", resRerender("jarvis-research-questions", "research-questions", "Add questions", (n, s) => `<div class="list-item"><span class="li-bullet">\u25CE</span><span>${escHtml(n)}</span><button class="item-del" onclick="removeQuestion(${s})">\u2715</button></div>`) }, window.removeQuestion = function (e) { const t = JSON.parse(localStorage.getItem("jarvis-research-questions") || "[]"); t.splice(e, 1), localStorage.setItem("jarvis-research-questions", JSON.stringify(t)), resRerender("jarvis-research-questions", "research-questions", "Add questions", (n, s) => `<div class="list-item"><span class="li-bullet">\u25CE</span><span>${escHtml(n)}</span><button class="item-del" onclick="removeQuestion(${s})">\u2715</button></div>`) }, window.addOutlineItem = function () { const e = document.getElementById("outline-input"); if (!e?.value?.trim()) return; const t = JSON.parse(localStorage.getItem("jarvis-research-outline") || "[]"); t.push(e.value.trim()), localStorage.setItem("jarvis-research-outline", JSON.stringify(t)), e.value = "", resRerender("jarvis-research-outline", "research-outline", "Add outline items", (n, s) => `<div class="list-item"><span class="li-bullet">\u203A</span><span>${escHtml(n)}</span><button class="item-del" onclick="removeOutlineItem(${s})">\u2715</button></div>`) }, window.removeOutlineItem = function (e) { const t = JSON.parse(localStorage.getItem("jarvis-research-outline") || "[]"); t.splice(e, 1), localStorage.setItem("jarvis-research-outline", JSON.stringify(t)), resRerender("jarvis-research-outline", "research-outline", "Add outline items", (n, s) => `<div class="list-item"><span class="li-bullet">\u203A</span><span>${escHtml(n)}</span><button class="item-del" onclick="removeOutlineItem(${s})">\u2715</button></div>`) }; function dashAutomation() {
+  </div>`} function initResearchDash() { const e = document.getElementById("research-notes"); let t = null; return e && e.addEventListener("input", () => { clearTimeout(t), t = setTimeout(() => { localStorage.setItem("jarvis-research-notes", e.value); const n = document.getElementById("notes-saved"); n && (n.textContent = "SAVED", setTimeout(() => { n && (n.textContent = "\u2014") }, 1500)) }, 1200) }), [() => clearTimeout(t)] } window.startResearch = function () { const e = document.getElementById("research-topic")?.value?.trim(); if (!e) { showToast("Enter a topic first.", "error"); return } dashSend(`Conduct comprehensive research on: "${e}"Provide: overview, key concepts, current state, important findings, contrasting viewpoints, and recommended resources.`) }, window.generateOutline = function () { const e = document.getElementById("research-topic")?.value?.trim() || "the research topic"; dashSend(`Generate a detailed research outline for: "${e}". Include main sections, subsections, and key questions.`) }, window.findSources = function () { const e = document.getElementById("research-topic")?.value?.trim() || "the research topic"; dashSend(`What are the best sources, books, papers, websites, and databases for researching: "${e}"?`) }, window.sendNotesToJarvis = function () { const e = document.getElementById("research-notes")?.value?.trim(); if (!e) { showToast("Add notes first.", "error"); return } dashSend(`Review my research notes. Provide insights, fill gaps, correct errors, and suggest areas to explore:${e}`) }, window.clearResearchNotes = function () { const e = document.getElementById("research-notes"); e && (e.value = "", localStorage.removeItem("jarvis-research-notes")) }, window.generateQuestions = function () { const e = document.getElementById("research-topic")?.value?.trim() || "the research topic"; dashSend(`Generate 8-10 deep research questions for: "${e}". Include fundamental and advanced questions.`) }, window.clearQuestions = function () { localStorage.removeItem("jarvis-research-questions"); const e = document.getElementById("research-questions"); e && (e.innerHTML = '<div class="list-ph">Add questions to guide your research</div>') }, window.clearOutline = function () { localStorage.removeItem("jarvis-research-outline"); const e = document.getElementById("research-outline"); e && (e.innerHTML = '<div class="list-ph">Add outline items or ask JARVIS to generate one</div>') }; function resRerender(e, t, n, s) { const o = JSON.parse(localStorage.getItem(e) || "[]"), i = document.getElementById(t); return i && (i.innerHTML = o.map(s).join("") || `<div class="list-ph">${n}</div>`), o } window.addQuestion = function () { const e = document.getElementById("question-input"); if (!e?.value?.trim()) return; const t = JSON.parse(localStorage.getItem("jarvis-research-questions") || "[]"); t.push(e.value.trim()), localStorage.setItem("jarvis-research-questions", JSON.stringify(t)), e.value = "", resRerender("jarvis-research-questions", "research-questions", "Add questions", (n, s) => `<div class="list-item"><span class="li-bullet">\u25CE</span><span>${escHtml(n)}</span><button class="item-del" data-action="removeQuestion" data-arg-json="${s}">\u2715</button></div>`) }, window.removeQuestion = function (e) { const t = JSON.parse(localStorage.getItem("jarvis-research-questions") || "[]"); t.splice(e, 1), localStorage.setItem("jarvis-research-questions", JSON.stringify(t)), resRerender("jarvis-research-questions", "research-questions", "Add questions", (n, s) => `<div class="list-item"><span class="li-bullet">\u25CE</span><span>${escHtml(n)}</span><button class="item-del" data-action="removeQuestion" data-arg-json="${s}">\u2715</button></div>`) }, window.addOutlineItem = function () { const e = document.getElementById("outline-input"); if (!e?.value?.trim()) return; const t = JSON.parse(localStorage.getItem("jarvis-research-outline") || "[]"); t.push(e.value.trim()), localStorage.setItem("jarvis-research-outline", JSON.stringify(t)), e.value = "", resRerender("jarvis-research-outline", "research-outline", "Add outline items", (n, s) => `<div class="list-item"><span class="li-bullet">\u203A</span><span>${escHtml(n)}</span><button class="item-del" data-action="removeOutlineItem" data-arg-json="${s}">\u2715</button></div>`) }, window.removeOutlineItem = function (e) { const t = JSON.parse(localStorage.getItem("jarvis-research-outline") || "[]"); t.splice(e, 1), localStorage.setItem("jarvis-research-outline", JSON.stringify(t)), resRerender("jarvis-research-outline", "research-outline", "Add outline items", (n, s) => `<div class="list-item"><span class="li-bullet">\u203A</span><span>${escHtml(n)}</span><button class="item-del" data-action="removeOutlineItem" data-arg-json="${s}">\u2715</button></div>`) }; function dashAutomation() {
     return `<div class="mode-dashboard dash-auto">
     <div class="auto-left">
       <div class="auto-editor-hdr">
@@ -856,10 +856,10 @@ ${e}
           <option value="python">Python</option>
           <option value="bash">Bash</option>
         </select>
-        <button class="dash-btn dash-btn-yellow" onclick="runAutoScript()">\u25B6 EXECUTE</button>
-        <button class="dash-btn" onclick="clearAutoScript()">\u2298 CLEAR</button>
-        <button class="dash-btn dash-btn-cyan" onclick="generateAutoScript()">\u2B21 GENERATE</button>
-        <button class="dash-btn" onclick="scheduleScript()">\u23F1 SCHEDULE</button>
+        <button class="dash-btn dash-btn-yellow" data-action="runAutoScript">\u25B6 EXECUTE</button>
+        <button class="dash-btn" data-action="clearAutoScript">\u2298 CLEAR</button>
+        <button class="dash-btn dash-btn-cyan" data-action="generateAutoScript">\u2B21 GENERATE</button>
+        <button class="dash-btn" data-action="scheduleScript">\u23F1 SCHEDULE</button>
       </div>
       <textarea id="auto-editor" class="auto-editor-ta" spellcheck="false"
         placeholder="# Write or generate your automation script here\u2026&#10;# Pick a quick template below or ask JARVIS to generate one"></textarea>
@@ -868,7 +868,7 @@ ${e}
         name: "File Backup", lang: "powershell", code: `$src = "$env:USERPROFILE\\Documents"
 $dst = "$env:USERPROFILE\\Desktop\\Backup_$(Get-Date -Format "yyyyMMdd_HHmmss")"
 Copy-Item $src $dst -Recurse -Force
-Write-Host "Backup complete: $dst"`}, { name: "Event Log Errors", lang: "powershell", code: "Get-EventLog -LogName System -Newest 5 -EntryType Error | Select-Object TimeGenerated, Source, Message | Format-List" }].map(n => `<button class="auto-tpl-chip" onclick="loadAutoTemplate(${JSON.stringify(n.lang)},${JSON.stringify(n.code)})">${n.name}</button>`).join("")}
+Write-Host "Backup complete: $dst"`}, { name: "Event Log Errors", lang: "powershell", code: "Get-EventLog -LogName System -Newest 5 -EntryType Error | Select-Object TimeGenerated, Source, Message | Format-List" }].map(n => `<button class="auto-tpl-chip" data-action="loadAutoTemplate" data-arg1="${n.lang}" data-arg2="${n.code}">${n.name}</button>`).join("")}
       </div>
     </div>
     <div class="auto-right">
@@ -876,8 +876,8 @@ Write-Host "Backup complete: $dst"`}, { name: "Event Log Errors", lang: "powersh
         <span>\u2328 EXECUTION OUTPUT</span>
         <div class="phdr-actions">
           <span id="auto-exec-time" class="meta-txt">\u2014</span>
-          <button class="micro-btn" onclick="clearAutoOutput()">CLEAR</button>
-          <button class="micro-btn" onclick="analyzeAutoOutput()">ANALYZE</button>
+          <button class="micro-btn" data-action="clearAutoOutput">CLEAR</button>
+          <button class="micro-btn" data-action="analyzeAutoOutput">ANALYZE</button>
         </div>
       </div>
       <div id="auto-output" class="auto-output">
@@ -901,24 +901,24 @@ ${e}
       <input type="range" class="kpi-slider" min="0" max="100" value="${a.progress}" oninput="updateKPIProg(${c},this.value)">
     </div>`).join(""), i = n.map((a, c) => `
     <div class="goal-item ${a.done ? "done" : ""}">
-      <input type="checkbox" ${a.done ? "checked" : ""} onchange="toggleGoal(${c})" id="g-${c}">
+      <input type="checkbox" ${a.done ? "checked" : ""} data-change="toggleGoal" data-arg="${c}" id="g-${c}">
       <label for="g-${c}">${escHtml(a.text)}</label>
       <span class="goal-pri goal-${a.priority.toLowerCase()}">${a.priority}</span>
-      <button class="item-del" onclick="deleteGoal(${c})">\u2715</button>
+      <button class="item-del" data-action="deleteGoal" data-arg-json="${c}">\u2715</button>
     </div>`).join("") || '<div class="list-ph">Add your strategic goals</div>'; return `<div class="mode-dashboard dash-biz">
     <div class="biz-kpi-row">${o}</div>
     <div class="biz-bottom">
       <div class="biz-goals-panel">
-        <div class="biz-phdr"><span>\u25B2 STRATEGIC GOALS</span><button class="micro-btn" onclick="askGoalsJarvis()">\u2B21 JARVIS</button></div>
+        <div class="biz-phdr"><span>\u25B2 STRATEGIC GOALS</span><button class="micro-btn" data-action="askGoalsJarvis">\u2B21 JARVIS</button></div>
         <div id="goals-list" class="goals-list">${i}</div>
         <div class="biz-add-row">
-          <input type="text" id="goal-input" class="list-input" placeholder="Add goal\u2026" onkeydown="if(event.key==='Enter') addGoal()">
+          <input type="text" id="goal-input" class="list-input" placeholder="Add goal\u2026" data-keydown-enter="addGoal">
           <select id="goal-priority" class="mini-sel"><option>HIGH</option><option selected>MED</option><option>LOW</option></select>
-          <button class="dash-btn-sm" onclick="addGoal()">+</button>
+          <button class="dash-btn-sm" data-action="addGoal">+</button>
         </div>
       </div>
       <div class="biz-swot-panel">
-        <div class="biz-phdr"><span>\u25C8 SWOT ANALYSIS</span><div class="phdr-actions"><button class="micro-btn" onclick="analyzeSwot()">\u2B21 ANALYZE</button><button class="micro-btn" onclick="saveSwot()">SAVE</button></div></div>
+        <div class="biz-phdr"><span>\u25C8 SWOT ANALYSIS</span><div class="phdr-actions"><button class="micro-btn" data-action="analyzeSwot">\u2B21 ANALYZE</button><button class="micro-btn" data-action="saveSwot">SAVE</button></div></div>
         <div class="swot-grid">
           <div class="swot-cell swot-s"><div class="swot-label">STRENGTHS</div><textarea id="swot-s" class="swot-ta" placeholder="Internal strengths\u2026">${escHtml(s.s)}</textarea></div>
           <div class="swot-cell swot-w"><div class="swot-label">WEAKNESSES</div><textarea id="swot-w" class="swot-ta" placeholder="Internal weaknesses\u2026">${escHtml(s.w)}</textarea></div>
@@ -929,23 +929,23 @@ ${e}
       <div class="biz-ask-panel">
         <div class="biz-phdr"><span>\u2B21 STRATEGY ADVISOR</span></div>
         <div class="biz-asks">
-          <button class="biz-ask-btn" onclick="bizAsk('growth strategy')">Growth Strategy</button>
-          <button class="biz-ask-btn" onclick="bizAsk('competitive analysis')">Competitive Analysis</button>
-          <button class="biz-ask-btn" onclick="bizAsk('revenue optimization')">Revenue Optimization</button>
-          <button class="biz-ask-btn" onclick="bizAsk('market expansion')">Market Expansion</button>
-          <button class="biz-ask-btn" onclick="bizAsk('risk assessment and mitigation')">Risk Assessment</button>
-          <button class="biz-ask-btn" onclick="bizAsk('fundraising and investor strategy')">Fundraising</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="growth strategy">Growth Strategy</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="competitive analysis">Competitive Analysis</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="revenue optimization">Revenue Optimization</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="market expansion">Market Expansion</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="risk assessment and mitigation">Risk Assessment</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="fundraising and investor strategy">Fundraising</button>
         </div>
-        <button class="dash-btn dash-btn-yellow fw-btn" onclick="fullBizAnalysis()">\u2B21 FULL STRATEGIC ANALYSIS</button>
+        <button class="dash-btn dash-btn-yellow fw-btn" data-action="fullBizAnalysis">\u2B21 FULL STRATEGIC ANALYSIS</button>
       </div>
     </div>
   </div>`} function initBizDash() { return [] } window.saveKPI = function (e, t) { const n = JSON.parse(localStorage.getItem("jarvis-kpis") || "null") || []; n[e] && (n[e].value = t, localStorage.setItem("jarvis-kpis", JSON.stringify(n))) }, window.updateKPIProg = function (e, t) { const n = document.getElementById(`kpi-bar-${e}`); n && (n.style.width = t + "%"); const s = JSON.parse(localStorage.getItem("jarvis-kpis") || "null") || []; s[e] && (s[e].progress = parseInt(t), localStorage.setItem("jarvis-kpis", JSON.stringify(s))) }, window.addGoal = function () { const e = document.getElementById("goal-input"), t = document.getElementById("goal-priority")?.value || "MED"; if (!e?.value?.trim()) return; const n = JSON.parse(localStorage.getItem("jarvis-goals") || "[]"); n.push({ id: Date.now(), text: e.value.trim(), priority: t, done: !1 }), localStorage.setItem("jarvis-goals", JSON.stringify(n)), e.value = "", renderGoals(n) }, window.toggleGoal = function (e) { const t = JSON.parse(localStorage.getItem("jarvis-goals") || "[]"); t[e] && (t[e].done = !t[e].done, localStorage.setItem("jarvis-goals", JSON.stringify(t)), renderGoals(t)) }, window.deleteGoal = function (e) { const t = JSON.parse(localStorage.getItem("jarvis-goals") || "[]"); t.splice(e, 1), localStorage.setItem("jarvis-goals", JSON.stringify(t)), renderGoals(t) }; function renderGoals(e) {
     const t = document.getElementById("goals-list"); t && (t.innerHTML = e.map((n, s) => `
     <div class="goal-item ${n.done ? "done" : ""}">
-      <input type="checkbox" ${n.done ? "checked" : ""} onchange="toggleGoal(${s})" id="g-${s}">
+      <input type="checkbox" ${n.done ? "checked" : ""} data-change="toggleGoal" data-arg="${s}" id="g-${s}">
       <label for="g-${s}">${escHtml(n.text)}</label>
       <span class="goal-pri goal-${n.priority.toLowerCase()}">${n.priority}</span>
-      <button class="item-del" onclick="deleteGoal(${s})">\u2715</button>
+      <button class="item-del" data-action="deleteGoal" data-arg-json="${s}">\u2715</button>
     </div>`).join("") || '<div class="list-ph">Add your strategic goals</div>')
   } window.saveSwot = function () { const e = { s: document.getElementById("swot-s")?.value || "", w: document.getElementById("swot-w")?.value || "", o: document.getElementById("swot-o")?.value || "", t: document.getElementById("swot-t")?.value || "" }; localStorage.setItem("jarvis-swot", JSON.stringify(e)), showToast("SWOT saved.", "info") }, window.analyzeSwot = function () {
     const e = JSON.parse(localStorage.getItem("jarvis-swot") || "{}"); dashSend(`Analyze my SWOT:
@@ -983,20 +983,20 @@ Threats: ${t.t || "Not specified"}Provide: situation analysis, strategic priorit
       </div>
       <div class="creative-topbar-right">
         <span id="creative-wc" class="wc-badge">0 words</span>
-        <button class="dash-btn dash-btn-pink" onclick="generateCreative()">\u2726 GENERATE</button>
-        <button class="dash-btn" onclick="improveCreative()">\u25CE IMPROVE</button>
-        <button class="dash-btn" onclick="sparkIdea()">\u26A1 SPARK</button>
-        <button class="dash-btn" onclick="copyCreative()">\u2398 COPY</button>
-        <button class="dash-btn" onclick="clearCreative()">\u2298 CLEAR</button>
+        <button class="dash-btn dash-btn-pink" data-action="generateCreative">\u2726 GENERATE</button>
+        <button class="dash-btn" data-action="improveCreative">\u25CE IMPROVE</button>
+        <button class="dash-btn" data-action="sparkIdea">\u26A1 SPARK</button>
+        <button class="dash-btn" data-action="copyCreative">\u2398 COPY</button>
+        <button class="dash-btn" data-action="clearCreative">\u2298 CLEAR</button>
       </div>
     </div>
     <div class="creative-workspace">
-      <textarea id="creative-editor" class="creative-ta" oninput="updateWordCount()"
+      <textarea id="creative-editor" class="creative-ta" data-input="updateWordCount"
         placeholder="Start writing here\u2026&#10;&#10;Or use:&#10;\u2726 GENERATE \u2014 create from scratch&#10;\u25CE IMPROVE \u2014 enhance existing text&#10;\u26A1 SPARK  \u2014 get creative ideas">${escHtml(e)}</textarea>
     </div>
     <div class="creative-footer">
       <div class="creative-ideas-panel">
-        <div class="ci-hdr"><span>\u2726 IDEA SPARKS</span><button class="micro-btn" onclick="sparkIdea()">GENERATE</button></div>
+        <div class="ci-hdr"><span>\u2726 IDEA SPARKS</span><button class="micro-btn" data-action="sparkIdea">GENERATE</button></div>
         <div id="creative-ideas" class="creative-ideas"><div class="list-ph">Click SPARK to generate creative ideas</div></div>
       </div>
     </div>
@@ -1015,8 +1015,8 @@ Make it complete, compelling, and publication-ready.`)
     <div class="gcp-desc">${s.desc}</div>
     ${s.input ? `<input class="gcp-input" id="gcp-field" placeholder="${s.placeholder || ""}" autocomplete="off">` : ""}
     <div class="gcp-btns">
-      <button class="gcp-cancel" onclick="closeHamburger()">\u2715 Cancel</button>
-      <button class="gcp-run" onclick="executeGitConfirm('${e}')">\u25B6 Run</button>
+      <button class="gcp-cancel" data-action="closeHamburger">\u2715 Cancel</button>
+      <button class="gcp-run" data-action="executeGitConfirm" data-arg="${e}">\u25B6 Run</button>
     </div>`, o.hidden = !1, setTimeout(() => { const i = document.getElementById("gcp-field"); i && i.focus() }, 50)
   } window.executeGitConfirm = function (e) { const t = getGitCwd(), n = (document.getElementById("gcp-field")?.value || "").trim(); if (e === "push") { if (n !== "CONFIRM") { showToast("\u26D4 Type CONFIRM exactly to push.", "error"); return } closeHamburger(), runGitCommand("git push", t, "PUSH") } else if (e === "pull") closeHamburger(), runGitCommand("git pull", t, "PULL"); else if (e === "add-commit") { if (!n) { showToast("\u26D4 Enter a commit message.", "error"); return } const s = n.replace(/["`$\\]/g, "").slice(0, 200); closeHamburger(), runGitCommand(`git add -A && git commit -m "${s}"`, t, "COMMIT") } }; async function runGitCommand(e, t, n) {
     const s = e.toLowerCase(); if (GIT_BLOCKED_PATTERNS.some(r => s.includes(r))) { showToast("\u26D4 Destructive command blocked by JARVIS safety policy.", "error"); return } showToast(`\u{1F500} Running git ${n}\u2026`, "info"); let o; try { o = await window.jarvis.runCommand(e, t) } catch (r) { appendJarvisMessage(`\u274C Git error: ${r.message}`); return } const i = o.stdout?.trim(), a = o.stderr?.trim(), c = [i ? `\`\`\`
@@ -1038,7 +1038,7 @@ ${o.slice(0, 12e3)}
     <div class="mem-item">
       <span class="mem-item-icon">\u25C8</span>
       <span class="mem-item-text">${t}</span>
-      <button class="mem-item-del" onclick="memoryDelete(${n})" title="Remove">\u2715</button>
+      <button class="mem-item-del" data-action="memoryDelete" data-arg-json="${n}" title="Remove">\u2715</button>
     </div>`).join("")
     }
   }; function getMemoryPrefix() {
@@ -1048,7 +1048,7 @@ ${state.memory.map(e => `\u2022 ${e}`).join(`
 [END MEMORY]`: ""
   } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", _initMemoryUI, { once: !0 }) : _initMemoryUI(); function _initMemoryUI() { const e = document.getElementById("mem-input"); e && !e.dataset.bound && (e.dataset.bound = "1", e.addEventListener("keydown", t => { t.key === "Enter" && window.memoryAdd() })), memoryInit() } const CMD_LIST = [{ group: "SWITCH MODE", icon: "\u2B21", name: "General Mode", shortcut: "G", action: () => setMode("general") }, { group: "SWITCH MODE", icon: "\u{1F4BB}", name: "Code Mode", shortcut: "C", action: () => setMode("code") }, { group: "SWITCH MODE", icon: "\u{1F41B}", name: "Debug Mode", shortcut: "D", action: () => setMode("debug") }, { group: "SWITCH MODE", icon: "\u{1F52C}", name: "Research Mode", shortcut: "R", action: () => setMode("research") }, { group: "SWITCH MODE", icon: "\u26A1", name: "Automation Mode", shortcut: "A", action: () => setMode("automation") }, { group: "SWITCH MODE", icon: "\u{1F4C8}", name: "Business Mode", shortcut: "B", action: () => setMode("business") }, { group: "SWITCH MODE", icon: "\u{1F3A8}", name: "Creative Mode", shortcut: "X", action: () => setMode("creative") }, { group: "SWITCH MODE", icon: "\u26A1", name: "Productivity Mode", shortcut: "P", action: () => setMode("productivity") }, { group: "ACTIONS", icon: "\u{1F195}", name: "New Session", shortcut: "", action: () => newSession() }, { group: "ACTIONS", icon: "\u{1F5D1}\uFE0F", name: "Clear Chat", shortcut: "", action: () => clearCurrentChat() }, { group: "ACTIONS", icon: "\u{1F4E6}", name: "Load Project", shortcut: "", action: () => window.loadProject() }, { group: "ACTIONS", icon: "\u{1F9E0}", name: "Open Memory", shortcut: "", action: () => { openModal("memory-modal"), renderMemory() } }, { group: "ACTIONS", icon: "\u{1F3A4}", name: "Toggle Wake Word", shortcut: "", action: () => toggleWakeWord() }, { group: "ACTIONS", icon: "\u{1F4DC}", name: "Git Log", shortcut: "", action: () => gitAction("log") }, { group: "ACTIONS", icon: "\u{1F4CB}", name: "Git Status", shortcut: "", action: () => gitAction("status") }, { group: "ACTIONS", icon: "\u2193", name: "Export Chat", shortcut: "", action: () => exportChat() }, { group: "ACTIONS", icon: "\u2699\uFE0F", name: "Settings", shortcut: "", action: () => openModal("settings-modal") }, { group: "ACTIONS", icon: "\u23FB", name: "Power Off", shortcut: "", action: () => window.confirmPowerOff() }, { group: "\u{1F3A8} THEMES", icon: "\u2B21", name: "Theme: Iron Man (Default Cyan)", shortcut: "", action: () => applyTheme("ironman") }, { group: "\u{1F3A8} THEMES", icon: "\u2620", name: "Theme: Phantom (Blood Red)", shortcut: "", action: () => applyTheme("phantom") }, { group: "\u{1F3A8} THEMES", icon: "\u229E", name: "Theme: Matrix (Terminal Green)", shortcut: "", action: () => applyTheme("matrix") }, { group: "\u{1F3A8} THEMES", icon: "\u2726", name: "Theme: Nova (Deep Space Purple)", shortcut: "", action: () => applyTheme("nova") }, { group: "\u{1F3A8} THEMES", icon: "\u25C8", name: "Theme: Ghost (Light Military)", shortcut: "", action: () => applyTheme("ghost") }]; let cmdActiveIdx = 0, cmdFiltered = [...CMD_LIST]; function openCmdPalette() { const e = document.getElementById("cmd-palette"), t = document.getElementById("cmd-input"); e && (e.hidden = !1, cmdActiveIdx = 0, cmdFiltered = [...CMD_LIST], renderCmdResults(""), setTimeout(() => t?.focus(), 30)) } window.openCmdPalette = openCmdPalette; function closeCmdPalette() { const e = document.getElementById("cmd-palette"); e && (e.hidden = !0) } window.closeCmdPalette = closeCmdPalette; function renderCmdResults(e) {
     const t = e.toLowerCase().trim(); cmdFiltered = t ? CMD_LIST.filter(i => i.name.toLowerCase().includes(t) || i.group.toLowerCase().includes(t)) : [...CMD_LIST], cmdActiveIdx = 0; const n = document.getElementById("cmd-results"); if (!n) return; if (!cmdFiltered.length) { n.innerHTML = '<div class="cmd-empty">No commands found</div>'; return } let s = "", o = ""; cmdFiltered.forEach((i, a) => {
-      i.group !== o && (s += `<div class="cmd-group-label">${i.group}</div>`, o = i.group), s += `<button class="cmd-item${a === 0 ? " active" : ""}" data-idx="${a}" onclick="runCmdItem(${a})">
+      i.group !== o && (s += `<div class="cmd-group-label">${i.group}</div>`, o = i.group), s += `<button class="cmd-item${a === 0 ? " active" : ""}" data-idx="${a}" data-action="runCmdItem" data-arg-json="${a}">
       <span class="cmd-item-icon">${i.icon}</span>
       <span class="cmd-name">${i.name}</span>
       ${i.shortcut ? `<span class="cmd-shortcut">${i.shortcut}</span>` : ""}
@@ -1102,7 +1102,7 @@ ${state.memory.map(e => `\u2022 ${e}`).join(`
     if (!e || !e.length) return ""; const t = { "Google News": "\u{1F4F0}", "BBC News": "\u{1F310}", DuckDuckGo: "\u{1F986}" }; return `<div class="source-chips-wrap">
     <span class="source-chips-label">\u{1F310} Live Sources</span>
     <div class="source-chips-list">${e.filter(s => s.url && s.title).slice(0, 8).map(s => {
-      const o = t[s.engine] || "\u{1F517}", i = (() => { try { return new URL(s.url).hostname.replace("www.", "") } catch { return s.engine || "Web" } })(), a = escHtml(s.title.slice(0, 60)), c = s.pubDate ? ` \xB7 ${new Date(s.pubDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "", r = escHtml(s.url); return `<button class="source-chip" onclick="window.jarvis.openExternal(${JSON.stringify(s.url)})" title="${r}">
+      const o = t[s.engine] || "\u{1F517}", i = (() => { try { return new URL(s.url).hostname.replace("www.", "") } catch { return s.engine || "Web" } })(), a = escHtml(s.title.slice(0, 60)), c = s.pubDate ? ` \xB7 ${new Date(s.pubDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "", r = escHtml(s.url); return `<button class="source-chip" data-action="window.jarvis.openExternal" data-arg-json="${JSON.stringify(s.url)}" title="${r}">
         <span class="source-chip-favicon">${o}</span>
         <span class="source-chip-info">
           <span class="source-chip-title">${a}</span>
@@ -1135,11 +1135,11 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
     }; setTimeout(tc, 300);
   }; const TaskQueue = { _queue: [], _draining: !1, enqueue: function (e) { if (!state.isStreaming) { sendMessage(e); return } TaskQueue._queue.push(e), TaskQueue._updateHUD(), showToast("Command queued \u2014 JARVIS will process it shortly, sir.", "info") }, drainNext: function () { if (TaskQueue._draining || TaskQueue._queue.length === 0) { TaskQueue._updateHUD(); return } TaskQueue._draining = !0; const e = TaskQueue._queue.shift(); TaskQueue._updateHUD(), setTimeout(function () { TaskQueue._draining = !1, sendMessage(e) }, 200) }, _updateHUD: function () { const e = document.getElementById("task-queue-hud"), t = document.getElementById("tq-count"), n = TaskQueue._queue.length; e && e.classList.toggle("hidden", n === 0), t && (t.textContent = n) }, getQueue: function () { return TaskQueue._queue.slice() }, clear: function () { TaskQueue._queue = [], TaskQueue._draining = !1, TaskQueue._updateHUD() } }; window.TaskQueue = TaskQueue; const _origFinalizeStreamingEl = finalizeStreamingEl; window.finalizeStreamingEl = function (e, t) { _origFinalizeStreamingEl(e, t), setTimeout(function () { !state.isStreaming && TaskQueue._queue.length > 0 && TaskQueue.drainNext() }, 300) }; const Skills = { _manifest: [], _loaded: !1, load: async function () { try { if (!window.jarvis || !window.jarvis.skillsList) return; const e = await window.jarvis.skillsList(); if (e.ok) { Skills._manifest = e.skills || [], Skills._loaded = !0; const t = document.getElementById("skills-count"); t && (t.textContent = Skills._manifest.length) } } catch (e) { console.error("[Skills] Failed to load:", e) } }, run: async function (e, t) { if (!window.jarvis || !window.jarvis.skillsRun) return null; try { return await window.jarvis.skillsRun(e, t || {}) } catch { return null } } }; window.Skills = Skills; const Auth = { _input: "", _setupMode: !1, _firstPin: null, _keyHandler: null, init: async function () { if (!window.jarvis || !window.jarvis.authLoad) return; const e = await window.jarvis.authLoad(), t = document.getElementById("auth-screen"); if (t) { if (!e.ok || !e.data) { Auth._setupMode = !0, t.classList.remove("hidden"); const n = document.getElementById("auth-subtitle"); n && (n.textContent = "FIRST RUN \u2014 SET YOUR PIN"); const s = document.getElementById("auth-hint"); s && (s.textContent = "Set a 4-digit PIN to secure JARVIS"); const o = document.getElementById("auth-setup"); o && o.classList.remove("hidden") } else if (e.data.hasPin) { t.classList.remove("hidden") } else setTimeout(() => { if (window._runBootSequence) window._runBootSequence(triggerLLMGreeting); else triggerLLMGreeting(); }, 100); Auth._keyHandler = function (n) { const s = document.getElementById("auth-screen"); !s || s.classList.contains("hidden") || (n.key >= "0" && n.key <= "9" ? (n.preventDefault(), Auth.pressKey(n.key)) : n.key === "Backspace" ? (n.preventDefault(), Auth.pressKey("clear")) : n.key === "Enter" && (n.preventDefault(), Auth.pressKey("enter"))) }, document.addEventListener("keydown", Auth._keyHandler) } }, pressKey: function (e) { const t = document.getElementById("auth-error"); if (t && t.classList.add("hidden"), e === "clear") Auth._input = Auth._input.slice(0, -1); else if (e === "enter") { Auth._verify(); return } else Auth._input.length < 4 && (Auth._input += e); Auth._updateDots(), Auth._input.length === 4 && setTimeout(Auth._verify, 120) }, _updateDots: function () { for (let e = 1; e <= 4; e++) { const t = document.getElementById("pin-d" + e); t && (t.classList.toggle("filled", Auth._input.length >= e), t.classList.remove("error")) } }, _verify: async function () { if (Auth._setupMode) { if (Auth._firstPin) if (Auth._input === Auth._firstPin) { /* MED-05 fix: send raw PIN to main for PBKDF2 hashing */ window.jarvis && window.jarvis.authSave && await window.jarvis.authSave({ pin: Auth._input }), Auth._unlock() } else { Auth._showError("PINs do not match. Try again."), Auth._firstPin = null, Auth._input = "", Auth._updateDots(); const t = document.getElementById("auth-subtitle"); t && (t.textContent = "FIRST RUN \u2014 SET YOUR PIN") } else { Auth._firstPin = Auth._input, Auth._input = "", Auth._updateDots(); const t = document.getElementById("auth-subtitle"); t && (t.textContent = "CONFIRM YOUR PIN") } return } /* MED-05 fix: delegate PIN check to main process via auth-verify */ if (!window.jarvis || !window.jarvis.authVerify) { Auth._showError("Auth service unavailable."); return } const res = await window.jarvis.authVerify(Auth._input); Auth._input = ""; if (res.rateLimited) { Auth._showError("Too many attempts. Try again in 15 minutes."); document.querySelectorAll(".keypad-btn").forEach(b => b.disabled = !0); return } if (res.ok) { Auth._unlock(); } else { for (let t = 1; t <= 4; t++) { const n = document.getElementById("pin-d" + t); n && (n.classList.add("error"), n.classList.remove("filled")) } setTimeout(function () { for (let t = 1; t <= 4; t++) { const n = document.getElementById("pin-d" + t); n && n.classList.remove("error") } }, 600); Auth._showError(res.error || "Incorrect PIN.") } }, _showError: function (e) { const t = document.getElementById("auth-error"); t && (t.textContent = e, t.classList.remove("hidden")) }, _unlock: function () { Auth._keyHandler && (document.removeEventListener("keydown", Auth._keyHandler), Auth._keyHandler = null); const e = document.getElementById("auth-screen"); e && (e.classList.add("unlocking"), showToast("Identity confirmed. Welcome back, sir.", "success"), setTimeout(function () { e.classList.add("hidden") }, 600), setTimeout(() => { if (window._runBootSequence) window._runBootSequence(triggerLLMGreeting); else triggerLLMGreeting(); }, 650)) }, skip: async function () { window.jarvis && window.jarvis.authSave && await window.jarvis.authSave({ skipPin: true }), Auth._unlock() } }; window.Auth = Auth, window.authKey = function (e) { Auth.pressKey(e) }, window.authSkip = function () { Auth.skip() }, document.addEventListener("visibilitychange", () => { document.hidden ? (typeof gpuPollInterval < "u" && gpuPollInterval && (clearInterval(gpuPollInterval), gpuPollInterval = null), typeof hudInterval < "u" && hudInterval && (clearInterval(hudInterval), hudInterval = null)) : (!gpuPollInterval && typeof pollGPU == "function" && (pollGPU(), gpuPollInterval = setInterval(pollGPU, 15e3)), !hudInterval && typeof updateLiveHUD == "function" && (updateLiveHUD(), hudInterval = setInterval(updateLiveHUD, 3e4))) }); function openChangePinModal() { closeModal("settings-modal"), ["chpin-current", "chpin-new", "chpin-confirm"].forEach(t => { const n = document.getElementById(t); n && (n.value = "") }); const e = document.getElementById("chpin-error"); e && e.classList.add("hidden"), openModal("change-pin-modal"), setTimeout(() => { const t = document.getElementById("chpin-current"); t && t.focus() }, 100) } window.openChangePinModal = openChangePinModal; async function submitChangePin() { const e = document.getElementById("chpin-current")?.value.trim(), t = document.getElementById("chpin-new")?.value.trim(), n = document.getElementById("chpin-confirm")?.value.trim(), s = document.getElementById("chpin-error"); function o(a) { s && (s.textContent = a, s.classList.remove("hidden")) } if (!/^\d{4}$/.test(t)) return o("New PIN must be exactly 4 digits."); if (t !== n) return o("New PINs do not match."); /* MED-05 fix: verify current PIN via main process, then save raw new PIN for main to hash */ const verifyRes = window.jarvis && window.jarvis.authVerify ? await window.jarvis.authVerify(e) : { ok: false }; if (!verifyRes.ok) return o("Current PIN is incorrect."); window.jarvis && window.jarvis.authSave && await window.jarvis.authSave({ pin: t }), closeModal("change-pin-modal"), showToast("PIN updated successfully, sir.", "success") } window.submitChangePin = submitChangePin; async function refreshDiagnostics() { const e = document.getElementById("diag-grid"), t = document.getElementById("diag-skills-list"), n = document.getElementById("diag-queue-list"); e && (e.innerHTML = '<div class="panel-placeholder">Loading...</div>'); try { let s = null; if (window.jarvis && window.jarvis.getRuntimeStats && (s = await window.jarvis.getRuntimeStats()), e && s && s.ok) { const o = s.process, i = s.system, a = s.jarvis, c = Math.round(parseFloat(o.heap_used_mb) / parseFloat(o.heap_total_mb) * 100), r = Math.round((parseFloat(i.total_mem_gb) - parseFloat(i.free_mem_gb)) / parseFloat(i.total_mem_gb) * 100); e.innerHTML = ['<div class="diag-card">', '<div class="diag-card-title">PROCESS</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">UPTIME</span><span class="diag-stat-val">' + o.uptime_human + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP USED</span><span class="diag-stat-val">' + o.heap_used_mb + " MB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP TOTAL</span><span class="diag-stat-val">' + o.heap_total_mb + " MB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP %</span><span class="diag-stat-val ' + (c > 80 ? "warn" : "ok") + '">' + c + "%</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RSS</span><span class="diag-stat-val">' + o.rss_mb + " MB</span></div>", "</div>", '<div class="diag-card">', '<div class="diag-card-title">SYSTEM</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">SYS UPTIME</span><span class="diag-stat-val">' + i.uptime_human + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM FREE</span><span class="diag-stat-val">' + i.free_mem_gb + " GB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM TOTAL</span><span class="diag-stat-val">' + i.total_mem_gb + " GB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM USED</span><span class="diag-stat-val ' + (r > 85 ? "warn" : "ok") + '">' + r + "%</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">CPU CORES</span><span class="diag-stat-val">' + i.cpu_cores + "</span></div>", "</div>", '<div class="diag-card">', '<div class="diag-card-title">JARVIS</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">OLLAMA</span><span class="diag-stat-val ' + (a.ollama_running ? "ok" : "err") + '">' + (a.ollama_running ? "ONLINE" : "OFFLINE") + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">SKILLS</span><span class="diag-stat-val">' + a.skill_count + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">SESSIONS</span><span class="diag-stat-val">' + a.session_count + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">ELECTRON</span><span class="diag-stat-val">' + a.electron_ver + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">NODE</span><span class="diag-stat-val">' + a.node_ver + "</span></div>", "</div>"].join("") } else e && (e.innerHTML = '<div class="panel-placeholder">Could not fetch diagnostics.</div>') } catch (s) { e && (e.innerHTML = '<div class="panel-placeholder">Error: ' + (s.message || "unknown") + "</div>") } if (t) if (!Skills._manifest.length) t.innerHTML = '<div class="panel-placeholder">No skills loaded.</div>'; else { const s = { get_datetime: "\u23F0", calculator: "\u{1F9F8}", system_status: "\u{1F4BB}", web_search: "\u{1F310}" }; t.innerHTML = Skills._manifest.map(function (o) { return '<div class="diag-skill-chip"><span class="diag-skill-icon">' + (s[o.id] || "\u2B21") + '</span><div><div class="diag-skill-name">' + escHtml(o.name) + '</div><div class="diag-skill-desc">' + escHtml(o.description) + "</div></div></div>" }).join("") } if (n) { const s = TaskQueue.getQueue(); s.length ? n.innerHTML = s.map(function (o, i) { return '<div class="diag-queue-item"><span class="diag-qi-pos">#' + (i + 1) + '</span><span class="diag-qi-text">' + escHtml(o) + "</span></div>" }).join("") : n.innerHTML = '<div class="panel-placeholder">Queue empty \u2014 JARVIS is ready.</div>' } } window.refreshDiagnostics = refreshDiagnostics; function openDiagnosticsModal() { openModal("diag-modal"), refreshDiagnostics() } window.openDiagnosticsModal = openDiagnosticsModal, document.addEventListener("DOMContentLoaded", async function () { await Skills.load(), WakeWord.init(), await Auth.init(), document.addEventListener("keydown", function (e) { e.ctrlKey && e.key === "d" && (e.preventDefault(), openDiagnosticsModal()) }), console.log("[JARVIS] New features initialized: TaskQueue, Skills, Auth, WakeWord, Diagnostics") }); const JarvisSec = { config: { blockWritesOutsideWorkspace: !1, terminalEnabled: !0, requirePinForDestructive: !1, auditLogging: !0, screenCaptureEnabled: !1 }, async load() { try { const e = await window.jarvis.secConfigLoad(); e.ok && (this.config = { ...this.config, ...e.config }) } catch { } }, async save() { try { await window.jarvis.secConfigSave(this.config), showToast("\u{1F512} Security settings saved.", "success") } catch (e) { showToast("Error saving security config: " + e.message, "error") } } }; window.openSecurityModal = function () {
     let e = document.getElementById("security-modal"); e || (e = document.createElement("div"), e.id = "security-modal", e.className = "modal", e.setAttribute("role", "dialog"), e.setAttribute("aria-modal", "true"), e.innerHTML = `
-      <div class="modal-backdrop" onclick="closeModal('security-modal')"></div>
+      <div class="modal-backdrop" data-action="closeModal" data-arg="security-modal"></div>
       <div class="modal-box" style="max-width:640px">
         <div class="modal-hdr">
           <span class="modal-title">\u{1F512} JARVIS SECURITY CONTROL CENTER</span>
-          <button class="modal-close-btn" onclick="closeModal('security-modal')">\u2715</button>
+          <button class="modal-close-btn" data-action="closeModal" data-arg="security-modal">\u2715</button>
         </div>
         <div class="modal-body">
           <div class="sec-status-banner" id="sec-status-banner">
@@ -1158,7 +1158,7 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
               <div class="sec-toggle-desc">Allow JARVIS terminal to execute system commands</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-terminal" onchange="secToggle('terminalEnabled', this.checked)">
+              <input type="checkbox" id="sec-terminal" data-change="secToggle" data-arg="'terminalEnabled', this.checked">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
@@ -1169,7 +1169,7 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
               <div class="sec-toggle-desc">Block file writes outside the current workspace directory</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-writes" onchange="secToggle('blockWritesOutsideWorkspace', this.checked)">
+              <input type="checkbox" id="sec-writes" data-change="secToggle" data-arg="'blockWritesOutsideWorkspace', this.checked">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
@@ -1180,7 +1180,7 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
               <div class="sec-toggle-desc">Allow JARVIS to capture your screen for visual analysis (disabled by default)</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-screen" onchange="secToggle('screenCaptureEnabled', this.checked)">
+              <input type="checkbox" id="sec-screen" data-change="secToggle" data-arg="'screenCaptureEnabled', this.checked">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
@@ -1191,7 +1191,7 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
               <div class="sec-toggle-desc">Log all sensitive operations (terminal, file writes, screen capture) to security_audit.log</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-audit" onchange="secToggle('auditLogging', this.checked)">
+              <input type="checkbox" id="sec-audit" data-change="secToggle" data-arg="'auditLogging', this.checked">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
@@ -1208,10 +1208,10 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
 
           <div class="sec-section-title" style="margin-top:16px">AUDIT LOG (Last 20 entries)</div>
           <div class="sec-audit-log" id="sec-audit-log">Loading\u2026</div>
-          <button class="micro-btn" onclick="refreshSecAudit()" style="margin-top:6px">\u21BB REFRESH LOG</button>
+          <button class="micro-btn" data-action="refreshSecAudit" style="margin-top:6px">\u21BB REFRESH LOG</button>
 
           <div class="cfg-actions" style="margin-top:16px">
-            <button class="cfg-btn-primary" onclick="JarvisSec.save()">\u{1F512} SAVE SECURITY CONFIG</button>
+            <button class="cfg-btn-primary" data-action="JarvisSec.save">\u{1F512} SAVE SECURITY CONFIG</button>
           </div>
         </div>
       </div>`, document.body.appendChild(e)), JarvisSec.load().then(() => { const t = (n, s) => { const o = document.getElementById(n); o && (o.checked = s) }; t("sec-terminal", JarvisSec.config.terminalEnabled), t("sec-writes", JarvisSec.config.blockWritesOutsideWorkspace), t("sec-screen", JarvisSec.config.screenCaptureEnabled), t("sec-audit", JarvisSec.config.auditLogging), refreshSecAudit() }), openModal("security-modal")
@@ -1277,3 +1277,155 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
       });
     }
   })();
+
+
+// ─── GLOBAL EVENT DELEGATION (CSP FIX) ───────────────────────────
+
+function resolveAndCall(actionStr, argsArray) {
+  if (!actionStr) return;
+  if (actionStr === 'toggleSchedulerType') {
+    const val = argsArray[0];
+    document.getElementById('sched-oneoff').hidden = (val === 'recurring');
+    document.getElementById('sched-recurring').hidden = (val === 'one-off');
+    return;
+  }
+  // Handle some hardcoded composite actions that were previously inline JS
+  if (actionStr === 'openModels') { window.refreshModels(); window.openModal('models-modal'); return; }
+  if (actionStr === 'openMemoryModal') { window.openModal('memory-modal'); window.renderMemory(); window.closeHamburger(); return; }
+  if (actionStr === 'toggleWakeWordAndClose') { window.toggleWakeWord(); window.closeHamburger(); return; }
+  if (actionStr === 'loadProject') { window.loadProject(); window.closeHamburger(); return; }
+  if (actionStr === 'clearProjectAndClose') { window.clearProject(); window.closeHamburger(); return; }
+  if (actionStr === 'openTerminalAndClose') { window.openTerminalModal(); window.closeHamburger(); return; }
+  if (actionStr === 'exportChatAndClose') { window.exportChat(); window.closeHamburger(); return; }
+  if (actionStr === 'selectModelAndClose') { window.selectModel(argsArray[0]); window.closeModal('models-modal'); return; }
+  if (actionStr === 'jarvisApi') { window.jarvis[argsArray[0]](); return; }
+  if (actionStr === 'applyTheme') { window.applyTheme(argsArray[0]); window.closeHamburger(); return; }
+
+  const parts = actionStr.split('.');
+  let obj = window;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!obj) return;
+    obj = obj[parts[i]];
+  }
+  const func = obj[parts[parts.length - 1]];
+  if (typeof func === 'function') {
+    func.apply(obj, argsArray);
+  }
+}
+
+function extractArgs(el) {
+  const args = [];
+  if (el.hasAttribute('data-arg')) args.push(el.getAttribute('data-arg'));
+  if (el.hasAttribute('data-arg1')) args.push(el.getAttribute('data-arg1'));
+  if (el.hasAttribute('data-arg2')) args.push(el.getAttribute('data-arg2'));
+  if (el.hasAttribute('data-col') && el.hasAttribute('data-idx')) {
+    args.push(el.getAttribute('data-col'));
+    args.push(parseInt(el.getAttribute('data-idx'), 10));
+  }
+  if (el.hasAttribute('data-idx') && !el.hasAttribute('data-col')) {
+    args.push(parseInt(el.getAttribute('data-idx'), 10));
+  }
+  if (el.hasAttribute('data-arg-json')) {
+    try { args.push(JSON.parse(el.getAttribute('data-arg-json'))); } catch(e){}
+  }
+  return args;
+}
+
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action]');
+  if (el) {
+    const action = el.getAttribute('data-action');
+    const args = extractArgs(el);
+    resolveAndCall(action, args);
+  }
+});
+
+document.addEventListener('change', (e) => {
+  const el = e.target.closest('[data-change]');
+  if (el) {
+    const action = el.getAttribute('data-change');
+    let args = extractArgs(el);
+    if (e.target.tagName === 'SELECT') {
+      args = [e.target.value];
+    } else if (args.length === 0 && action.includes('toggle')) {
+      args = [e.target.checked];
+    }
+    resolveAndCall(action, args);
+  }
+});
+
+document.addEventListener('input', (e) => {
+  const el = e.target.closest('[data-input]');
+  if (el) {
+    const action = el.getAttribute('data-input');
+    const args = extractArgs(el);
+    if (action === 'updateKPIProg') args.push(e.target.value);
+    resolveAndCall(action, args);
+  }
+});
+
+document.addEventListener('blur', (e) => {
+  const el = e.target.closest('[data-blur]');
+  if (el) {
+    const action = el.getAttribute('data-blur');
+    const args = extractArgs(el);
+    if (action === 'saveKPI') args.push(e.target.innerText);
+    resolveAndCall(action, args);
+  }
+}, true);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const el = e.target.closest('[data-keydown-enter]');
+    if (el) {
+      const action = el.getAttribute('data-keydown-enter');
+      const args = extractArgs(el);
+      resolveAndCall(action, args);
+    }
+  }
+});
+
+document.addEventListener('dragstart', (e) => {
+  const el = e.target.closest('[data-dragstart]');
+  if (el) {
+    const action = el.getAttribute('data-dragstart');
+    const args = [e, ...extractArgs(el)];
+    resolveAndCall(action, args);
+  }
+});
+
+document.addEventListener('dragend', (e) => {
+  const el = e.target.closest('[data-dragend]');
+  if (el) {
+    const action = el.getAttribute('data-dragend');
+    resolveAndCall(action, [e]);
+  }
+});
+
+document.addEventListener('dragover', (e) => {
+  const el = e.target.closest('[data-dragover]');
+  if (el) {
+    const action = el.getAttribute('data-dragover');
+    resolveAndCall(action, [e]);
+  }
+});
+
+document.addEventListener('dragleave', (e) => {
+  const el = e.target.closest('[data-dragleave]');
+  if (el) {
+    const action = el.getAttribute('data-dragleave');
+    resolveAndCall(action, [e]);
+  }
+});
+
+document.addEventListener('drop', (e) => {
+  const el = e.target.closest('[data-drop]');
+  if (el) {
+    const action = el.getAttribute('data-drop');
+    const args = [e, ...extractArgs(el)];
+    resolveAndCall(action, args);
+  }
+});
+
+if (typeof hljs !== 'undefined') hljs.highlightAll && document.addEventListener('DOMContentLoaded', () => hljs.highlightAll());
+document.addEventListener('DOMContentLoaded', () => { const authInput = document.getElementById('auth-hidden-input'); const authScreen = document.getElementById('auth-screen'); if (authInput && authScreen) { document.addEventListener('click', () => { if (!authScreen.classList.contains('hidden')) { authInput.focus(); } }); window.addEventListener('focus', () => { if (!authScreen.classList.contains('hidden')) { authInput.focus(); } }); } });
