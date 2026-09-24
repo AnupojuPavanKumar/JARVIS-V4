@@ -11,8 +11,8 @@
 async function checkOllama() {
   setOllamaStatus('checking');
   try {
-    const res = await fetch(`${state.endpoint}/api/tags`, { signal: AbortSignal.timeout(4000) });
-    if (res.ok) { setOllamaStatus('online'); return true; }
+    const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' });
+    if (res && res.ok) { setOllamaStatus('online'); return true; }
     setOllamaStatus('offline'); return false;
   } catch {
     setOllamaStatus('offline'); return false;
@@ -32,79 +32,81 @@ function setOllamaStatus(status) {
 // ─── Ollama Streaming ───────────────────────────────────────────
 
 async function streamOllama(messages, { onChunk, onDone, onError }) {
-  const controller = new AbortController();
+  const reqId = Date.now().toString() + Math.random().toString(36).substring(7);
   const timeoutId = setTimeout(() => {
-    controller.abort();
+    window.jarvis.ollamaStreamAbort(reqId);
   }, 90000); // 90-second connection and model loading timeout
 
-  try {
-    const response = await fetch(`${state.endpoint}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: state.model,
-        messages: messages,
-        stream: true,
-        keep_alive: -1,
-        options: { 
-          temperature: 0.3, 
-          top_p: 0.85,
-          num_predict: 512,
-          num_ctx: 8192,
-          stop: ["</tool_call>"]
-        }
-      }),
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
+  let fullContent = '';
 
-    if (!response.ok) throw new Error(`Ollama ${response.status}: ${await response.text()}`);
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let fullContent = '', buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const data = JSON.parse(line);
-          if (data.message?.content) { 
-            fullContent += data.message.content; 
-            onChunk(data.message.content, fullContent); 
-            
-            // Agentic intercept: Stop stream if a complete JSON tool call is detected
-            if (fullContent.includes('{"tool"')) {
-              const match = fullContent.match(/\{[\s\S]*?"tool"[\s\S]*?\}/);
-              if (match) {
-                try {
-                  const p = JSON.parse(match[0]);
-                  if (p && p.tool) {
-                    controller.abort(); // Force stop LLM
-                    onDone(fullContent);
-                    return;
-                  }
-                } catch (_) {}
-              }
+  window.jarvis.onOllamaStreamChunk((data) => {
+    if (data.reqId !== reqId) return;
+    const lines = data.chunk.split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.message?.content) { 
+          fullContent += parsed.message.content; 
+          onChunk(parsed.message.content, fullContent); 
+          
+          // Agentic intercept: Stop stream if a complete JSON tool call is detected
+          if (fullContent.includes('{"tool"')) {
+            const match = fullContent.match(/\{[\s\S]*?"tool"[\s\S]*?\}/);
+            if (match) {
+              try {
+                const p = JSON.parse(match[0]);
+                if (p && p.tool) {
+                  window.jarvis.ollamaStreamAbort(reqId); // Force stop LLM
+                  clearTimeout(timeoutId);
+                  onDone(fullContent);
+                  return;
+                }
+              } catch (_) {}
             }
           }
-          if (data.done) { onDone(fullContent); return; }
-        } catch (e) { 
-          console.error('[STREAM ERROR] Failed to parse line:', line, e);
         }
+        if (parsed.done) {
+          clearTimeout(timeoutId);
+          onDone(fullContent);
+        }
+      } catch (e) { 
+        console.error('[STREAM ERROR] Failed to parse line:', line, e);
       }
     }
-    onDone(fullContent);
-  } catch (err) {
+  });
+
+  window.jarvis.onOllamaStreamEnd((data) => {
+    if (data.reqId !== reqId) return;
     clearTimeout(timeoutId);
-    console.error('[OLLAMA ERROR]', err);
-    onError(err);
-  }
+    onDone(fullContent);
+  });
+
+  window.jarvis.onOllamaStreamError((data) => {
+    if (data.reqId !== reqId) return;
+    clearTimeout(timeoutId);
+    console.error('[OLLAMA ERROR]', data.error);
+    if (onError) onError(new Error(data.error));
+  });
+
+  window.jarvis.ollamaStreamStart({
+    reqId,
+    path: '/api/chat',
+    method: 'POST',
+    body: {
+      model: state.model,
+      messages: messages,
+      stream: true,
+      keep_alive: "30m",
+      options: { 
+        temperature: 0.3, 
+        top_p: 0.85,
+        num_predict: 512,
+        num_ctx: 8192,
+        stop: ["</tool_call>"]
+      }
+    }
+  });
 }
 
 // ─── Context Builder ────────────────────────────────────────────
@@ -180,9 +182,9 @@ function buildMessages() {
 async function refreshModels() {
   showToast('Scanning Ollama for installed models…', 'info');
   try {
-    const res = await fetch(`${state.endpoint}/api/tags`, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) throw new Error('Ollama offline');
-    const data = await res.json();
+    const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' });
+    if (!res || !res.ok) throw new Error('Ollama offline');
+    const data = JSON.parse(res.body);
     const models = data.models || [];
     renderModelsList(models);
     return models;
@@ -213,7 +215,7 @@ function renderModelsList(models) {
       item.className = `models-modal-item ${m.name === state.model ? 'active' : ''}`;
       item.innerHTML = `
         <div><div class="model-info-name">${m.name}</div><div class="model-info-meta">${sizeGb} · ${m.details?.parameter_size || ''} · ${m.details?.quantization_level || ''}</div></div>
-        <button class="model-select-btn ${m.name === state.model ? 'active-model' : ''}" onclick="selectModel('${m.name}'); closeModal('models-modal')">${m.name === state.model ? '✓ ACTIVE' : 'SELECT'}</button>`;
+        <button class="model-select-btn ${m.name === state.model ? 'active-model' : ''}" data-action="selectModelAndClose" data-arg="${m.name}">${m.name === state.model ? '✓ ACTIVE' : 'SELECT'}</button>`;
       modalBody.appendChild(item);
     });
   }

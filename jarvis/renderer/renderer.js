@@ -337,13 +337,95 @@ window.toggleDeepWork = function() {
     }
   }
 };
-async function saveSession() { const e = state.conversations[state.mode]; if (!(!e || e.messages.length === 0)) { if (!e.title) { const t = e.messages.find(n => n.role === "user"); e.title = t ? t.content.slice(0, 60) : "Untitled" } await window.jarvis.saveHistory(e.id, e), await updateSessionCount() } } async function updateSessionCount() { const e = await window.jarvis.listHistory(); e.ok && $pSessions && ($pSessions.textContent = e.data.length) } async function checkOllama() { setOllamaStatus("checking"); try { return (await fetch(`${state.endpoint}/api/tags`, { signal: AbortSignal.timeout(4e3) })).ok ? (setOllamaStatus("online"), !0) : (setOllamaStatus("offline"), !1) } catch { return setOllamaStatus("offline"), !1 } } function setOllamaStatus(e) { state.ollamaOnline = e === "online", $ollamaBadge && ($ollamaBadge.className = `status-badge ${e}`), $ollamaLabel && ($ollamaLabel.textContent = e.toUpperCase()), $pOllama && ($pOllama.textContent = e.toUpperCase(), $pOllama.className = `stat-val ${e === "online" ? "online" : "offline"}`) } let _streamController = null; function cancelStream() { _streamController && (_streamController.abort(), _streamController = null), state.isStreaming = !1, $sendBtn && ($sendBtn.disabled = !1), setWaveformActive(!1); const e = document.getElementById("stream-cancel-btn"); e && (e.style.display = "none") } window.cancelStream = cancelStream; async function streamOllama(e, { onChunk: t, onDone: n, onError: s }) {
-  _streamController = new AbortController; const o = setTimeout(() => { _streamController && _streamController.abort() }, 9e4); try {
-    const memCtx = jarvisMemory.getRelevantContext(e[e.length - 1]?.content || ""); if (memCtx && e.length > 0 && e[0].role === "system") { e[0].content += `\n${memCtx}`; } const i = await fetch(`${state.endpoint}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: state.model, messages: e, stream: !0, options: { temperature: .3, top_p: .85, num_predict: 256, num_ctx: 4096, num_gpu: 99, num_thread: 8 } }), signal: _streamController.signal }); if (clearTimeout(o), !i.ok) throw new Error(`Ollama ${i.status}: ${await i.text()}`); const a = i.body.getReader(), c = new TextDecoder; let r = "", l = ""; for (; ;) {
-      const { done: p, value: g } = await a.read(); if (p) break; l += c.decode(g, { stream: !0 }); const d = l.split(`
-`); l = d.pop(); for (const u of d) if (u.trim()) try { const m = JSON.parse(u); if (m.message?.content && (r += m.message.content, t(m.message.content, r)), m.done) { n(r); return } } catch { }
-    } n(r)
-  } catch (i) { clearTimeout(o), s(i) }
+async function saveSession() { const e = state.conversations[state.mode]; if (!(!e || e.messages.length === 0)) { if (!e.title) { const t = e.messages.find(n => n.role === "user"); e.title = t ? t.content.slice(0, 60) : "Untitled" } await window.jarvis.saveHistory(e.id, e), await updateSessionCount() } } async function updateSessionCount() { const e = await window.jarvis.listHistory(); e.ok && $pSessions && ($pSessions.textContent = e.data.length) } async function checkOllama() {
+  setOllamaStatus("checking");
+  try {
+    const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' });
+    if (res && res.ok) { setOllamaStatus("online"); return !0; }
+    setOllamaStatus("offline"); return !1;
+  } catch {
+    setOllamaStatus("offline"); return !1;
+  }
+} function setOllamaStatus(e) { state.ollamaOnline = e === "online", $ollamaBadge && ($ollamaBadge.className = `status-badge ${e}`), $ollamaLabel && ($ollamaLabel.textContent = e.toUpperCase()), $pOllama && ($pOllama.textContent = e.toUpperCase(), $pOllama.className = `stat-val ${e === "online" ? "online" : "offline"}`) } let currentReqId = null;
+function cancelStream() {
+  if (currentReqId) {
+    if(window.jarvis.ollamaStreamAbort) window.jarvis.ollamaStreamAbort(currentReqId);
+    currentReqId = null;
+  }
+  state.isStreaming = !1;
+  if ($sendBtn) $sendBtn.disabled = !1;
+  setWaveformActive(!1);
+  const e = document.getElementById("stream-cancel-btn");
+  if (e) e.style.display = "none";
+}
+window.cancelStream = cancelStream;
+
+async function streamOllama(e, { onChunk: t, onDone: n, onError: s }) {
+  currentReqId = Date.now().toString() + Math.random().toString(36).substring(7);
+  const reqId = currentReqId;
+  const tout = setTimeout(() => {
+    if (window.jarvis.ollamaStreamAbort) window.jarvis.ollamaStreamAbort(reqId);
+  }, 9e4);
+  
+  let full = "";
+  
+  const cleanupChunk = window.jarvis.onOllamaStreamChunk && window.jarvis.onOllamaStreamChunk((r) => {
+    if (r.reqId !== reqId) return;
+    const lines = r.chunk.split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const f = JSON.parse(line);
+        if (f.message && f.message.content) {
+          full += f.message.content;
+          t(f.message.content, full);
+        }
+        if (f.done) {
+          clearTimeout(tout);
+          if (typeof cleanupChunk === 'function') cleanupChunk();
+          if (typeof cleanupEnd === 'function') cleanupEnd();
+          if (typeof cleanupErr === 'function') cleanupErr();
+          n(full);
+        }
+      } catch (err) {}
+    }
+  });
+
+  const cleanupEnd = window.jarvis.onOllamaStreamEnd && window.jarvis.onOllamaStreamEnd((r) => {
+    if (r.reqId !== reqId) return;
+    clearTimeout(tout);
+    if (typeof cleanupChunk === 'function') cleanupChunk();
+    if (typeof cleanupEnd === 'function') cleanupEnd();
+    if (typeof cleanupErr === 'function') cleanupErr();
+    n(full);
+  });
+
+  const cleanupErr = window.jarvis.onOllamaStreamError && window.jarvis.onOllamaStreamError((r) => {
+    if (r.reqId !== reqId) return;
+    clearTimeout(tout);
+    if (typeof cleanupChunk === 'function') cleanupChunk();
+    if (typeof cleanupEnd === 'function') cleanupEnd();
+    if (typeof cleanupErr === 'function') cleanupErr();
+    s(new Error(r.error));
+  });
+
+  const memCtx = jarvisMemory.getRelevantContext(e[e.length - 1]?.content || "");
+  if (memCtx && e.length > 0 && e[0].role === "system") {
+    e[0].content += '\n' + memCtx;
+  }
+
+  window.jarvis.ollamaStreamStart({
+    reqId,
+    path: '/api/chat',
+    method: 'POST',
+    body: {
+      model: state.model,
+      messages: e,
+      stream: !0,
+      keep_alive: "30m",
+      options: { temperature: .3, top_p: .85, num_predict: 256, num_ctx: 4096, num_gpu: 99, num_thread: 8 }
+    }
+  });
 } const _BUDGET_SYSTEM = 24e3, _BUDGET_WEB = 3e3, _BUDGET_PROJ_TOT = 8e3, _CONV_MAX = 100, _CONV_PRUNE = 20; function pruneConversationIfNeeded(e) { if (!e?.messages || e.messages.length <= _CONV_MAX) return; const t = e.messages.splice(0, _CONV_PRUNE); console.log(`[JARVIS] Pruned ${t.length} old messages (history was ${t.length + e.messages.length}).`) } function buildMessages() {
   const e = state.conversations[state.mode]; pruneConversationIfNeeded(e); let t = MODES[state.mode].prompt; 
   const _now = new Date();
@@ -542,7 +624,20 @@ Do NOT say "How can I help", "I am ready", or anything generic. Make it feel ali
     }
     state.waveformAnim = requestAnimationFrame(i);
     document.addEventListener("visibilitychange", () => { !document.hidden && !state.waveformAnim && (state.waveformAnim = requestAnimationFrame(i)) }, { once: !1 })
-  } function setWaveformActive(e) { state.waveformActive = e } function updateSystemPanel(e) { if (e) { if ($pPlatform && ($pPlatform.textContent = `${e.platform}/${e.arch}`.toUpperCase()), $pCpu && ($pCpu.textContent = `${e.cpuCount}\xD7 CORE`), $pMem) { const t = (e.totalMem / 1024 / 1024 / 1024).toFixed(1); $pMem.textContent = `${t} GB` } $pModel && ($pModel.textContent = state.model), $activeModelLabel && ($activeModelLabel.textContent = state.model) } } async function refreshModels() { showToast("Scanning Ollama for installed models\u2026", "info"); try { const e = await fetch(`${state.endpoint}/api/tags`, { signal: AbortSignal.timeout(5e3) }); if (!e.ok) throw new Error("Ollama offline"); const n = (await e.json()).models || []; return renderModelsList(n), n } catch { return showToast("Could not fetch models \u2014 is Ollama running?", "error"), [] } } function renderModelsList(e) {
+  } function setWaveformActive(e) { state.waveformActive = e } function updateSystemPanel(e) { if (e) { if ($pPlatform && ($pPlatform.textContent = `${e.platform}/${e.arch}`.toUpperCase()), $pCpu && ($pCpu.textContent = `${e.cpuCount}\xD7 CORE`), $pMem) { const t = (e.totalMem / 1024 / 1024 / 1024).toFixed(1); $pMem.textContent = `${t} GB` } $pModel && ($pModel.textContent = state.model), $activeModelLabel && ($activeModelLabel.textContent = state.model) } } async function refreshModels() {
+  showToast("Scanning Ollama for installed models\u2026", "info");
+  try {
+    const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' });
+    if (!res || !res.ok) throw new Error("Ollama offline");
+    const data = JSON.parse(res.body);
+    const models = data.models || [];
+    renderModelsList(models);
+    return models;
+  } catch {
+    showToast("Could not fetch models — is Ollama running?", "error");
+    return [];
+  }
+} function renderModelsList(e) {
     const t = document.getElementById("models-list"); t && (t.innerHTML = "", e.length ? e.forEach(s => { const o = document.createElement("div"); o.className = `model-item ${s.name === state.model ? "current" : ""}`; const i = s.size ? (s.size / 1e9).toFixed(1) + " GB" : "?"; o.innerHTML = `<span>${s.name.split(":")[0]}</span><span class="model-size">${i}</span>`, o.onclick = () => selectModel(s.name), t.appendChild(o) }) : t.innerHTML = '<div class="panel-placeholder">No models found</div>'); const n = document.getElementById("models-modal-body"); n && (n.innerHTML = "", e.length ? e.forEach(s => {
       const o = s.size ? (s.size / 1e9).toFixed(2) + " GB" : "Unknown", i = document.createElement("div"); i.className = `models-modal-item ${s.name === state.model ? "active" : ""}`, i.innerHTML = `
         <div><div class="model-info-name">${s.name}</div><div class="model-info-meta">${o} \xB7 ${s.details?.parameter_size || ""} \xB7 ${s.details?.quantization_level || ""}</div></div>
