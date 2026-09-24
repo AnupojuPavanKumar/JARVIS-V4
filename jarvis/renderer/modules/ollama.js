@@ -200,7 +200,7 @@ function renderModelsList(models) {
       const item = document.createElement('div');
       item.className = `model-item ${m.name === state.model ? 'current' : ''}`;
       const sizeGb = m.size ? (m.size / 1e9).toFixed(1) + ' GB' : '?';
-      item.innerHTML = `<span>${m.name.split(':')[0]}</span><span class="model-size">${sizeGb}</span>`;
+      item.innerHTML = `<span>${escHtml(m.name.split(':')[0])}</span><span class="model-size">${escHtml(sizeGb)}</span>`;
       item.onclick = () => selectModel(m.name);
       sideList.appendChild(item);
     });
@@ -214,8 +214,8 @@ function renderModelsList(models) {
       const item = document.createElement('div');
       item.className = `models-modal-item ${m.name === state.model ? 'active' : ''}`;
       item.innerHTML = `
-        <div><div class="model-info-name">${m.name}</div><div class="model-info-meta">${sizeGb} · ${m.details?.parameter_size || ''} · ${m.details?.quantization_level || ''}</div></div>
-        <button class="model-select-btn ${m.name === state.model ? 'active-model' : ''}" data-action="selectModelAndClose" data-arg="${m.name}">${m.name === state.model ? '✓ ACTIVE' : 'SELECT'}</button>`;
+        <div><div class="model-info-name">${escHtml(m.name)}</div><div class="model-info-meta">${escHtml(sizeGb)} · ${escHtml(m.details?.parameter_size || '')} · ${escHtml(m.details?.quantization_level || '')}</div></div>
+        <button class="model-select-btn ${m.name === state.model ? 'active-model' : ''}" data-action="selectModelAndClose" data-arg="${escHtml(m.name)}">${m.name === state.model ? '✓ ACTIVE' : 'SELECT'}</button>`;
       modalBody.appendChild(item);
     });
   }
