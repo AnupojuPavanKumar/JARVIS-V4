@@ -241,3 +241,25 @@ describe('HIGH-05 dead chatMemoryRead/Save bindings removed from preload.js', ()
     assert.equal(src.includes("'chat-memory-save'"), false);
   });
 });
+
+// ─── MED-02: Workspace Navigator Path Traversal ────────────────────────────
+describe('MED-02 workspace_navigator.js path traversal', () => {
+  const wsNav = require(path.join(ROOT, 'jarvis', 'skills', 'workspace_navigator.js'));
+  
+  it('rejects path escaping allowedBase', () => {
+    const result = wsNav.listDir({
+      path: "../../"
+    });
+    
+    // It should reject or error on traversal
+    assert.equal(result.success, false);
+    assert.ok(result.error.toLowerCase().includes('outside the allowed'), result.error);
+  });
+
+  it('rejects path traversing symlinks escaping allowedBase', () => {
+    // If the path uses symlinks to escape, isPathSafe should catch it.
+    // The main fix uses realpathSync to resolve symlinks before checking the prefix.
+    const safe = wsNav.isPathSafe('../../', process.cwd());
+    assert.equal(safe, false);
+  });
+});

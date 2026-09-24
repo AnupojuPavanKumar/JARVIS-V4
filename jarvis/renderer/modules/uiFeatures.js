@@ -20,7 +20,7 @@ function openChatSearch() {
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'chat-search-overlay';
-    overlay.innerHTML = `<div class="chat-search-row"><input class="chat-search-input" id="chat-search-input" type="text" placeholder="Search messages…" autocomplete="off"><button class="chat-search-close" onclick="closeChatSearch()">✕</button></div><div class="chat-search-count" id="chat-search-count"></div><div class="chat-search-hits" id="chat-search-hits"></div>`;
+    overlay.innerHTML = `<div class="chat-search-row"><input class="chat-search-input" id="chat-search-input" type="text" placeholder="Search messages…" autocomplete="off"><button class="chat-search-close" data-action="closeChatSearch">✕</button></div><div class="chat-search-count" id="chat-search-count"></div><div class="chat-search-hits" id="chat-search-hits"></div>`;
     document.body.appendChild(overlay);
     document.getElementById('chat-search-input').addEventListener('input', e => runChatSearch(e.target.value));
     document.getElementById('chat-search-input').addEventListener('keydown', e => { if (e.key === 'Escape') closeChatSearch(); });
@@ -51,7 +51,7 @@ function runChatSearch(query) {
     const preview = h.text.slice(0, 120).replace(/\n/g, ' ');
     const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
     const highlighted = preview.replace(re, m => `<mark>${m}</mark>`);
-    return `<div class="chat-search-hit" onclick="scrollToMsg(${h.idx})"><div class="chat-search-hit-who">${who}</div>${highlighted}</div>`;
+    return `<div class="chat-search-hit" data-action="scrollToMsg" data-arg-json="${h.idx}"><div class="chat-search-hit-who">${who}</div>${highlighted}</div>`;
   }).join('') || '<div class="chat-search-hit"><div class="chat-search-hit-who">NO MATCHES</div></div>';
 }
 window.runChatSearch = runChatSearch;
@@ -132,7 +132,7 @@ function renderPrompts(filter) {
   if (!grid) return;
   const q = filter.toLowerCase();
   const list = q ? _prompts.filter(p => (p.title + p.body + p.category).toLowerCase().includes(q)) : _prompts;
-  grid.innerHTML = list.length ? list.map(p => `<div class="prompt-card"><div class="prompt-card-cat">${_uiEscHtml(p.category)}</div><div class="prompt-card-title">${_uiEscHtml(p.title)}</div><div class="prompt-card-body">${_uiEscHtml(p.body)}</div><div class="prompt-card-actions"><button class="prompt-card-use" onclick="usePrompt(${JSON.stringify(p.id)})">▶ USE</button><button class="prompt-card-del" onclick="deletePrompt(${JSON.stringify(p.id)})">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No prompts found</div>';
+  grid.innerHTML = list.length ? list.map(p => `<div class="prompt-card"><div class="prompt-card-cat">${_uiEscHtml(p.category)}</div><div class="prompt-card-title">${_uiEscHtml(p.title)}</div><div class="prompt-card-body">${_uiEscHtml(p.body)}</div><div class="prompt-card-actions"><button class="prompt-card-use" data-action="usePrompt" data-arg-json="${JSON.stringify(p.id)}">▶ USE</button><button class="prompt-card-del" data-action="deletePrompt" data-arg-json="${JSON.stringify(p.id)}">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No prompts found</div>';
 }
 window.renderPrompts = renderPrompts;
 
@@ -194,7 +194,7 @@ function renderSnippets(filter) {
   if (!list) return;
   const q = filter.toLowerCase();
   const items = q ? _snippets.filter(s => (s.title + s.code + s.lang).toLowerCase().includes(q)) : _snippets;
-  list.innerHTML = items.length ? items.map(s => `<div class="snip-item"><div class="snip-item-hdr"><span class="snip-title">${_uiEscHtml(s.title)}</span><span class="snip-tag ${s.lang}">${s.lang.toUpperCase()}</span></div><div class="snip-code-preview">${_uiEscHtml(s.code.slice(0, 200))}</div><div class="snip-actions"><button class="snip-btn use" onclick="useSnippet(${JSON.stringify(s.id)})">▶ INSERT</button><button class="snip-btn" onclick="copySnip(${JSON.stringify(s.id)})">⧉ COPY</button><button class="snip-btn del" onclick="deleteSnippet(${JSON.stringify(s.id)})">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No snippets found</div>';
+  list.innerHTML = items.length ? items.map(s => `<div class="snip-item"><div class="snip-item-hdr"><span class="snip-title">${_uiEscHtml(s.title)}</span><span class="snip-tag ${s.lang}">${s.lang.toUpperCase()}</span></div><div class="snip-code-preview">${_uiEscHtml(s.code.slice(0, 200))}</div><div class="snip-actions"><button class="snip-btn use" data-action="useSnippet" data-arg-json="${JSON.stringify(s.id)}">▶ INSERT</button><button class="snip-btn" data-action="copySnip" data-arg-json="${JSON.stringify(s.id)}">⧉ COPY</button><button class="snip-btn del" data-action="deleteSnippet" data-arg-json="${JSON.stringify(s.id)}">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No snippets found</div>';
 }
 window.renderSnippets = renderSnippets;
 
@@ -346,7 +346,7 @@ function buildCalcPanel() {
     if (['+', '-', '×', '÷'].includes(b)) c += ' calc-btn-op';
     if (b === '=') c += ' calc-btn-eq';
     if (b === 'C') c += ' calc-btn-clear';
-    return `<button class="${c}" onclick="calcPress(${JSON.stringify(b)})">${b}</button>`;
+    return `<button class="${c}" data-action="calcPress" data-arg-json="${JSON.stringify(b)}">${b}</button>`;
   }).join('')).join('');
   panel.querySelector('.panel-body').innerHTML = `<div class="calc-expr" id="calc-expr"></div><div class="calc-display" id="calc-display">0</div><div class="calc-grid">${btns}</div>`;
 }
@@ -360,7 +360,7 @@ function openShortcuts() {
     ov = document.createElement('div'); ov.id = 'shortcuts-overlay';
     ov.onclick = e => { if (e.target === ov) closeShortcuts(); };
     const sk = (keys, desc) => `<div class="shortcut-row"><div class="shortcut-keys">${keys.map(k => `<span class="shortcut-key">${k}</span>`).join('+')}</div><span class="shortcut-desc">${desc}</span></div>`;
-    ov.innerHTML = `<div id="shortcuts-box"><div class="shortcuts-hdr"><span class="shortcuts-title">⌨ KEYBOARD SHORTCUTS</span><button class="shortcuts-close" onclick="closeShortcuts()">✕</button></div>
+    ov.innerHTML = `<div id="shortcuts-box"><div class="shortcuts-hdr"><span class="shortcuts-title">⌨ KEYBOARD SHORTCUTS</span><button class="shortcuts-close" data-action="closeShortcuts">✕</button></div>
       <div class="shortcuts-section-title">GENERAL</div><div class="shortcuts-grid">
         ${sk(['Ctrl', 'K'], 'Command Palette')}${sk(['Ctrl', 'F'], 'Search Chat')}${sk(['Ctrl', '?'], 'Keyboard Shortcuts')}${sk(['Ctrl', 'L'], 'Clear Chat')}
         ${sk(['Enter'], 'Send Message')}${sk(['Shift', 'Enter'], 'New Line')}</div>
@@ -434,16 +434,12 @@ async function sendApiRequest() {
   const btn = document.getElementById('api-send-btn'); if (btn) btn.disabled = true;
   const respEl = document.getElementById('api-response-body');
   const respHdr = document.getElementById('api-response-hdr');
-  if (respEl) respEl.textContent = 'Sending…';
-  if (respHdr) respHdr.innerHTML = '';
-  try {
-    const res = await window.jarvis.invoke('http-request', { method, url, headers, body });
-    if (respHdr) {
-      const cls = res.status >= 500 ? 'api-status-5xx' : res.status >= 400 ? 'api-status-4xx' : 'api-status-2xx';
-      respHdr.innerHTML = `<span class="api-status-badge ${cls}">${res.status} ${res.statusText || ''}</span><span class="api-time">${res.time}ms</span>`;
-    }
-    if (respEl) { let b = res.body || ''; try { b = JSON.stringify(JSON.parse(b), null, 2); } catch {} respEl.textContent = b; }
-  } catch (e) { if (respEl) respEl.textContent = `Error: ${e.message}`; }
+  if (respHdr) {
+    respHdr.innerHTML = `<span class="api-status-badge api-status-5xx">403 Forbidden</span><span class="api-time">0ms</span>`;
+  }
+  if (respEl) {
+    respEl.textContent = "Error: Generic HTTP proxy disabled by security policy (SSRF prevention).";
+  }
   if (btn) btn.disabled = false;
 }
 window.sendApiRequest = sendApiRequest;
@@ -539,7 +535,7 @@ window.renderSchedulerJobs = async function() {
         <div style="font-size:10px; color:var(--accent-blue); margin-top:4px;">Payload: ${_uiEscHtml(job.payload.text || '')}</div>
       </div>
       <div>
-        <button class="micro-btn" style="color:var(--accent-red); border-color:var(--accent-red);" onclick="deleteSchedulerJob('${job.id}')">✕ DELETE</button>
+        <button class="micro-btn" style="color:var(--accent-red); border-color:var(--accent-red);" data-action="deleteSchedulerJob" data-arg="${job.id}">✕ DELETE</button>
       </div>
     </div>
   `).join('');

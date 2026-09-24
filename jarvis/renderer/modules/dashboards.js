@@ -58,7 +58,7 @@ function dashGeneral() {
     'Research the latest in AI', 'Build a React component for me',
   ];
   const chips = prompts.map(p =>
-    `<button class="welcome-chip" onclick="injectPrompt(${JSON.stringify(p)})">${escHtml(p)}</button>`
+    `<button class="welcome-chip" data-action="injectPrompt" data-arg-json="${JSON.stringify(p)}">${escHtml(p)}</button>`
   ).join('');
 
   return `<div class="mode-dashboard dash-general">
@@ -301,23 +301,23 @@ function dashCode() {
     { label: 'JSON Parse',   code: 'import json\ndata = \'{"name": "JARVIS", "version": 2}\'\nobj = json.loads(data)\nprint(obj["name"], obj["version"])' },
   ];
   const chips = templates.map(t =>
-    `<button class="template-chip" onclick="loadCodeTemplate(${JSON.stringify(t.code)})">${t.label}</button>`
+    `<button class="template-chip" data-action="loadCodeTemplate" data-arg-json="${JSON.stringify(t.code)}">${t.label}</button>`
   ).join('');
   return `<div class="mode-dashboard dash-code">
     <div class="dash-code-topbar">
       <div class="dash-code-controls">
-        <select id="code-lang" class="dash-select" onchange="onCodeLangChange()">
+        <select id="code-lang" class="dash-select" data-change="onCodeLangChange">
           <option value="python">Python</option>
           <option value="javascript">JavaScript (Node)</option>
           <option value="powershell">PowerShell</option>
           <option value="bash">Bash / Shell</option>
         </select>
-        <button class="dash-btn dash-btn-green" onclick="runDashCode()">▶ RUN</button>
-        <button class="dash-btn" onclick="clearDashCode()">⊘ CLEAR</button>
+        <button class="dash-btn dash-btn-green" data-action="runDashCode">▶ RUN</button>
+        <button class="dash-btn" data-action="clearDashCode">⊘ CLEAR</button>
         <div class="dash-sep"></div>
-        <button class="dash-btn dash-btn-cyan" onclick="reviewWithJarvis()">⬡ REVIEW</button>
-        <button class="dash-btn" onclick="explainWithJarvis()">◎ EXPLAIN</button>
-        <button class="dash-btn" onclick="optimizeWithJarvis()">⚡ OPTIMIZE</button>
+        <button class="dash-btn dash-btn-cyan" data-action="reviewWithJarvis">⬡ REVIEW</button>
+        <button class="dash-btn" data-action="explainWithJarvis">◎ EXPLAIN</button>
+        <button class="dash-btn" data-action="optimizeWithJarvis">⚡ OPTIMIZE</button>
       </div>
       <span id="code-line-count" class="code-meta">0 lines · 0 chars</span>
     </div>
@@ -334,8 +334,8 @@ function dashCode() {
         <div class="code-panel-hdr">
           <span>OUTPUT</span>
           <div class="phdr-actions">
-            <button class="micro-btn" onclick="clearCodeOutput()">CLEAR</button>
-            <button class="micro-btn" onclick="sendOutputToJarvis()">ASK JARVIS</button>
+            <button class="micro-btn" data-action="clearCodeOutput">CLEAR</button>
+            <button class="micro-btn" data-action="sendOutputToJarvis">ASK JARVIS</button>
           </div>
         </div>
         <div id="dash-code-output" class="dash-code-output">
@@ -445,8 +445,8 @@ function dashDebug() {
         <div class="debug-phdr">
           <span>⚠ PASTE ERROR / STACK TRACE</span>
           <div class="phdr-actions">
-            <button class="micro-btn" onclick="clearErrorInput()">CLEAR</button>
-            <button class="dash-btn dash-btn-orange" onclick="analyzeError()">⚠ ANALYZE</button>
+            <button class="micro-btn" data-action="clearErrorInput">CLEAR</button>
+            <button class="dash-btn dash-btn-orange" data-action="analyzeError">⚠ ANALYZE</button>
           </div>
         </div>
         <textarea id="debug-error-input" class="debug-textarea" spellcheck="false"
@@ -459,14 +459,14 @@ Traceback (most recent call last):
 KeyError: 'user_id'"></textarea>
         <div class="debug-patterns">
           <span class="pat-label">QUICK ANALYZE:</span>
-          <button class="pat-chip" onclick="debugPattern('memory leak')">Memory Leak</button>
-          <button class="pat-chip" onclick="debugPattern('null pointer / undefined reference')">Null Reference</button>
-          <button class="pat-chip" onclick="debugPattern('race condition / concurrency bug')">Race Condition</button>
-          <button class="pat-chip" onclick="debugPattern('infinite loop')">Infinite Loop</button>
-          <button class="pat-chip" onclick="debugPattern('CORS error')">CORS Error</button>
-          <button class="pat-chip" onclick="debugPattern('type mismatch / type error')">Type Error</button>
-          <button class="pat-chip" onclick="debugPattern('SQL injection vulnerability')">SQL Injection</button>
-          <button class="pat-chip" onclick="debugPattern('async/await / promise rejection')">Promise Error</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="memory leak">Memory Leak</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="null pointer / undefined reference">Null Reference</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="race condition / concurrency bug">Race Condition</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="infinite loop">Infinite Loop</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="CORS error">CORS Error</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="type mismatch / type error">Type Error</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="SQL injection vulnerability">SQL Injection</button>
+          <button class="pat-chip" data-action="debugPattern" data-arg="async/await / promise rejection">Promise Error</button>
         </div>
       </div>
       <div class="debug-proc-panel">
@@ -474,7 +474,7 @@ KeyError: 'user_id'"></textarea>
           <span>◈ LIVE PROCESSES</span>
           <div class="phdr-actions">
             <span id="proc-refresh-time" class="meta-txt">—</span>
-            <button class="micro-btn" onclick="refreshProcesses()">↻</button>
+            <button class="micro-btn" data-action="refreshProcesses">↻</button>
           </div>
         </div>
         <div class="proc-list-hdr"><span>PROCESS</span><span>CPU(s)</span><span>MEM(MB)</span></div>
@@ -484,7 +484,7 @@ KeyError: 'user_id'"></textarea>
     <div class="debug-footer">
       <div class="dbg-stat"><span class="dbg-stat-label">TOP PROCESS</span><span class="dbg-stat-val" id="dbg-top">—</span></div>
       <div class="dbg-stat"><span class="dbg-stat-label">LAST REFRESH</span><span class="dbg-stat-val" id="dbg-time">—</span></div>
-      <button class="dash-btn dash-btn-orange" onclick="analyzeSystem()">⬡ ANALYZE MY SYSTEM WITH JARVIS</button>
+      <button class="dash-btn dash-btn-orange" data-action="analyzeSystem">⬡ ANALYZE MY SYSTEM WITH JARVIS</button>
     </div>
   </div>`;
 }
@@ -552,19 +552,19 @@ function dashResearch() {
   const questions= JSON.parse(localStorage.getItem('jarvis-research-questions') || '[]');
   const outline  = JSON.parse(localStorage.getItem('jarvis-research-outline') || '[]');
   const qHTML = questions.map((q, i) =>
-    `<div class="list-item"><span class="li-bullet">◎</span><span>${escHtml(q)}</span><button class="item-del" onclick="removeQuestion(${i})">✕</button></div>`
+    `<div class="list-item"><span class="li-bullet">◎</span><span>${escHtml(q)}</span><button class="item-del" data-action="removeQuestion" data-arg-json="${i}">✕</button></div>`
   ).join('') || '<div class="list-ph">Add questions to guide your research</div>';
   const oHTML = outline.map((o, i) =>
-    `<div class="list-item"><span class="li-bullet">›</span><span>${escHtml(o)}</span><button class="item-del" onclick="removeOutlineItem(${i})">✕</button></div>`
+    `<div class="list-item"><span class="li-bullet">›</span><span>${escHtml(o)}</span><button class="item-del" data-action="removeOutlineItem" data-arg-json="${i}">✕</button></div>`
   ).join('') || '<div class="list-ph">Add outline items or ask JARVIS to generate one</div>';
   return `<div class="mode-dashboard dash-research">
     <div class="research-topbar">
       <span class="res-icon">◎</span>
       <input type="text" id="research-topic" class="research-topic-input" placeholder="Enter research topic, question, or domain…"
-        onkeydown="if(event.key==='Enter') window.startResearch()">
-      <button class="dash-btn dash-btn-purple" onclick="window.startResearch()">⬡ RESEARCH</button>
-      <button class="dash-btn" onclick="window.generateOutline()">≡ OUTLINE</button>
-      <button class="dash-btn" onclick="window.findSources()">⎋ SOURCES</button>
+        data-keydown-enter="window.startResearch">
+      <button class="dash-btn dash-btn-purple" data-action="window.startResearch">⬡ RESEARCH</button>
+      <button class="dash-btn" data-action="window.generateOutline">≡ OUTLINE</button>
+      <button class="dash-btn" data-action="window.findSources">⎋ SOURCES</button>
     </div>
     <div class="research-workspace">
       <div class="research-notes-panel">
@@ -572,8 +572,8 @@ function dashResearch() {
           <span>📄 NOTES</span>
           <div class="phdr-actions">
             <span id="notes-saved" class="save-ind">—</span>
-            <button class="micro-btn" onclick="window.clearResearchNotes()">CLEAR</button>
-            <button class="micro-btn" onclick="window.sendNotesToJarvis()">ASK JARVIS</button>
+            <button class="micro-btn" data-action="window.clearResearchNotes">CLEAR</button>
+            <button class="micro-btn" data-action="window.sendNotesToJarvis">ASK JARVIS</button>
           </div>
         </div>
         <textarea id="research-notes" class="research-notes-ta"
@@ -584,25 +584,25 @@ function dashResearch() {
           <div class="res-phdr">
             <span>≡ OUTLINE</span>
             <div class="phdr-actions">
-              <button class="micro-btn" onclick="window.addOutlineItem()">+ ADD</button>
-              <button class="micro-btn" onclick="window.clearOutline()">CLEAR</button>
+              <button class="micro-btn" data-action="window.addOutlineItem">+ ADD</button>
+              <button class="micro-btn" data-action="window.clearOutline">CLEAR</button>
             </div>
           </div>
           <div id="research-outline" class="res-list">${oHTML}</div>
           <input type="text" id="outline-input" class="list-input" placeholder="Add outline item…"
-            onkeydown="if(event.key==='Enter') window.addOutlineItem()">
+            data-keydown-enter="window.addOutlineItem">
         </div>
         <div class="research-questions-panel">
           <div class="res-phdr">
             <span>? KEY QUESTIONS</span>
             <div class="phdr-actions">
-              <button class="micro-btn" onclick="window.generateQuestions()">⬡ GENERATE</button>
-              <button class="micro-btn" onclick="window.clearQuestions()">CLEAR</button>
+              <button class="micro-btn" data-action="window.generateQuestions">⬡ GENERATE</button>
+              <button class="micro-btn" data-action="window.clearQuestions">CLEAR</button>
             </div>
           </div>
           <div id="research-questions" class="res-list">${qHTML}</div>
           <input type="text" id="question-input" class="list-input" placeholder="Add research question…"
-            onkeydown="if(event.key==='Enter') window.addQuestion()">
+            data-keydown-enter="window.addQuestion">
         </div>
       </div>
     </div>
@@ -644,23 +644,23 @@ window.addQuestion = function() {
   const inp = document.getElementById('question-input'); if (!inp?.value?.trim()) return;
   const arr = JSON.parse(localStorage.getItem('jarvis-research-questions') || '[]');
   arr.push(inp.value.trim()); localStorage.setItem('jarvis-research-questions', JSON.stringify(arr)); inp.value = '';
-  resRerender('jarvis-research-questions', 'research-questions', 'Add questions', (q, i) => `<div class="list-item"><span class="li-bullet">◎</span><span>${escHtml(q)}</span><button class="item-del" onclick="removeQuestion(${i})">✕</button></div>`);
+  resRerender('jarvis-research-questions', 'research-questions', 'Add questions', (q, i) => `<div class="list-item"><span class="li-bullet">◎</span><span>${escHtml(q)}</span><button class="item-del" data-action="removeQuestion" data-arg-json="${i}">✕</button></div>`);
 };
 window.removeQuestion = function(i) {
   const arr = JSON.parse(localStorage.getItem('jarvis-research-questions') || '[]');
   arr.splice(i, 1); localStorage.setItem('jarvis-research-questions', JSON.stringify(arr));
-  resRerender('jarvis-research-questions', 'research-questions', 'Add questions', (q, j) => `<div class="list-item"><span class="li-bullet">◎</span><span>${escHtml(q)}</span><button class="item-del" onclick="removeQuestion(${j})">✕</button></div>`);
+  resRerender('jarvis-research-questions', 'research-questions', 'Add questions', (q, j) => `<div class="list-item"><span class="li-bullet">◎</span><span>${escHtml(q)}</span><button class="item-del" data-action="removeQuestion" data-arg-json="${j}">✕</button></div>`);
 };
 window.addOutlineItem = function() {
   const inp = document.getElementById('outline-input'); if (!inp?.value?.trim()) return;
   const arr = JSON.parse(localStorage.getItem('jarvis-research-outline') || '[]');
   arr.push(inp.value.trim()); localStorage.setItem('jarvis-research-outline', JSON.stringify(arr)); inp.value = '';
-  resRerender('jarvis-research-outline', 'research-outline', 'Add outline items', (o, i) => `<div class="list-item"><span class="li-bullet">›</span><span>${escHtml(o)}</span><button class="item-del" onclick="removeOutlineItem(${i})">✕</button></div>`);
+  resRerender('jarvis-research-outline', 'research-outline', 'Add outline items', (o, i) => `<div class="list-item"><span class="li-bullet">›</span><span>${escHtml(o)}</span><button class="item-del" data-action="removeOutlineItem" data-arg-json="${i}">✕</button></div>`);
 };
 window.removeOutlineItem = function(i) {
   const arr = JSON.parse(localStorage.getItem('jarvis-research-outline') || '[]');
   arr.splice(i, 1); localStorage.setItem('jarvis-research-outline', JSON.stringify(arr));
-  resRerender('jarvis-research-outline', 'research-outline', 'Add outline items', (o, j) => `<div class="list-item"><span class="li-bullet">›</span><span>${escHtml(o)}</span><button class="item-del" onclick="removeOutlineItem(${j})">✕</button></div>`);
+  resRerender('jarvis-research-outline', 'research-outline', 'Add outline items', (o, j) => `<div class="list-item"><span class="li-bullet">›</span><span>${escHtml(o)}</span><button class="item-del" data-action="removeOutlineItem" data-arg-json="${j}">✕</button></div>`);
 };
 
 // ─── 17e. Automation Dashboard ──────────────────────────────────
@@ -677,7 +677,7 @@ function dashAutomation() {
     { name: 'Event Log Errors',lang: 'powershell', code: 'Get-EventLog -LogName System -Newest 5 -EntryType Error | Select-Object TimeGenerated, Source, Message | Format-List' },
   ];
   const chips = tpls.map(t =>
-    `<button class="auto-tpl-chip" onclick="loadAutoTemplate(${JSON.stringify(t.lang)},${JSON.stringify(t.code)})">${t.name}</button>`
+    `<button class="auto-tpl-chip" data-action="loadAutoTemplate" data-arg1="${t.lang}" data-arg2="${t.code}">${t.name}</button>`
   ).join('');
   return `<div class="mode-dashboard dash-auto">
     <div class="auto-left">
@@ -687,10 +687,10 @@ function dashAutomation() {
           <option value="python">Python</option>
           <option value="bash">Bash</option>
         </select>
-        <button class="dash-btn dash-btn-yellow" onclick="runAutoScript()">▶ EXECUTE</button>
-        <button class="dash-btn" onclick="clearAutoScript()">⊘ CLEAR</button>
-        <button class="dash-btn dash-btn-cyan" onclick="generateAutoScript()">⬡ GENERATE</button>
-        <button class="dash-btn" onclick="scheduleScript()">⏱ SCHEDULE</button>
+        <button class="dash-btn dash-btn-yellow" data-action="runAutoScript">▶ EXECUTE</button>
+        <button class="dash-btn" data-action="clearAutoScript">⊘ CLEAR</button>
+        <button class="dash-btn dash-btn-cyan" data-action="generateAutoScript">⬡ GENERATE</button>
+        <button class="dash-btn" data-action="scheduleScript">⏱ SCHEDULE</button>
       </div>
       <textarea id="auto-editor" class="auto-editor-ta" spellcheck="false"
         placeholder="# Write or generate your automation script here…&#10;# Pick a quick template below or ask JARVIS to generate one"></textarea>
@@ -703,8 +703,8 @@ function dashAutomation() {
         <span>⌨ EXECUTION OUTPUT</span>
         <div class="phdr-actions">
           <span id="auto-exec-time" class="meta-txt">—</span>
-          <button class="micro-btn" onclick="clearAutoOutput()">CLEAR</button>
-          <button class="micro-btn" onclick="analyzeAutoOutput()">ANALYZE</button>
+          <button class="micro-btn" data-action="clearAutoOutput">CLEAR</button>
+          <button class="micro-btn" data-action="analyzeAutoOutput">ANALYZE</button>
         </div>
       </div>
       <div id="auto-output" class="auto-output">
@@ -764,31 +764,31 @@ function dashBusiness() {
   const kpiCards = kpis.map((k, i) => `
     <div class="kpi-card" style="--kc:${k.color}">
       <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value" contenteditable="true" id="kpi-val-${i}" onblur="saveKPI(${i},this.innerText)">${escHtml(k.value)}</div>
+      <div class="kpi-value" contenteditable="true" id="kpi-val-${i}" data-blur="saveKPI" data-idx="${i}">${escHtml(k.value)}</div>
       <div class="kpi-bar-track"><div class="kpi-bar-fill" id="kpi-bar-${i}" style="width:${k.progress}%;background:${k.color}"></div></div>
-      <input type="range" class="kpi-slider" min="0" max="100" value="${k.progress}" oninput="updateKPIProg(${i},this.value)">
+      <input type="range" class="kpi-slider" min="0" max="100" value="${k.progress}" data-input="updateKPIProg" data-idx="${i}">
     </div>`).join('');
   const goalHTML = goals.map((g, i) => `
     <div class="goal-item ${g.done ? 'done' : ''}">
-      <input type="checkbox" ${g.done ? 'checked' : ''} onchange="toggleGoal(${i})" id="g-${i}">
+      <input type="checkbox" ${g.done ? 'checked' : ''} data-change="toggleGoal" data-arg="${i}" id="g-${i}">
       <label for="g-${i}">${escHtml(g.text)}</label>
       <span class="goal-pri goal-${g.priority.toLowerCase()}">${g.priority}</span>
-      <button class="item-del" onclick="deleteGoal(${i})">✕</button>
+      <button class="item-del" data-action="deleteGoal" data-arg-json="${i}">✕</button>
     </div>`).join('') || '<div class="list-ph">Add your strategic goals</div>';
   return `<div class="mode-dashboard dash-biz">
     <div class="biz-kpi-row">${kpiCards}</div>
     <div class="biz-bottom">
       <div class="biz-goals-panel">
-        <div class="biz-phdr"><span>▲ STRATEGIC GOALS</span><button class="micro-btn" onclick="askGoalsJarvis()">⬡ JARVIS</button></div>
+        <div class="biz-phdr"><span>▲ STRATEGIC GOALS</span><button class="micro-btn" data-action="askGoalsJarvis">⬡ JARVIS</button></div>
         <div id="goals-list" class="goals-list">${goalHTML}</div>
         <div class="biz-add-row">
-          <input type="text" id="goal-input" class="list-input" placeholder="Add goal…" onkeydown="if(event.key==='Enter') addGoal()">
+          <input type="text" id="goal-input" class="list-input" placeholder="Add goal…" data-keydown-enter="addGoal">
           <select id="goal-priority" class="mini-sel"><option>HIGH</option><option selected>MED</option><option>LOW</option></select>
-          <button class="dash-btn-sm" onclick="addGoal()">+</button>
+          <button class="dash-btn-sm" data-action="addGoal">+</button>
         </div>
       </div>
       <div class="biz-swot-panel">
-        <div class="biz-phdr"><span>◈ SWOT ANALYSIS</span><div class="phdr-actions"><button class="micro-btn" onclick="analyzeSwot()">⬡ ANALYZE</button><button class="micro-btn" onclick="saveSwot()">SAVE</button></div></div>
+        <div class="biz-phdr"><span>◈ SWOT ANALYSIS</span><div class="phdr-actions"><button class="micro-btn" data-action="analyzeSwot">⬡ ANALYZE</button><button class="micro-btn" data-action="saveSwot">SAVE</button></div></div>
         <div class="swot-grid">
           <div class="swot-cell swot-s"><div class="swot-label">STRENGTHS</div><textarea id="swot-s" class="swot-ta" placeholder="Internal strengths…">${escHtml(swot.s)}</textarea></div>
           <div class="swot-cell swot-w"><div class="swot-label">WEAKNESSES</div><textarea id="swot-w" class="swot-ta" placeholder="Internal weaknesses…">${escHtml(swot.w)}</textarea></div>
@@ -799,14 +799,14 @@ function dashBusiness() {
       <div class="biz-ask-panel">
         <div class="biz-phdr"><span>⬡ STRATEGY ADVISOR</span></div>
         <div class="biz-asks">
-          <button class="biz-ask-btn" onclick="bizAsk('growth strategy')">Growth Strategy</button>
-          <button class="biz-ask-btn" onclick="bizAsk('competitive analysis')">Competitive Analysis</button>
-          <button class="biz-ask-btn" onclick="bizAsk('revenue optimization')">Revenue Optimization</button>
-          <button class="biz-ask-btn" onclick="bizAsk('market expansion')">Market Expansion</button>
-          <button class="biz-ask-btn" onclick="bizAsk('risk assessment and mitigation')">Risk Assessment</button>
-          <button class="biz-ask-btn" onclick="bizAsk('fundraising and investor strategy')">Fundraising</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="growth strategy">Growth Strategy</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="competitive analysis">Competitive Analysis</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="revenue optimization">Revenue Optimization</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="market expansion">Market Expansion</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="risk assessment and mitigation">Risk Assessment</button>
+          <button class="biz-ask-btn" data-action="bizAsk" data-arg="fundraising and investor strategy">Fundraising</button>
         </div>
-        <button class="dash-btn dash-btn-yellow fw-btn" onclick="fullBizAnalysis()">⬡ FULL STRATEGIC ANALYSIS</button>
+        <button class="dash-btn dash-btn-yellow fw-btn" data-action="fullBizAnalysis">⬡ FULL STRATEGIC ANALYSIS</button>
       </div>
     </div>
   </div>`;
@@ -842,10 +842,10 @@ function renderGoals(goals) {
   const el = document.getElementById('goals-list'); if (!el) return;
   el.innerHTML = goals.map((g, i) => `
     <div class="goal-item ${g.done ? 'done' : ''}">
-      <input type="checkbox" ${g.done ? 'checked' : ''} onchange="toggleGoal(${i})" id="g-${i}">
+      <input type="checkbox" ${g.done ? 'checked' : ''} data-change="toggleGoal" data-arg="${i}" id="g-${i}">
       <label for="g-${i}">${escHtml(g.text)}</label>
       <span class="goal-pri goal-${g.priority.toLowerCase()}">${g.priority}</span>
-      <button class="item-del" onclick="deleteGoal(${i})">✕</button>
+      <button class="item-del" data-action="deleteGoal" data-arg-json="${i}">✕</button>
     </div>`).join('') || '<div class="list-ph">Add your strategic goals</div>';
 }
 window.saveSwot = function() {
@@ -891,20 +891,20 @@ function dashCreative() {
       </div>
       <div class="creative-topbar-right">
         <span id="creative-wc" class="wc-badge">0 words</span>
-        <button class="dash-btn dash-btn-pink" onclick="generateCreative()">✦ GENERATE</button>
-        <button class="dash-btn" onclick="improveCreative()">◎ IMPROVE</button>
-        <button class="dash-btn" onclick="sparkIdea()">⚡ SPARK</button>
-        <button class="dash-btn" onclick="copyCreative()">⎘ COPY</button>
-        <button class="dash-btn" onclick="clearCreative()">⊘ CLEAR</button>
+        <button class="dash-btn dash-btn-pink" data-action="generateCreative">✦ GENERATE</button>
+        <button class="dash-btn" data-action="improveCreative">◎ IMPROVE</button>
+        <button class="dash-btn" data-action="sparkIdea">⚡ SPARK</button>
+        <button class="dash-btn" data-action="copyCreative">⎘ COPY</button>
+        <button class="dash-btn" data-action="clearCreative">⊘ CLEAR</button>
       </div>
     </div>
     <div class="creative-workspace">
-      <textarea id="creative-editor" class="creative-ta" oninput="updateWordCount()"
+      <textarea id="creative-editor" class="creative-ta" data-input="updateWordCount"
         placeholder="Start writing here…&#10;&#10;Or use:&#10;✦ GENERATE — create from scratch&#10;◎ IMPROVE — enhance existing text&#10;⚡ SPARK  — get creative ideas">${escHtml(saved)}</textarea>
     </div>
     <div class="creative-footer">
       <div class="creative-ideas-panel">
-        <div class="ci-hdr"><span>✦ IDEA SPARKS</span><button class="micro-btn" onclick="sparkIdea()">GENERATE</button></div>
+        <div class="ci-hdr"><span>✦ IDEA SPARKS</span><button class="micro-btn" data-action="sparkIdea">GENERATE</button></div>
         <div id="creative-ideas" class="creative-ideas"><div class="list-ph">Click SPARK to generate creative ideas</div></div>
       </div>
     </div>
@@ -976,9 +976,9 @@ function dashProductivity() {
           </div>
         </div>
         <div class="pomo-controls">
-          <button class="pomo-btn pomo-start" id="pomo-start" onclick="startPomodoro()">▶ START</button>
-          <button class="pomo-btn" onclick="resetPomodoro()">↺ RESET</button>
-          <button class="pomo-btn" onclick="skipPhase()">⏭ SKIP</button>
+          <button class="pomo-btn pomo-start" id="pomo-start" data-action="startPomodoro">▶ START</button>
+          <button class="pomo-btn" data-action="resetPomodoro">↺ RESET</button>
+          <button class="pomo-btn" data-action="skipPhase">⏭ SKIP</button>
         </div>
         <div class="pomo-stats">
           <div class="ps-stat"><span class="ps-label">POMODOROS</span><span class="ps-val" id="pomo-count">0</span></div>
@@ -991,17 +991,17 @@ function dashProductivity() {
         <div class="prod-phdr">
           <span>✓ TODAY'S TASKS</span>
           <div class="phdr-actions">
-            <button class="micro-btn" onclick="clearDoneTasks()">CLEAR DONE</button>
-            <button class="micro-btn" onclick="prioritizeWithJarvis()">⬡ PRIORITIZE</button>
+            <button class="micro-btn" data-action="clearDoneTasks">CLEAR DONE</button>
+            <button class="micro-btn" data-action="prioritizeWithJarvis">⬡ PRIORITIZE</button>
           </div>
         </div>
         <div id="tasks-list" class="tasks-list">${taskHTML}</div>
         <div class="task-add-row">
-          <input type="text" id="task-input" class="list-input" placeholder="Add task…" onkeydown="if(event.key==='Enter') addTask()">
+          <input type="text" id="task-input" class="list-input" placeholder="Add task…" data-keydown-enter="addTask">
           <select id="task-priority" class="mini-sel"><option>HIGH</option><option selected>MED</option><option>LOW</option></select>
-          <button class="dash-btn-sm" onclick="addTask()">+</button>
+          <button class="dash-btn-sm" data-action="addTask">+</button>
         </div>
-        <button class="dash-btn fw-btn" onclick="planWithJarvis()">⬡ PLAN MY DAY WITH JARVIS</button>
+        <button class="dash-btn fw-btn" data-action="planWithJarvis">⬡ PLAN MY DAY WITH JARVIS</button>
       </div>
     </div>
     <div class="prod-right">
@@ -1010,14 +1010,14 @@ function dashProductivity() {
           <span>⏰ TIME BLOCKS</span>
           <div class="phdr-actions">
             <span id="tb-total" class="meta-txt">Total: ${tbTotal}m (${(tbTotal/60).toFixed(1)}h)</span>
-            <button class="micro-btn" onclick="clearTBs()">CLEAR</button>
+            <button class="micro-btn" data-action="clearTBs">CLEAR</button>
           </div>
         </div>
         <div id="tb-list" class="tb-list">${tbHTML}</div>
         <div class="tb-add-row">
-          <input type="text" id="tb-task" class="list-input" placeholder="Task name…" onkeydown="if(event.key==='Enter') addTimeBlock()">
+          <input type="text" id="tb-task" class="list-input" placeholder="Task name…" data-keydown-enter="addTimeBlock">
           <input type="number" id="tb-mins" class="tb-mins-inp" value="25" min="5" max="240">
-          <button class="dash-btn-sm" onclick="addTimeBlock()">+</button>
+          <button class="dash-btn-sm" data-action="addTimeBlock">+</button>
         </div>
       </div>
     </div>
@@ -1033,10 +1033,10 @@ function renderTasksHTML(tasks) {
   return sorted.map((t, si) => {
     const ri = tasks.indexOf(t);
     return `<div class="task-item ${t.done ? 'done' : ''}">
-      <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask(${ri})">
+      <input type="checkbox" ${t.done ? 'checked' : ''} data-change="toggleTask" data-arg="${ri}">
       <span class="task-text">${escHtml(t.text)}</span>
       <span class="task-pri task-${t.priority.toLowerCase()}">${t.priority}</span>
-      <button class="item-del" onclick="deleteTask(${ri})">✕</button>
+      <button class="item-del" data-action="deleteTask" data-arg-json="${ri}">✕</button>
     </div>`;
   }).join('') || '<div class="list-ph">Add tasks for today</div>';
 }
@@ -1044,10 +1044,10 @@ function renderTasksHTML(tasks) {
 function renderTBsHTML(tbs) {
   return tbs.map((tb, i) => `
     <div class="tb-item ${tb.done ? 'done' : ''}">
-      <input type="checkbox" ${tb.done ? 'checked' : ''} onchange="toggleTB(${i})">
+      <input type="checkbox" ${tb.done ? 'checked' : ''} data-change="toggleTB" data-arg="${i}">
       <span class="tb-task">${escHtml(tb.task)}</span>
       <span class="tb-dur">${tb.mins}m</span>
-      <button class="item-del" onclick="deleteTB(${i})">✕</button>
+      <button class="item-del" data-action="deleteTB" data-arg-json="${i}">✕</button>
     </div>`).join('') || '<div class="list-ph">Plan your time blocks</div>';
 }
 

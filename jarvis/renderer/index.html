@@ -102,9 +102,9 @@
       </div>
     </div>
     <div id="titlebar-controls">
-      <button id="btn-min" onclick="window.jarvis.minimize()" title="Minimize">─</button>
-      <button id="btn-max" onclick="window.jarvis.maximize()" title="Maximize">□</button>
-      <button id="btn-close" onclick="window.jarvis.close()" title="Close">✕</button>
+      <button id="btn-min" data-action="window.jarvis.minimize" title="Minimize">─</button>
+      <button id="btn-max" data-action="window.jarvis.maximize" title="Maximize">□</button>
+      <button id="btn-close" data-action="window.jarvis.close" title="Close">✕</button>
     </div>
   </header>
 
@@ -122,11 +122,11 @@
       </div>
       <div id="sidebar-modes"></div>
       <div id="sidebar-bottom">
-        <button class="sb-btn" id="btn-diagnostics" title="Diagnostics" onclick="openDiagnosticsModal()">
+        <button class="sb-btn" id="btn-diagnostics" title="Diagnostics" data-action="openDiagnosticsModal">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sb-icon" style="width:1em;height:1em;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
           <span class="sb-label">DIAG</span>
         </button>
-        <button class="sb-btn" id="btn-scheduler" title="Scheduler" onclick="openSchedulerModal()">
+        <button class="sb-btn" id="btn-scheduler" title="Scheduler" data-action="openSchedulerModal">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sb-icon" style="width:1em;height:1em;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
           <span class="sb-label">TASKS</span>
         </button>
@@ -140,7 +140,7 @@
         </button>
         <div class="sb-divider"></div>
         <button class="sb-btn sb-btn-power" id="btn-poweroff" title="Power Off — Quit JARVIS &amp; Ollama"
-          onclick="confirmPowerOff()">
+          data-action="confirmPowerOff">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sb-icon power-icon" style="width:1.2em;height:1.2em;"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
           <span class="sb-label">POWER</span>
         </button>
@@ -180,14 +180,14 @@
             <div id="hud-date-str">──────────</div>
           </div>
           <div id="model-badge" title="Click to switch active model"
-            onclick="refreshModels(); openModal('models-modal')" class="interactive-badge">
+            data-action="openModels" class="interactive-badge">
             <span class="model-icon">◈</span>
             <span id="active-model-label">llama3.2</span>
           </div>
 
           <!-- Hamburger Menu -->
           <div id="hamburger-wrap">
-            <button id="btn-hamburger" title="Options" onclick="toggleHamburger()">
+            <button id="btn-hamburger" title="Options" data-action="toggleHamburger">
               <span></span>
               <span></span>
               <span></span>
@@ -198,22 +198,22 @@
 
               <div class="ham-section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1em;height:1em;margin-right:4px;vertical-align:-0.15em"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><line x1="6" y1="9" x2="6" y2="21"></line></svg> GIT</div>
 
-              <button class="ham-item" onclick="gitAction('status')">
+              <button class="ham-item" data-action="gitAction" data-arg="status">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span>
                 <span>Status</span>
                 <span class="ham-badge safe">SAFE</span>
               </button>
-              <button class="ham-item" onclick="gitAction('log')">
+              <button class="ham-item" data-action="gitAction" data-arg="log">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg></span>
                 <span>Log</span>
                 <span class="ham-badge safe">SAFE</span>
               </button>
-              <button class="ham-item" onclick="gitAction('diff')">
+              <button class="ham-item" data-action="gitAction" data-arg="diff">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></span>
                 <span>Diff</span>
                 <span class="ham-badge safe">SAFE</span>
               </button>
-              <button class="ham-item" onclick="gitAction('branch')">
+              <button class="ham-item" data-action="gitAction" data-arg="branch">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></span>
                 <span>Branches</span>
                 <span class="ham-badge safe">SAFE</span>
@@ -221,17 +221,17 @@
 
               <div class="ham-divider"></div>
 
-              <button class="ham-item" onclick="gitAction('pull')">
+              <button class="ham-item" data-action="gitAction" data-arg="pull">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></span>
                 <span>Pull</span>
                 <span class="ham-badge warn">CONFIRM</span>
               </button>
-              <button class="ham-item" onclick="gitAction('add-commit')">
+              <button class="ham-item" data-action="gitAction" data-arg="add-commit">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></span>
                 <span>Add &amp; Commit</span>
                 <span class="ham-badge warn">CONFIRM</span>
               </button>
-              <button class="ham-item" onclick="gitAction('push')">
+              <button class="ham-item" data-action="gitAction" data-arg="push">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg></span>
                 <span>Push</span>
                 <span class="ham-badge warn">CONFIRM</span>
@@ -240,32 +240,32 @@
               <div class="ham-divider"></div>
 
               <div class="ham-section-title" style="margin-top:2px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1em;height:1em;margin-right:4px;vertical-align:-0.15em"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> QUICK</div>
-              <button class="ham-item" onclick="openModal('memory-modal'); renderMemory(); closeHamburger()">
+              <button class="ham-item" data-action="openMemoryModal">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
                 <span>Memory</span>
               </button>
-              <button class="ham-item" id="ham-wake-btn" onclick="toggleWakeWord(); closeHamburger()">
+              <button class="ham-item" id="ham-wake-btn" data-action="toggleWakeWord">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></span>
                 <span>Wake Word</span>
                 <span class="ham-badge" id="ham-wake-badge">OFF</span>
               </button>
-              <button class="ham-item" onclick="window.loadProject(); closeHamburger()">
+              <button class="ham-item" data-action="loadProject">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"></line><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>
                 <span>Load Project</span>
               </button>
-              <button class="ham-item" onclick="window.clearProject(); closeHamburger()">
+              <button class="ham-item" data-action="clearProjectAndClose">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></span>
                 <span>Clear Project</span>
               </button>
-              <button class="ham-item" onclick="openTerminalModal(); closeHamburger()">
+              <button class="ham-item" data-action="openTerminalAndClose">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></span>
                 <span>Terminal</span>
               </button>
-              <button class="ham-item" onclick="quickAction('models'); closeHamburger()">
+              <button class="ham-item" data-action="quickAction" data-arg="models">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg></span>
                 <span>Scan Models</span>
               </button>
-              <button class="ham-item" onclick="exportChat(); closeHamburger()">
+              <button class="ham-item" data-action="exportChatAndClose">
                 <span class="ham-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1.2em;height:1.2em"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></span>
                 <span>Export Chat</span>
               </button>
@@ -274,27 +274,27 @@
 
               <div class="ham-section-title" style="margin-top:2px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1em;height:1em;margin-right:4px;vertical-align:-0.15em"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg> THEME</div>
               <div style="padding: 4px 10px 8px; display:grid; grid-template-columns: repeat(5,1fr); gap:6px">
-                <button class="theme-swatch" id="ham-theme-ironman" onclick="applyTheme('ironman'); closeHamburger()"
+                <button class="theme-swatch" id="ham-theme-ironman" data-action="applyTheme" data-arg="ironman"
                   title="Iron Man">
                   <div class="theme-dot" style="background: radial-gradient(circle, #00d4ff, #020c18)">⬡</div>
                   <span class="theme-name">IRON MAN</span>
                 </button>
-                <button class="theme-swatch" id="ham-theme-phantom" onclick="applyTheme('phantom'); closeHamburger()"
+                <button class="theme-swatch" id="ham-theme-phantom" data-action="applyTheme" data-arg="phantom"
                   title="Phantom">
                   <div class="theme-dot" style="background: radial-gradient(circle, #ff2244, #070005)">☠</div>
                   <span class="theme-name">PHANTOM</span>
                 </button>
-                <button class="theme-swatch" id="ham-theme-matrix" onclick="applyTheme('matrix'); closeHamburger()"
+                <button class="theme-swatch" id="ham-theme-matrix" data-action="applyTheme" data-arg="matrix"
                   title="Matrix">
                   <div class="theme-dot" style="background: radial-gradient(circle, #00ff41, #000800)">⊞</div>
                   <span class="theme-name">MATRIX</span>
                 </button>
-                <button class="theme-swatch" id="ham-theme-nova" onclick="applyTheme('nova'); closeHamburger()"
+                <button class="theme-swatch" id="ham-theme-nova" data-action="applyTheme" data-arg="nova"
                   title="Nova">
                   <div class="theme-dot" style="background: radial-gradient(circle, #b86bff, #05020e)">✦</div>
                   <span class="theme-name">NOVA</span>
                 </button>
-                <button class="theme-swatch" id="ham-theme-ghost" onclick="applyTheme('ghost'); closeHamburger()"
+                <button class="theme-swatch" id="ham-theme-ghost" data-action="applyTheme" data-arg="ghost"
                   title="Ghost">
                   <div class="theme-dot"
                     style="background: radial-gradient(circle, #0057ff, #f0f4f8); border-color: rgba(0,87,255,0.3)">◈
@@ -324,10 +324,10 @@
               <span class="cph-label">JARVIS CHAT</span>
             </div>
             <div class="cph-right">
-              <button class="micro-btn dw-off" id="btn-deepwork" onclick="toggleDeepWork()" title="Toggle Deep Work Mode">🧠 FAST</button>
-              <button class="micro-btn" onclick="newSession()" title="New session">NEW</button>
-              <button class="micro-btn" onclick="clearCurrentChat()" title="Clear">CLEAR</button>
-              <button class="micro-btn" onclick="exportChat()" title="Export">EXPORT</button>
+              <button class="micro-btn dw-off" id="btn-deepwork" data-action="toggleDeepWork" title="Toggle Deep Work Mode">🧠 FAST</button>
+              <button class="micro-btn" data-action="newSession" title="New session">NEW</button>
+              <button class="micro-btn" data-action="clearCurrentChat" title="Clear">CLEAR</button>
+              <button class="micro-btn" data-action="exportChat" title="Export">EXPORT</button>
             </div>
           </div>
 
@@ -374,7 +374,7 @@
                 </button>
                 <!-- Issue 12 & 14: stream cancel button — shown only while streaming -->
                 <button id="stream-cancel-btn" title="Cancel generation (Esc)" aria-label="Cancel stream"
-                  onclick="cancelStream()"
+                  data-action="cancelStream"
                   style="display:none; align-items:center; gap:6px; background:rgba(255,60,60,0.15); border:1px solid rgba(255,60,60,0.4); color:#ff6b6b; padding:0 14px; border-radius:8px; font-size:11px; font-weight:700; letter-spacing:.08em; cursor:pointer; transition:background .2s;">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
                     style="width:14px;height:14px;">
@@ -416,9 +416,9 @@
       <div class="hud-panel" id="panel-actions">
         <div class="panel-hdr"><span class="panel-hdr-icon">▶</span>QUICK ACTIONS</div>
         <div class="panel-body">
-          <button class="qa-btn" onclick="quickAction('terminal')">⌨ TERMINAL</button>
-          <button class="qa-btn" onclick="quickAction('models')">◉ SCAN MODELS</button>
-          <button class="qa-btn" onclick="exportChat()">↓ EXPORT CHAT</button>
+          <button class="qa-btn" data-action="quickAction" data-arg="terminal">⌨ TERMINAL</button>
+          <button class="qa-btn" data-action="quickAction" data-arg="models">◉ SCAN MODELS</button>
+          <button class="qa-btn" data-action="exportChat">↓ EXPORT CHAT</button>
         </div>
       </div>
 
@@ -483,11 +483,11 @@
 
   <!-- History Modal -->
   <div id="history-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('history-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="history-modal"></div>
     <div class="modal-box">
       <div class="modal-hdr">
         <span>⏱ CONVERSATION HISTORY</span>
-        <button class="modal-close-btn" onclick="closeModal('history-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="history-modal">✕</button>
       </div>
       <div class="modal-body">
         <div id="history-search-row">
@@ -500,11 +500,11 @@
 
   <!-- Settings Modal -->
   <div id="settings-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('settings-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="settings-modal"></div>
     <div class="modal-box">
       <div class="modal-hdr">
         <span>⚙ JARVIS CONFIGURATION</span>
-        <button class="modal-close-btn" onclick="closeModal('settings-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="settings-modal">✕</button>
       </div>
       <div class="modal-body">
         <div class="cfg-section">
@@ -523,15 +523,15 @@
             <option value="deepseek-coder:6.7b">DeepSeek Coder 6.7B</option>
           </select>
           <div class="model-presets" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
-            <button class="model-preset-btn" onclick="quickSwitchModel('llama3.2')"
+            <button class="model-preset-btn" data-action="quickSwitchModel" data-arg="llama3.2"
               title="Fastest · Chat &amp; Automations">⚡ Llama 3.2</button>
-            <button class="model-preset-btn" onclick="quickSwitchModel('llama3.1:8b')" title="Balanced performance">★
+            <button class="model-preset-btn" data-action="quickSwitchModel" data-arg="llama3.1:8b" title="Balanced performance">★
               Llama 3.1</button>
-            <button class="model-preset-btn" onclick="quickSwitchModel('qwen2.5-coder:7b')" title="Best for code">💻
+            <button class="model-preset-btn" data-action="quickSwitchModel" data-arg="qwen2.5-coder:7b" title="Best for code">💻
               Qwen Coder 7B</button>
-            <button class="model-preset-btn" onclick="quickSwitchModel('qwen2.5-coder:3b')" title="Coder, fast">💻 Qwen
+            <button class="model-preset-btn" data-action="quickSwitchModel" data-arg="qwen2.5-coder:3b" title="Coder, fast">💻 Qwen
               Coder 3B</button>
-            <button class="model-preset-btn" onclick="quickSwitchModel('phi3:mini')" title="Ultra fast">🔋 Phi-3
+            <button class="model-preset-btn" data-action="quickSwitchModel" data-arg="phi3:mini" title="Ultra fast">🔋 Phi-3
               Mini</button>
           </div>
         </div>
@@ -571,27 +571,27 @@
         <div class="cfg-section">
           <label class="cfg-label">🎨 INTERFACE THEME</label>
           <div class="theme-grid" id="theme-grid">
-            <button class="theme-swatch" id="cfg-theme-ironman" onclick="applyTheme('ironman')"
+            <button class="theme-swatch" id="cfg-theme-ironman" data-action="applyTheme" data-arg="ironman"
               title="Iron Man — Default cyan HUD">
               <div class="theme-dot" style="background: radial-gradient(circle, #00d4ff 30%, #020c18)">⬡</div>
               <span class="theme-name">IRON MAN</span>
             </button>
-            <button class="theme-swatch" id="cfg-theme-phantom" onclick="applyTheme('phantom')"
+            <button class="theme-swatch" id="cfg-theme-phantom" data-action="applyTheme" data-arg="phantom"
               title="Phantom — Blood red dark">
               <div class="theme-dot" style="background: radial-gradient(circle, #ff2244 30%, #070005)">☠</div>
               <span class="theme-name">PHANTOM</span>
             </button>
-            <button class="theme-swatch" id="cfg-theme-matrix" onclick="applyTheme('matrix')"
+            <button class="theme-swatch" id="cfg-theme-matrix" data-action="applyTheme" data-arg="matrix"
               title="Matrix — Terminal green">
               <div class="theme-dot" style="background: radial-gradient(circle, #00ff41 30%, #000800)">⊞</div>
               <span class="theme-name">MATRIX</span>
             </button>
-            <button class="theme-swatch" id="cfg-theme-nova" onclick="applyTheme('nova')"
+            <button class="theme-swatch" id="cfg-theme-nova" data-action="applyTheme" data-arg="nova"
               title="Nova — Deep space purple">
               <div class="theme-dot" style="background: radial-gradient(circle, #b86bff 30%, #05020e)">✦</div>
               <span class="theme-name">NOVA</span>
             </button>
-            <button class="theme-swatch" id="cfg-theme-ghost" onclick="applyTheme('ghost')"
+            <button class="theme-swatch" id="cfg-theme-ghost" data-action="applyTheme" data-arg="ghost"
               title="Ghost — Light military">
               <div class="theme-dot"
                 style="background: radial-gradient(circle, #0057ff 30%, #f0f4f8); border-color: rgba(0,87,255,0.3)">◈
@@ -603,18 +603,18 @@
         <div class="cfg-section">
           <label class="cfg-label">🔤 INTERFACE FONT SIZE</label>
           <div class="font-size-row" id="font-size-row">
-            <button class="font-size-btn" data-size="font-sm" onclick="setFontSize('font-sm')" title="Small">SM</button>
-            <button class="font-size-btn active" data-size="font-md" onclick="setFontSize('font-md')"
+            <button class="font-size-btn" data-size="font-sm" data-action="setFontSize" data-arg="font-sm" title="Small">SM</button>
+            <button class="font-size-btn active" data-size="font-md" data-action="setFontSize" data-arg="font-md"
               title="Medium (default)">MD</button>
-            <button class="font-size-btn" data-size="font-lg" onclick="setFontSize('font-lg')" title="Large">LG</button>
-            <button class="font-size-btn" data-size="font-xl" onclick="setFontSize('font-xl')"
+            <button class="font-size-btn" data-size="font-lg" data-action="setFontSize" data-arg="font-lg" title="Large">LG</button>
+            <button class="font-size-btn" data-size="font-xl" data-action="setFontSize" data-arg="font-xl"
               title="Extra Large">XL</button>
           </div>
         </div>
         <div class="cfg-actions">
-          <button class="cfg-btn-primary" onclick="saveSettings()">◈ SAVE CONFIGURATION</button>
-          <button class="cfg-btn-secondary" onclick="resetSettings()">⊘ RESET DEFAULTS</button>
-          <button class="cfg-btn-secondary" onclick="openChangePinModal()"
+          <button class="cfg-btn-primary" data-action="saveSettings">◈ SAVE CONFIGURATION</button>
+          <button class="cfg-btn-secondary" data-action="resetSettings">⊘ RESET DEFAULTS</button>
+          <button class="cfg-btn-secondary" data-action="openChangePinModal"
             style="border-color:var(--cyan);color:var(--cyan);">🔒 CHANGE PIN</button>
         </div>
       </div>
@@ -623,11 +623,11 @@
 
   <!-- Change PIN Modal -->
   <div id="change-pin-modal" class="modal" hidden>
-    <div class="modal-backdrop" onclick="closeModal('change-pin-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="change-pin-modal"></div>
     <div class="modal-box" style="width:360px;">
       <div class="modal-hdr">
         <span>🔒 CHANGE PIN</span>
-        <button class="modal-close-btn" onclick="closeModal('change-pin-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="change-pin-modal">✕</button>
       </div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
         <div class="cfg-section" style="margin-bottom:0">
@@ -648,8 +648,8 @@
         <div id="chpin-error" class="hidden"
           style="font-size:11px;color:var(--orange);letter-spacing:0.08em;text-align:center;"></div>
         <div class="cfg-actions" style="margin-top:4px;">
-          <button class="cfg-btn-primary" onclick="submitChangePin()">◈ UPDATE PIN</button>
-          <button class="cfg-btn-secondary" onclick="closeModal('change-pin-modal')">CANCEL</button>
+          <button class="cfg-btn-primary" data-action="submitChangePin">◈ UPDATE PIN</button>
+          <button class="cfg-btn-secondary" data-action="closeModal" data-arg="change-pin-modal">CANCEL</button>
         </div>
         <p style="font-size:9px;color:var(--text-muted);text-align:center;letter-spacing:0.08em;margin:0;">PIN is hashed
           with SHA-256 before storage.</p>
@@ -659,13 +659,13 @@
 
   <!-- Terminal Modal -->
   <div id="terminal-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('terminal-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="terminal-modal"></div>
     <div class="modal-box terminal-box">
       <div class="modal-hdr">
         <span>⌨ JARVIS TERMINAL</span>
         <div class="term-hdr-right">
-          <button class="term-action-btn" onclick="clearTerminal()">CLEAR</button>
-          <button class="modal-close-btn" onclick="closeModal('terminal-modal')">✕</button>
+          <button class="term-action-btn" data-action="clearTerminal">CLEAR</button>
+          <button class="modal-close-btn" data-action="closeModal" data-arg="terminal-modal">✕</button>
         </div>
       </div>
       <div class="modal-body terminal-body">
@@ -681,11 +681,11 @@
 
   <!-- Models Modal -->
   <div id="models-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('models-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="models-modal"></div>
     <div class="modal-box">
       <div class="modal-hdr">
         <span>◉ INSTALLED MODELS</span>
-        <button class="modal-close-btn" onclick="closeModal('models-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="models-modal">✕</button>
       </div>
       <div class="modal-body" id="models-modal-body">
         <div class="panel-placeholder">Scanning Ollama…</div>
@@ -695,11 +695,11 @@
 
   <!-- Power-Off Confirm Modal -->
   <div id="poweroff-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('poweroff-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="poweroff-modal"></div>
     <div class="modal-box modal-box-sm">
       <div class="modal-hdr power-modal-hdr">
         <span>⏻ POWER OFF</span>
-        <button class="modal-close-btn" onclick="closeModal('poweroff-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="poweroff-modal">✕</button>
       </div>
       <div class="modal-body power-modal-body">
         <div class="power-icon-lg">⏻</div>
@@ -707,8 +707,8 @@
         <div class="power-confirm-sub">This will stop JARVIS and Ollama completely.<br>All unsaved sessions will be
           preserved.</div>
         <div class="power-confirm-btns">
-          <button class="power-btn-cancel" onclick="closeModal('poweroff-modal')">✕ Cancel</button>
-          <button class="power-btn-confirm" onclick="executePowerOff()">⏻ Shut Down</button>
+          <button class="power-btn-cancel" data-action="closeModal" data-arg="poweroff-modal">✕ Cancel</button>
+          <button class="power-btn-confirm" data-action="executePowerOff">⏻ Shut Down</button>
         </div>
       </div>
     </div>
@@ -716,7 +716,7 @@
 
   <!-- ⌨️ Command Palette (Ctrl+K) -->
   <div id="cmd-palette" hidden>
-    <div id="cmd-backdrop" onclick="closeCmdPalette()"></div>
+    <div id="cmd-backdrop" data-action="closeCmdPalette"></div>
     <div id="cmd-box">
       <div id="cmd-search-row">
         <span id="cmd-search-icon">⌘</span>
@@ -729,11 +729,11 @@
 
   <!-- 🧠 Memory Modal -->
   <div id="memory-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('memory-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="memory-modal"></div>
     <div class="modal-box">
       <div class="modal-hdr">
         <span>🧠 JARVIS MEMORY</span>
-        <button class="modal-close-btn" onclick="closeModal('memory-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="memory-modal">✕</button>
       </div>
       <div class="modal-body">
         <p class="mem-desc">Facts stored here are injected into every conversation as persistent context. JARVIS will
@@ -742,7 +742,7 @@
         <div id="mem-add-row">
           <input id="mem-input" class="mem-input" type="text"
             placeholder="Add a fact… e.g. My name is Pavan, I use Python" maxlength="200">
-          <button class="mem-add-btn" onclick="memoryAdd()">＋ Add</button>
+          <button class="mem-add-btn" data-action="memoryAdd">＋ Add</button>
         </div>
       </div>
     </div>
@@ -750,13 +750,13 @@
 
   <!-- ═══ DIAGNOSTICS MODAL ════════════════════════════════════ -->
   <div id="diag-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('diag-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="diag-modal"></div>
     <div class="modal-box" style="max-width:700px">
       <div class="modal-hdr">
         <span class="modal-title">⚡ RUNTIME DIAGNOSTICS</span>
         <div style="display:flex;gap:8px;align-items:center">
-          <button class="micro-btn" onclick="refreshDiagnostics()">↻ REFRESH</button>
-          <button class="modal-close-btn" onclick="closeModal('diag-modal')">✕</button>
+          <button class="micro-btn" data-action="refreshDiagnostics">↻ REFRESH</button>
+          <button class="modal-close-btn" data-action="closeModal" data-arg="diag-modal">✕</button>
         </div>
       </div>
       <div class="modal-body" id="diag-body">
@@ -794,17 +794,17 @@
 
   <!-- ═══ PROMPT LIBRARY MODAL ════════════════════════════════ -->
   <div id="prompts-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('prompts-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="prompts-modal"></div>
     <div class="modal-box" style="max-width:700px">
       <div class="modal-hdr">
         <span class="modal-title">📝 PROMPT LIBRARY</span>
-        <button class="modal-close-btn" onclick="closeModal('prompts-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="prompts-modal">✕</button>
       </div>
       <div class="modal-body">
         <div class="prompt-lib-toolbar">
           <input id="prompts-search" class="prompt-lib-search" type="text" placeholder="Search prompts…"
-            oninput="renderPrompts(this.value)">
-          <button class="prompt-lib-add-btn" onclick="togglePromptAddForm()">+ NEW</button>
+            data-input="renderPrompts">
+          <button class="prompt-lib-add-btn" data-action="togglePromptAddForm">+ NEW</button>
         </div>
         <div class="prompt-lib-grid" id="prompts-grid"></div>
         <div class="prompt-add-form" id="prompt-add-form" hidden>
@@ -815,7 +815,7 @@
           </div>
           <textarea id="prompt-new-body" class="prompt-form-textarea"
             placeholder="Prompt text… use {placeholder} for variables"></textarea>
-          <button class="prompt-form-save" onclick="saveNewPrompt()">💾 SAVE PROMPT</button>
+          <button class="prompt-form-save" data-action="saveNewPrompt">💾 SAVE PROMPT</button>
         </div>
       </div>
     </div>
@@ -823,17 +823,17 @@
 
   <!-- ═══ SNIPPET MANAGER MODAL ════════════════════════════════ -->
   <div id="snippets-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('snippets-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="snippets-modal"></div>
     <div class="modal-box" style="max-width:680px">
       <div class="modal-hdr">
         <span class="modal-title">⧉ SNIPPET MANAGER</span>
-        <button class="modal-close-btn" onclick="closeModal('snippets-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="snippets-modal">✕</button>
       </div>
       <div class="modal-body">
         <div class="snip-toolbar">
           <input id="snippets-search" class="snip-search" type="text" placeholder="Search snippets…"
-            oninput="renderSnippets(this.value)">
-          <button class="snip-add-btn" onclick="toggleSnipAddForm()">+ NEW</button>
+            data-input="renderSnippets">
+          <button class="snip-add-btn" data-action="toggleSnipAddForm">+ NEW</button>
         </div>
         <div class="snip-list" id="snippets-list"></div>
         <div class="snip-add-form" id="snip-add-form" hidden>
@@ -850,7 +850,7 @@
           <textarea id="snip-new-code" class="prompt-form-textarea"
             style="min-height:120px;font-family:var(--font-mono);font-size:11px"
             placeholder="Paste code here…"></textarea>
-          <button class="prompt-form-save" onclick="saveNewSnippet()">💾 SAVE SNIPPET</button>
+          <button class="prompt-form-save" data-action="saveNewSnippet">💾 SAVE SNIPPET</button>
         </div>
       </div>
     </div>
@@ -858,25 +858,25 @@
 
   <!-- ═══ NOTES SCRATCHPAD MODAL ════════════════════════════════ -->
   <div id="notes-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('notes-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="notes-modal"></div>
     <div class="modal-box" style="max-width:680px">
       <div class="modal-hdr">
         <span class="modal-title">📓 NOTES SCRATCHPAD</span>
-        <button class="modal-close-btn" onclick="closeModal('notes-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="notes-modal">✕</button>
       </div>
       <div class="modal-body">
         <div class="notes-toolbar">
-          <button class="notes-tool-btn" title="Bold" onclick="notesInsert('**{}**')"><b>B</b></button>
-          <button class="notes-tool-btn" title="Italic" onclick="notesInsert('*{}*')"><i>I</i></button>
-          <button class="notes-tool-btn" title="Code" onclick="notesInsert('\`{}\`')">⌘</button>
-          <button class="notes-tool-btn" title="Heading" onclick="notesInsert('## {}')">H</button>
-          <button class="notes-tool-btn" title="List" onclick="notesInsert('- {}')">≡</button>
-          <button class="notes-tool-btn" title="Checkbox" onclick="notesInsert('- [ ] {}')">☑</button>
+          <button class="notes-tool-btn" title="Bold" data-action="notesInsert" data-arg="**{}**"><b>B</b></button>
+          <button class="notes-tool-btn" title="Italic" data-action="notesInsert" data-arg="*{}*"><i>I</i></button>
+          <button class="notes-tool-btn" title="Code" data-action="notesInsert" data-arg="\`{}\`">⌘</button>
+          <button class="notes-tool-btn" title="Heading" data-action="notesInsert" data-arg="## {}">H</button>
+          <button class="notes-tool-btn" title="List" data-action="notesInsert" data-arg="- {}">≡</button>
+          <button class="notes-tool-btn" title="Checkbox" data-action="notesInsert" data-arg="- [ ] {}">☑</button>
           <div class="notes-tool-sep"></div>
-          <button class="notes-save-btn" onclick="saveNotes()">💾 SAVE</button>
+          <button class="notes-save-btn" data-action="saveNotes">💾 SAVE</button>
         </div>
         <textarea id="notes-editor" class="notes-editor" placeholder="Your notes here… supports Markdown"
-          oninput="updateNotesStatus()"></textarea>
+          data-input="updateNotesStatus"></textarea>
         <div class="notes-status" id="notes-status-bar">0 chars · 0 words · 1 lines</div>
       </div>
     </div>
@@ -884,11 +884,11 @@
 
   <!-- ═══ API TESTER MODAL ════════════════════════════════════ -->
   <div id="api-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('api-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="api-modal"></div>
     <div class="modal-box" style="max-width:720px">
       <div class="modal-hdr">
         <span class="modal-title">🌐 API TESTER</span>
-        <button class="modal-close-btn" onclick="closeModal('api-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="api-modal">✕</button>
       </div>
       <div class="modal-body">
         <div class="api-tester-wrap">
@@ -901,11 +901,11 @@
               <option>DELETE</option>
             </select>
             <input id="api-url-inp" class="api-url-input" type="text" placeholder="https://api.example.com/endpoint">
-            <button id="api-send-btn" class="api-send-btn" onclick="sendApiRequest()">▶ SEND</button>
+            <button id="api-send-btn" class="api-send-btn" data-action="sendApiRequest">▶ SEND</button>
           </div>
           <div class="api-tabs">
-            <button class="api-tab active" data-tab="body" onclick="switchApiTab('body')">BODY</button>
-            <button class="api-tab" data-tab="headers" onclick="switchApiTab('headers')">HEADERS</button>
+            <button class="api-tab active" data-tab="body" data-action="switchApiTab" data-arg="body">BODY</button>
+            <button class="api-tab" data-tab="headers" data-action="switchApiTab" data-arg="headers">HEADERS</button>
           </div>
           <div class="api-tab-panel active" id="api-tab-body">
             <textarea id="api-body-inp" class="api-textarea" placeholder='{"key": "value"}'></textarea>
@@ -923,15 +923,15 @@
 
   <!-- ═══ IMAGE ANALYSIS MODAL ════════════════════════════════ -->
   <div id="img-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('img-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="img-modal"></div>
     <div class="modal-box" style="max-width:560px">
       <div class="modal-hdr">
         <span class="modal-title">🖼 IMAGE ANALYSIS</span>
-        <button class="modal-close-btn" onclick="closeModal('img-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="img-modal">✕</button>
       </div>
       <div class="modal-body">
         <div class="img-analysis-wrap">
-          <div class="img-drop-zone" id="img-drop-zone" onclick="pickImage()">
+          <div class="img-drop-zone" id="img-drop-zone" data-action="pickImage">
             <div id="img-drop-zone-inner">
               <div class="img-drop-icon">🖼</div>
               <div class="img-drop-text">Click to select an image<br><small>PNG, JPG, WEBP supported</small></div>
@@ -940,12 +940,12 @@
           <div class="img-preview-wrap" id="img-preview-wrap" hidden>
             <img id="img-preview" src="" alt="Preview">
             <div class="img-preview-overlay">
-              <button class="img-clear-btn" onclick="clearImg()">✕ CLEAR</button>
+              <button class="img-clear-btn" data-action="clearImg">✕ CLEAR</button>
             </div>
           </div>
           <input id="img-prompt-inp" class="prompt-form-input" type="text"
             placeholder="What do you want to know about this image?" style="width:100%">
-          <button id="img-analyze-btn" class="img-analyze-btn" onclick="analyzeImage()" disabled>⬡ ANALYZE WITH
+          <button id="img-analyze-btn" class="img-analyze-btn" data-action="analyzeImage" disabled>⬡ ANALYZE WITH
             JARVIS</button>
         </div>
       </div>
@@ -953,25 +953,24 @@
   </div>
   <!-- ═══ SCHEDULER MODAL ════════════════════════════════════ -->
   <div id="scheduler-modal" class="modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal-backdrop" onclick="closeModal('scheduler-modal')"></div>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="scheduler-modal"></div>
     <div class="modal-box" style="max-width:720px">
       <div class="modal-hdr">
         <span class="modal-title">⏱ BACKGROUND TASKS & SCHEDULER</span>
-        <button class="modal-close-btn" onclick="closeModal('scheduler-modal')">✕</button>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="scheduler-modal">✕</button>
       </div>
       <div class="modal-body">
         <div class="scheduler-wrap">
           <div class="scheduler-toolbar">
-            <button class="scheduler-add-btn" onclick="toggleSchedulerAddForm()">+ NEW TASK</button>
-            <button class="scheduler-refresh-btn" onclick="renderSchedulerJobs()">⟳ REFRESH</button>
+            <button class="scheduler-add-btn" data-action="toggleSchedulerAddForm">+ NEW TASK</button>
+            <button class="scheduler-refresh-btn" data-action="renderSchedulerJobs">⟳ REFRESH</button>
           </div>
 
           <div class="scheduler-add-form" id="scheduler-add-form" hidden
             style="margin-bottom: 12px; padding: 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(0,212,255,0.2); border-radius: 4px;">
             <div style="display:flex; gap:10px; margin-bottom:10px;">
               <input id="sched-name" class="prompt-form-input" type="text" placeholder="Task name..." style="flex:1">
-              <select id="sched-type" class="dash-select" style="width:120px"
-                onchange="document.getElementById('sched-oneoff').hidden=(this.value==='recurring');document.getElementById('sched-recurring').hidden=(this.value==='one-off')">
+              <select id="sched-type" class="dash-select" style="width:120px" data-change="toggleSchedulerType">
                 <option value="one-off">One-off</option>
                 <option value="recurring">Recurring</option>
               </select>
@@ -989,7 +988,7 @@
             <textarea id="sched-payload" class="prompt-form-textarea" style="min-height:60px;"
               placeholder="Command or prompt to execute..."></textarea>
             <div style="margin-top:10px; text-align:right;">
-              <button class="prompt-form-save" onclick="addSchedulerJob()">CREATE TASK</button>
+              <button class="prompt-form-save" data-action="addSchedulerJob">CREATE TASK</button>
             </div>
           </div>
 
@@ -1005,7 +1004,6 @@
   <script src="dist/marked.min.js"></script>
   <script src="dist/purify.min.js"></script>
   <script src="dist/highlight.min.js"></script>
-  <script>if (typeof hljs !== 'undefined') hljs.highlightAll && document.addEventListener('DOMContentLoaded', () => hljs.highlightAll());</script>
 
   <!-- ═══ JARVIS MODULES — loaded before renderer.js ════════════ -->
   <!-- Core modules: expose helpers used by renderer.js            -->
@@ -1026,30 +1024,6 @@
 
   <!-- Main renderer — references all module globals above -->
   <script src="dist/renderer.js"></script>
-
-  <script>
-    // Hidden passcode input fallback to ensure reliable keyboard capture
-    document.addEventListener('DOMContentLoaded', () => {
-      const authInput = document.getElementById('auth-hidden-input');
-      const authScreen = document.getElementById('auth-screen');
-      if (authInput && authScreen) {
-
-        // Force focus to hidden input if screen is active and user clicks anywhere
-        document.addEventListener('click', () => {
-          if (!authScreen.classList.contains('hidden')) {
-            authInput.focus();
-          }
-        });
-
-        // Also auto focus whenever window gains focus
-        window.addEventListener('focus', () => {
-          if (!authScreen.classList.contains('hidden')) {
-            authInput.focus();
-          }
-        });
-      }
-    });
-  </script>
 </body>
 
 </html>

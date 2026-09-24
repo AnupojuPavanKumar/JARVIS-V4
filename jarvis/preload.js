@@ -50,8 +50,13 @@ contextBridge.exposeInMainWorld('jarvis', {
   // ─── Safe Code Runner ────────────────────────────────────────
   runCodeSafe:      (lang, code) => ipcRenderer.invoke('run-code-safe', lang, code),
 
-  // ─── HTTP Proxy ──────────────────────────────────────────────
-  httpRequest:      (opts)       => ipcRenderer.invoke('http-request', opts),
+  // ─── Ollama Proxy ──────────────────────────────────────────────
+  ollamaFetch:      (opts)       => ipcRenderer.invoke('ollama-fetch', opts),
+  ollamaStreamStart:(opts)       => ipcRenderer.send('ollama-stream-start', opts),
+  ollamaStreamAbort:(reqId)      => ipcRenderer.send('ollama-stream-abort', { reqId }),
+  onOllamaStreamChunk:(cb)       => { ipcRenderer.removeAllListeners('ollama-stream-chunk'); ipcRenderer.on('ollama-stream-chunk', (_, data) => cb(data)); },
+  onOllamaStreamEnd:  (cb)       => { ipcRenderer.removeAllListeners('ollama-stream-end'); ipcRenderer.on('ollama-stream-end', (_, data) => cb(data)); },
+  onOllamaStreamError:(cb)       => { ipcRenderer.removeAllListeners('ollama-stream-error'); ipcRenderer.on('ollama-stream-error', (_, data) => cb(data)); },
 
   // ─── Image & Binary ──────────────────────────────────────────
   openImageDialog:  ()           => ipcRenderer.invoke('open-image-dialog'),

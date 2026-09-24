@@ -45,11 +45,11 @@ window.openSecurityModal = function() {
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
     modal.innerHTML = `
-      <div class="modal-backdrop" onclick="closeModal('security-modal')"></div>
+      <div class="modal-backdrop" data-action="closeModal" data-arg="security-modal"></div>
       <div class="modal-box" style="max-width:640px">
         <div class="modal-hdr">
           <span class="modal-title">🔒 JARVIS SECURITY CONTROL CENTER</span>
-          <button class="modal-close-btn" onclick="closeModal('security-modal')">✕</button>
+          <button class="modal-close-btn" data-action="closeModal" data-arg="security-modal">✕</button>
         </div>
         <div class="modal-body">
           <div class="sec-status-banner" id="sec-status-banner">
@@ -68,7 +68,7 @@ window.openSecurityModal = function() {
               <div class="sec-toggle-desc">Allow JARVIS terminal to execute system commands</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-terminal" onchange="secToggle('terminalEnabled', this.checked)">
+              <input type="checkbox" id="sec-terminal" data-change="secToggle" data-arg="'terminalEnabled', this.checked">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
@@ -79,7 +79,7 @@ window.openSecurityModal = function() {
               <div class="sec-toggle-desc">Block file writes outside the current workspace directory</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-writes" onchange="secToggle('blockWritesOutsideWorkspace', this.checked)">
+              <input type="checkbox" id="sec-writes" data-change="secToggle" data-arg="'blockWritesOutsideWorkspace', this.checked">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
@@ -90,7 +90,7 @@ window.openSecurityModal = function() {
               <div class="sec-toggle-desc">Allow JARVIS to capture your screen for visual analysis (disabled by default)</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-screen" onchange="secToggle('screenCaptureEnabled', this.checked)">
+              <input type="checkbox" id="sec-screen" data-change="secToggle" data-arg="'screenCaptureEnabled', this.checked">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
@@ -101,7 +101,7 @@ window.openSecurityModal = function() {
               <div class="sec-toggle-desc">Log all sensitive operations (terminal, file writes, screen capture) to security_audit.log</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-audit" onchange="secToggle('auditLogging', this.checked)">
+              <input type="checkbox" id="sec-audit" data-change="secToggle" data-arg="'auditLogging', this.checked">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
@@ -118,10 +118,10 @@ window.openSecurityModal = function() {
 
           <div class="sec-section-title" style="margin-top:16px">AUDIT LOG (Last 20 entries)</div>
           <div class="sec-audit-log" id="sec-audit-log">Loading…</div>
-          <button class="micro-btn" onclick="refreshSecAudit()" style="margin-top:6px">↻ REFRESH LOG</button>
+          <button class="micro-btn" data-action="refreshSecAudit" style="margin-top:6px">↻ REFRESH LOG</button>
 
           <div class="cfg-actions" style="margin-top:16px">
-            <button class="cfg-btn-primary" onclick="JarvisSec.save()">🔒 SAVE SECURITY CONFIG</button>
+            <button class="cfg-btn-primary" data-action="JarvisSec.save">🔒 SAVE SECURITY CONFIG</button>
           </div>
         </div>
       </div>`;

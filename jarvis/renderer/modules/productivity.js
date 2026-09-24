@@ -24,15 +24,15 @@ function renderKanbanHTML() {
     const cards = board[col.id] || [];
     const cardHTML = cards.map((text, i) => `
       <div class="kanban-card" draggable="true"
-           ondragstart="kanbanDragStart(event,'${col.id}',${i})"
-           ondragend="kanbanDragEnd(event)">
+           data-dragstart="kanbanDragStart" data-col="${col.id}" data-idx="${i}"
+           data-dragend="kanbanDragEnd">
         <span class="kanban-card-text">${_kanbanEscHtml(text)}</span>
-        <button class="kanban-card-del" onclick="kanbanDeleteCard('${col.id}',${i})" title="Remove">✕</button>
+        <button class="kanban-card-del" data-action="kanbanDeleteCard" data-col="${col.id}" data-idx="${i}" title="Remove">✕</button>
       </div>`).join('');
     return `<div class="kanban-col ${col.id}" id="kanban-col-${col.id}"
-              ondragover="kanbanDragOver(event)"
-              ondragleave="kanbanDragLeave(event)"
-              ondrop="kanbanDrop(event,'${col.id}')">
+              data-dragover="kanbanDragOver"
+              data-dragleave="kanbanDragLeave"
+              data-drop="kanbanDrop" data-arg="${col.id}">
       <div class="kanban-col-hdr">
         <span class="kanban-col-title">${col.icon} ${col.label}</span>
         <span class="kanban-col-count">${cards.length}</span>
@@ -40,8 +40,8 @@ function renderKanbanHTML() {
       ${cardHTML || '<div style="color:var(--text-dim);font-size:10px;text-align:center;padding:8px 0;opacity:0.5">Empty</div>'}
       <div class="kanban-add-row">
         <input class="kanban-add-input" id="kanban-inp-${col.id}" type="text" placeholder="Add card…"
-               onkeydown="if(event.key==='Enter') kanbanAddCard('${col.id}')">
-        <button class="kanban-add-btn" onclick="kanbanAddCard('${col.id}')">+</button>
+               data-keydown-enter="kanbanAddCard" data-arg="${col.id}">
+        <button class="kanban-add-btn" data-action="kanbanAddCard" data-arg="${col.id}">+</button>
       </div>
     </div>`;
   }).join('');
@@ -132,10 +132,10 @@ function renderTasksHTML(tasks) {
   return sorted.map((t, si) => {
     const ri = tasks.indexOf(t);
     return `<div class="task-item ${t.done ? 'done' : ''}">
-      <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask(${ri})">
+      <input type="checkbox" ${t.done ? 'checked' : ''} data-change="toggleTask" data-arg="${ri}">
       <span class="task-text">${_kanbanEscHtml(t.text)}</span>
       <span class="task-pri task-${t.priority.toLowerCase()}">${t.priority}</span>
-      <button class="item-del" onclick="deleteTask(${ri})">✕</button>
+      <button class="item-del" data-action="deleteTask" data-arg-json="${ri}">✕</button>
     </div>`;
   }).join('') || '<div class="list-ph">Add tasks for today</div>';
 }
@@ -180,10 +180,10 @@ window.prioritizeWithJarvis = function() {
 function renderTBsHTML(tbs) {
   return tbs.map((tb, i) => `
     <div class="tb-item ${tb.done ? 'done' : ''}">
-      <input type="checkbox" ${tb.done ? 'checked' : ''} onchange="toggleTB(${i})">
+      <input type="checkbox" ${tb.done ? 'checked' : ''} data-change="toggleTB" data-arg="${i}">
       <span class="tb-task">${_kanbanEscHtml(tb.task)}</span>
       <span class="tb-dur">${tb.mins}m</span>
-      <button class="item-del" onclick="deleteTB(${i})">✕</button>
+      <button class="item-del" data-action="deleteTB" data-arg-json="${i}">✕</button>
     </div>`).join('') || '<div class="list-ph">Plan your time blocks</div>';
 }
 window.renderTBsHTML = renderTBsHTML;

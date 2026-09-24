@@ -175,14 +175,23 @@ async function runTest(commitName) {
         if (s) { s.classList.remove('hidden', 'unlocking'); }
         const err = document.getElementById('auth-error');
         if (err) { err.textContent = ''; err.classList.add('hidden'); }
-        if (window.Auth) { window.Auth._pin = ''; window.Auth._attempts = 0; }
+        // Reset Auth state machine to verify mode (not setup mode)
+        if (window.Auth) {
+          window.Auth._input = '';
+          window.Auth._setupMode = false;  // KEY: must be in verify mode
+          window.Auth._firstPin = null;
+          window.Auth._failCount = 0;
+          window.Auth._rateLimited = false;
+        }
+        // Also reset keypad buttons if they were disabled
+        document.querySelectorAll('.keypad-btn').forEach(b => { b.disabled = false; });
       });
-      await delay(100);
+      await delay(200);
 
-      // Type wrong PIN
+      // Type wrong PIN via pressKey
       await safeEval(page, () => ['9','9','9','9'].forEach(d => window.Auth?.pressKey(d)));
 
-      // Wait for async IPC response → error visible
+      // Wait for async IPC authVerify response → error visible
       await page.waitForFunction(
         () => !document.getElementById('auth-error')?.classList.contains('hidden'),
         { timeout: 5000 }
@@ -202,15 +211,15 @@ async function runTest(commitName) {
     // ── AUTH LOCKOUT ───────────────────────────────────────────────
     console.log(`[${commitName}] --- authLockout ---`);
     try {
-      // 1 attempt used above; need 4 more to reach PIN_MAX_ATTEMPTS=5
-      for (let i = 0; i < 4; i++) {
+      // authWrongPin used 1 attempt; need 5 more to reach PIN_MAX_ATTEMPTS=5 (blocked on 6th call)
+      for (let i = 0; i < 5; i++) {
         await safeEval(page, () => {
           const err = document.getElementById('auth-error');
           if (err) err.classList.add('hidden');
-          if (window.Auth) window.Auth._pin = '';
+          if (window.Auth) { window.Auth._input = ''; window.Auth._setupMode = false; }
         });
         await safeEval(page, () => ['9','9','9','9'].forEach(d => window.Auth?.pressKey(d)));
-        await delay(700);
+        await delay(800);
       }
 
       await page.waitForFunction(
