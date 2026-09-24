@@ -10,6 +10,10 @@ function validateSessionId(sessionId) {
   if (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) {
     return { ok: false, error: 'Invalid session ID format' };
   }
+  const reserved = /^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$/i;
+  if (reserved.test(sessionId)) {
+    return { ok: false, error: 'Reserved session ID' };
+  }
   return { ok: true };
 }
 
