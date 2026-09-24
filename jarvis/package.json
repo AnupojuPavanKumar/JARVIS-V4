@@ -8,7 +8,8 @@
     "dev": "NODE_ENV=development electron .",
     "ollama:gpu": "powershell -ExecutionPolicy Bypass -File ./start-ollama-gpu.ps1",
     "start:gpu": "powershell -ExecutionPolicy Bypass -Command \"$env:CUDA_VISIBLE_DEVICES='0'; $env:OLLAMA_KEEP_ALIVE='30m'; $env:OLLAMA_NUM_GPU='99'; $env:OLLAMA_FLASH_ATTENTION='1'; electron .\"",
-    "build": "node build.js"
+    "build": "node build.js",
+    "sign-skills": "node sign-skills.js"
   },
   "keywords": [
     "jarvis",

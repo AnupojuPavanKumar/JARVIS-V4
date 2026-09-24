@@ -1303,7 +1303,7 @@ const skillsDir = path.join(__dirname, 'skills');
 // its signature matches this key. To disable signature checks (development
 // only) delete the .sig file.
 const SKILLS_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
+MCowBQYDK2VwAyEAQi/+EtNe7DXn4P7c/wiL20qmqVK2yWxRYOuOyLs0VAU=
 -----END PUBLIC KEY-----`;
 
 let _skillsPubKey = null;
@@ -1339,7 +1339,7 @@ async function loadVerifiedSkillsManifest() {
   if (!fs.existsSync(sigPath)) {
     return { ok: false, error: 'Skills manifest has no signature file (manifest.sig). Refusing to load skills.' };
   }
-  const sigRaw = await fs.promises.readFile(sigPath, 'utf8');
+  const sigRaw = await fs.promises.readFile(sigPath);
   const v = verifyManifestSignature(manifestRaw, sigRaw);
   if (!v.ok) {
     return { ok: false, error: 'Skills manifest signature invalid. Refusing to load skills.' };
