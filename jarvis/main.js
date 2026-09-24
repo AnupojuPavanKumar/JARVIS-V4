@@ -427,9 +427,10 @@ ipcMain.handle('sec-config-load', async () => {
 ipcMain.handle('sec-config-save', async (_, cfg) => {
   try {
     if (cfg && typeof cfg === 'object') {
-      for (const key of ['terminalEnabled', 'screenCaptureEnabled']) {
+      for (const key of ['terminalEnabled', 'screenCaptureEnabled', 'requirePinForDestructive', 'auditLogging', 'blockWritesOutsideWorkspace']) {
         if (typeof cfg[key] === 'boolean' && cfg[key] !== liveSecConfig[key]) {
-          if (cfg[key] === true) {
+          const requiresPrompt = key === 'terminalEnabled' || key === 'screenCaptureEnabled';
+          if (cfg[key] === true && requiresPrompt) {
             const typeName = key === 'terminalEnabled' ? 'terminal' : 'screen capture';
             const { response } = await dialog.showMessageBox(mainWindow, {
               type: 'warning', 
@@ -445,8 +446,8 @@ ipcMain.handle('sec-config-save', async (_, cfg) => {
               secAudit('SEC_CONFIG', key, 'ENABLE_CANCELLED');
             }
           } else {
-            liveSecConfig[key] = false;
-            secAudit('SEC_CONFIG', key, 'DISABLED');
+            liveSecConfig[key] = cfg[key];
+            secAudit('SEC_CONFIG', key, cfg[key] ? 'ENABLED' : 'DISABLED');
           }
         }
       }
