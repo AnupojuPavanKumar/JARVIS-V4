@@ -1202,6 +1202,14 @@ ipcMain.handle('ollama-fetch', async (_, { path, method, body }) => {
 const activeOllamaStreams = new Map();
 
 ipcMain.on('ollama-stream-start', (event, { reqId, path, method, body }) => {
+  const senderOk = mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
+  const urlOk = event.senderFrame && typeof event.senderFrame.url === 'string' &&
+                event.senderFrame.url.startsWith(_allowedRendererBase);
+  if (!senderOk || !urlOk) {
+    secAudit('IPC_BLOCK', 'ollama-stream-start', `BLOCKED sender=${senderOk} url=${urlOk}`);
+    return;
+  }
+
   if (!OLLAMA_ALLOWED.includes(path)) {
     event.sender.send('ollama-stream-error', { reqId, error: 'Forbidden path' });
     return;
@@ -1236,8 +1244,25 @@ ipcMain.on('ollama-stream-start', (event, { reqId, path, method, body }) => {
 });
 
 ipcMain.on('ollama-stream-abort', (event, { reqId }) => {
+  const senderOk = mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
+  const urlOk = event.senderFrame && typeof event.senderFrame.url === 'string' &&
+                event.senderFrame.url.startsWith(_allowedRendererBase);
+  if (!senderOk || !urlOk) {
+    secAudit('IPC_BLOCK', 'ollama-stream-abort', `BLOCKED sender=${senderOk} url=${urlOk}`);
+    return;
+  }
+
+  if (typeof reqId !== 'string' || !reqId) {
+    secAudit('IPC_BLOCK', 'ollama-stream-abort', 'Forged or unknown reqId');
+    return;
+  }
   const req = activeOllamaStreams.get(reqId);
-  if (req) { req.destroy(); activeOllamaStreams.delete(reqId); }
+  if (!req) {
+    secAudit('IPC_BLOCK', 'ollama-stream-abort', 'Forged or unknown reqId');
+    return;
+  }
+  req.destroy(); 
+  activeOllamaStreams.delete(reqId);
 });
 
 // ─── Snippets Persistence ────────────────────────────────────────
