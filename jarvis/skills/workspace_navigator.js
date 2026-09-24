@@ -16,12 +16,17 @@ const os   = require('os');
 // ─── Path Traversal Guard ────────────────────────────────────────────────────
 // Ensure the resolved path stays within an allowed base (home dir by default).
 // The calling code in main.js may pass an allowedBase via args.allowedBase.
-function isPathSafe(resolvedPath, allowedBase) {
-  const base = allowedBase ? path.resolve(allowedBase) : process.cwd();
+function isPathSafe(requestedPath, allowedBase) {
+  let baseReal = allowedBase ? path.resolve(allowedBase) : process.cwd();
+  try { if (fs.existsSync(baseReal)) baseReal = fs.realpathSync.native(baseReal); } catch {}
+  
+  let targetReal = path.resolve(requestedPath);
+  try { if (fs.existsSync(targetReal)) targetReal = fs.realpathSync.native(targetReal); } catch {}
+  
   // On Windows, drive letters might differ in case
-  const lowerResolved = resolvedPath.toLowerCase();
-  const lowerBase = base.toLowerCase();
-  return lowerResolved.startsWith(lowerBase);
+  const lowerResolved = targetReal.toLowerCase();
+  const lowerBase = baseReal.toLowerCase();
+  return lowerResolved === lowerBase || lowerResolved.startsWith(lowerBase + path.sep);
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────
@@ -127,20 +132,23 @@ function searchWorkspace(args) {
   }
 }
 
-// ─── Entry Point ─────────────────────────────────────────────────────────────
-const rawArgs = process.argv[2];
-let args = {};
-try { args = rawArgs ? JSON.parse(rawArgs) : {}; } catch (e) { args = {}; }
-const command = args.command || 'list-dir';
+if (require.main === module) {
+  const rawArgs = process.argv[2];
+  let args = {};
+  try { args = rawArgs ? JSON.parse(rawArgs) : {}; } catch (e) { args = {}; }
+  const command = args.command || 'list-dir';
 
-const commands = { 'list-dir': listDir, 'read-file': readFile, 'search-workspace': searchWorkspace };
-const handler = commands[command];
+  const commands = { 'list-dir': listDir, 'read-file': readFile, 'search-workspace': searchWorkspace };
+  const handler = commands[command];
 
-if (!handler) {
-  process.stdout.write(JSON.stringify({ success: false, error: `Unknown command: ${command}. Valid: ${Object.keys(commands).join(', ')}` }));
-  process.exit(1);
+  if (!handler) {
+    process.stdout.write(JSON.stringify({ success: false, error: `Unknown command: ${command}. Valid: ${Object.keys(commands).join(', ')}` }));
+    process.exit(1);
+  }
+
+  const result = handler(args);
+  process.stdout.write(JSON.stringify(result));
+  process.exit(result.success ? 0 : 1);
+} else {
+  module.exports = { listDir, readFile, searchWorkspace, isPathSafe };
 }
-
-const result = handler(args);
-process.stdout.write(JSON.stringify(result));
-process.exit(result.success ? 0 : 1);
