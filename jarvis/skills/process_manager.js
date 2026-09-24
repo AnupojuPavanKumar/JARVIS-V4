@@ -8,7 +8,7 @@
 
 'use strict';
 
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 
 // System-critical processes that can NEVER be killed.
 // On Windows the kernel and security components must not be terminated.
@@ -81,7 +81,8 @@ function listProcesses() {
 
 function killProcess(pid, name) {
   return new Promise((resolve) => {
-    if (!pid || isNaN(parseInt(pid, 10))) {
+    const numPid = Number(pid);
+    if (!Number.isInteger(numPid) || numPid <= 0) {
       resolve({ ok: false, error: 'Invalid PID.' }); return;
     }
     if (isProtected(name)) {
@@ -90,11 +91,18 @@ function killProcess(pid, name) {
     if (!PROCESS_NAME_RE.test(name || '')) {
       resolve({ ok: false, error: `⛔ Process name contains illegal characters.` }); return;
     }
-    exec(`taskkill /PID ${parseInt(pid, 10)} /F`, { timeout: 5000, shell: 'cmd.exe' }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ ok: false, error: stderr?.trim() || err.message }); return;
+    const proc = spawn('taskkill', ['/PID', String(numPid), '/F'], { shell: false, windowsHide: true });
+    let stderr = '';
+    proc.stderr.on('data', d => stderr += d.toString());
+    proc.on('close', code => {
+      if (code !== 0) {
+        resolve({ ok: false, error: stderr.trim() || `Process exited with code ${code}` });
+      } else {
+        resolve({ ok: true, data: { pid: numPid, name, message: `Process ${name} (PID ${numPid}) terminated.` } });
       }
-      resolve({ ok: true, data: { pid, name, message: `Process ${name} (PID ${pid}) terminated.` } });
+    });
+    proc.on('error', err => {
+      resolve({ ok: false, error: err.message });
     });
   });
 }
