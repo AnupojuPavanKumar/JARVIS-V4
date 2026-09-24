@@ -76,6 +76,8 @@ function stopOllama() {
 const _allowedRendererBase = _url.pathToFileURL(_path.join(__dirname, 'renderer')).href + '/';
 
 const originalIpcHandle = ipcMain.handle.bind(ipcMain);
+global.workspaceTokens = {};
+
 ipcMain.handle = (channel, listener) => {
   originalIpcHandle(channel, async (event, ...args) => {
     const senderOk = mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
@@ -364,9 +366,19 @@ function checkPathBounds(requestedPath) {
   return resolved;
 }
 
-ipcMain.handle('fs-read', async (_, filePath) => {
+ipcMain.handle('fs-read', async (_, filePath, token) => {
   try {
-    const resolved = checkPathBounds(filePath);
+    let resolved = null;
+    if (token && global.workspaceTokens[token]) {
+      const wp = global.workspaceTokens[token];
+      const res = path.resolve(filePath);
+      if (res.startsWith(wp + path.sep) || res === wp) {
+        resolved = res;
+      }
+    }
+    if (!resolved) {
+      resolved = checkPathBounds(filePath);
+    }
     if (!resolved) return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
     return { ok: true, data: await fs.promises.readFile(resolved, 'utf8') };
   } catch (e) {
@@ -390,9 +402,19 @@ ipcMain.handle('fs-write', async (_, filePath, content) => {
   }
 });
 
-ipcMain.handle('fs-list', async (_, dirPath) => {
+ipcMain.handle('fs-list', async (_, dirPath, token) => {
   try {
-    const resolved = checkPathBounds(dirPath);
+    let resolved = null;
+    if (token && global.workspaceTokens[token]) {
+      const wp = global.workspaceTokens[token];
+      const res = path.resolve(dirPath);
+      if (res.startsWith(wp + path.sep) || res === wp) {
+        resolved = res;
+      }
+    }
+    if (!resolved) {
+      resolved = checkPathBounds(dirPath);
+    }
     if (!resolved) return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
     if (!fs.existsSync(resolved)) return { ok: true, data: [] };
     const items = await fs.promises.readdir(resolved, { withFileTypes: true });
@@ -813,15 +835,25 @@ async function scanProject(dir, rootDir, files = [], depth = 0) {
   return files;
 }
 
-ipcMain.handle('read-project', async (_, rootPath) => {
+ipcMain.handle('read-project', async () => {
   try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory'],
+      title: 'Select Project Folder',
+    });
+    if (result.canceled || !result.filePaths.length) return { ok: false };
+    const rootPath = result.filePaths[0];
+
+    const token = require('crypto').randomBytes(32).toString('hex');
+    global.workspaceTokens[token] = rootPath;
+
     const files = [];
     await scanProject(rootPath, rootPath, files);
     const totalBytes = files.reduce((s, f) => s + f.size, 0);
     if (totalBytes > PROJ_MAX_TOTAL) {
       return { ok: false, error: `Project too large (${(totalBytes / 1048576).toFixed(1)}MB > 2MB limit). Exclude more folders.` };
     }
-    return { ok: true, files, fileCount: files.length, totalBytes };
+    return { ok: true, token, name: path.basename(rootPath), files, fileCount: files.length, totalBytes };
   } catch (e) {
     return { ok: false, error: e.message };
   }

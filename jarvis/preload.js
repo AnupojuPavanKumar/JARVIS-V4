@@ -17,9 +17,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   onWindowState: (cb) => { ipcRenderer.removeAllListeners('window-state'); ipcRenderer.on('window-state', (_, state) => cb(state)); },
 
   // ─── File System ─────────────────────────────────────────────
-  readFile:    (filePath)          => ipcRenderer.invoke('fs-read', filePath),
+  readFile:    (filePath, token)          => ipcRenderer.invoke('fs-read', filePath, token),
   writeFile:   (filePath, content) => ipcRenderer.invoke('fs-write', filePath, content),
-  listDir:     (dirPath)           => ipcRenderer.invoke('fs-list', dirPath),
+  listDir:     (dirPath, token)           => ipcRenderer.invoke('fs-list', dirPath, token),
   saveDialog:  (name, content)     => ipcRenderer.invoke('fs-dialog-save', name, content),
 
   // ─── History ─────────────────────────────────────────────────
@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld('jarvis', {
 
   // ─── Dev Pack ────────────────────────────────────────────────
   openFolderDialog: ()         => ipcRenderer.invoke('open-folder-dialog'),
-  readProject:      (rootPath) => ipcRenderer.invoke('read-project', rootPath),
+  readProject:      () => ipcRenderer.invoke('read-project'),
   memoryLoad:       ()         => ipcRenderer.invoke('memory-load'),
   memorySave:       (facts)    => ipcRenderer.invoke('memory-save', facts),
   // HIGH-05 fix: chat-memory-read/save channels have no main-process handler
