@@ -1,10 +1,11 @@
-# JARVIS-V4-LITE
+# JARVIS-V4
 
-JARVIS-V4-LITE is an advanced, Electron-based desktop AI assistant designed for extensibility, local privacy, and agentic workflows. It leverages local language models (via Ollama) and a robust IPC-driven architecture to execute a wide variety of tools and skills directly on your desktop.
+JARVIS-V4 is an advanced, Electron-based desktop AI assistant designed for extensibility, local privacy, and agentic workflows. It leverages local language models (via Ollama) and a robust IPC-driven architecture to execute a wide variety of tools and skills directly on your desktop.
 
 ## 🚀 Features
 
 - **Local-First AI Integration:** Fully integrated with Ollama for running local LLMs, ensuring privacy and offline capabilities.
+- **Auto-Detect LLMs:** Intelligent scanning of system telemetry to automatically suggest, select, and switch between models based on your hardware capabilities.
 - **Agentic Skill System:** Features an extensible `skills/` directory where Node.js and Python scripts can be registered as tools. The LLM can dynamically call these skills to perform real-world actions.
 - **Persistent Memory System:** Uses a local TF-IDF vector space model for conversational memory, allowing JARVIS to recall past interactions and context.
 - **Voice Capabilities:** Includes local transcription (Whisper) and Text-to-Speech (Piper TTS) for a complete voice-interactive experience.
@@ -44,15 +45,30 @@ JARVIS comes pre-packaged with a variety of skills registered in `skills/manifes
 
 ## 🚀 Getting Started
 
-1. Ensure you have Node.js and Ollama installed.
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the application:
-   ```bash
-   npm start
-   ```
+### 1. Prerequisites
+Ensure you have the following installed on your system:
+- **Node.js** (v18+)
+- **Python 3** (for voice transcription)
+- **Ollama** (for local LLMs)
+
+### 2. Python Dependencies (For Voice Whisper)
+Install the required python packages for Whisper transcription:
+```bash
+pip install openai-whisper torch
+```
+
+### 3. Application Setup
+Navigate into the core application folder to install packages and run the app:
+```bash
+cd jarvis
+npm install
+```
+
+### 4. Start JARVIS
+```bash
+npm start
+```
+*JARVIS will automatically scan for available Ollama models on boot and suggest the best one based on your hardware specs.*
 
 ## 📝 License
 

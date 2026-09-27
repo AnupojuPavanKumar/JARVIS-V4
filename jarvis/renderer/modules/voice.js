@@ -109,76 +109,9 @@ let isRecording = false;
 
 function initVoiceInput() {
   const voiceBtn = document.getElementById('voice-btn');
-  const userInput = document.getElementById('user-input');
-
-  if (!voiceBtn || !userInput) return;
-
-  voiceBtn.addEventListener('click', async () => {
-    if (isRecording) {
-      stopWhisperRecording();
-    } else {
-      await startWhisperRecording();
-    }
-  });
-
-  async function startWhisperRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      audioChunks = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunks.push(e.data);
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-        const arrayBuffer = await audioBlob.arrayBuffer();
-
-        userInput.placeholder = 'Transcribing locally (Whisper)...';
-        voiceBtn.classList.add('recording');
-        voiceBtn.style.color = '#00d4ff';
-
-        try {
-          const res = await window.jarvis.transcribeAudio(new Uint8Array(arrayBuffer));
-          if (res.success) {
-            const currentVal = userInput.value;
-            userInput.value = currentVal ? currentVal + ' ' + res.text : res.text;
-            userInput.style.height = 'auto';
-            userInput.style.height = (userInput.scrollHeight) + 'px';
-            showToast('Voice transcribed', 'success');
-          } else {
-            showToast('Whisper error: ' + res.error, 'error');
-          }
-        } catch (e) {
-          showToast('Transcription failed: ' + e.message, 'error');
-        }
-
-        // Reset UI
-        isRecording = false;
-        voiceBtn.classList.remove('recording');
-        voiceBtn.style.color = '';
-        userInput.placeholder = 'Awaiting your command, sir...';
-
-        // Release microphone
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      isRecording = true;
-      voiceBtn.classList.add('recording');
-      userInput.placeholder = 'Listening...';
-
-    } catch (e) {
-      console.error('Mic access denied or error:', e);
-      showToast('Microphone access denied or not found.', 'error');
-    }
-  }
-
-  function stopWhisperRecording() {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop();
-    }
+  if (voiceBtn) {
+    // Switch to native Web Speech API listener (0% CPU, 0 dependencies)
+    voiceBtn.addEventListener('click', toggleVoice);
   }
 }
 

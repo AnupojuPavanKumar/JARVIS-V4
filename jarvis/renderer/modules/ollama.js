@@ -38,10 +38,14 @@ async function streamOllama(messages, { onChunk, onDone, onError }) {
   }, 90000); // 90-second connection and model loading timeout
 
   let fullContent = '';
+  let streamBuffer = '';
 
   window.jarvis.onOllamaStreamChunk((data) => {
     if (data.reqId !== reqId) return;
-    const lines = data.chunk.split('\n');
+    streamBuffer += data.chunk;
+    const lines = streamBuffer.split('\n');
+    streamBuffer = lines.pop(); // Keep incomplete line in buffer
+
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
@@ -187,6 +191,27 @@ async function refreshModels() {
     const data = JSON.parse(res.body);
     const models = data.models || [];
     renderModelsList(models);
+
+    if (models.length === 1) {
+      if (state.model !== models[0].name) {
+        selectModel(models[0].name);
+        showToast(`Auto-selected only available model: ${models[0].name}`, "success");
+        setTimeout(() => alert(`JARVIS Auto-Configuration:\n\nOnly one model found on your system.\nAutomatically selected: ${models[0].name}`), 1000);
+      }
+    } else if (models.length > 1) {
+      if (!state.model || !models.find(m => m.name === state.model)) {
+        showToast("Multiple models found. Please select one.", "info");
+        setTimeout(() => openModal('models-modal'), 1000);
+      }
+    } else {
+      let rec = 'llama3.1:8b';
+      if (state.systemSpecs && state.systemSpecs.totalMem) {
+         const memGb = state.systemSpecs.totalMem / 1024 / 1024 / 1024;
+         if (memGb < 10) rec = 'llama3.2:3b';
+         else if (memGb > 20) rec = 'qwen2.5:14b';
+      }
+      setTimeout(() => alert(`No models found in Ollama!\n\nBased on your hardware (${state.systemSpecs ? Math.round(state.systemSpecs.totalMem/1e9) + 'GB RAM' : 'unknown'}), we recommend pulling:\n\n  ${rec}\n\nRun this in your terminal:\nollama pull ${rec}`), 1000);
+    }
     return models;
   } catch { showToast('Could not fetch models — is Ollama running?', 'error'); return []; }
 }

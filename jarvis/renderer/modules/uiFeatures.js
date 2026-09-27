@@ -50,7 +50,14 @@ function runChatSearch(query) {
     const who = h.el.classList.contains('message-user') ? 'YOU' : 'JARVIS';
     const preview = h.text.slice(0, 120).replace(/\n/g, ' ');
     const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    const highlighted = preview.replace(re, m => `<mark>${m}</mark>`);
+    let highlighted = '';
+    let lastIdx = 0, match;
+    while ((match = re.exec(preview)) !== null) {
+      highlighted += _uiEscHtml(preview.slice(lastIdx, match.index));
+      highlighted += `<mark>${_uiEscHtml(match[0])}</mark>`;
+      lastIdx = re.lastIndex;
+    }
+    highlighted += _uiEscHtml(preview.slice(lastIdx));
     return `<div class="chat-search-hit" data-action="scrollToMsg" data-arg-json="${h.idx}"><div class="chat-search-hit-who">${who}</div>${highlighted}</div>`;
   }).join('') || '<div class="chat-search-hit"><div class="chat-search-hit-who">NO MATCHES</div></div>';
 }

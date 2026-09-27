@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   readProject:      () => ipcRenderer.invoke('read-project'),
   memoryLoad:       ()         => ipcRenderer.invoke('memory-load'),
   memorySave:       (facts)    => ipcRenderer.invoke('memory-save', facts),
+  embedText:        (text)     => ipcRenderer.invoke('embed-text', text),
   // HIGH-05 fix: chat-memory-read/save channels have no main-process handler
   // and are never called in the renderer. Removed to eliminate dangling invoke() calls.
   webSearch:        (q, type)  => ipcRenderer.invoke('web-search', q, type),

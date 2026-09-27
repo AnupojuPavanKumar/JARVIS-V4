@@ -42,6 +42,7 @@ class JarvisMemory {
         return { ok: false, error: 'Write refused: path escapes history directory' };
       }
       await fs.promises.writeFile(fp, JSON.stringify(data, null, 2), 'utf8');
+
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -60,7 +61,9 @@ class JarvisMemory {
       }
       try { await fs.promises.access(fp); } catch { return { ok: true, data: null }; }
       const content = await fs.promises.readFile(fp, 'utf8');
-      return { ok: true, data: JSON.parse(content) };
+      const data = JSON.parse(content);
+
+      return { ok: true, data };
     } catch (e) {
       return { ok: false, error: e.message, data: null };
     }
@@ -110,6 +113,36 @@ class JarvisMemory {
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message };
+    }
+  }
+
+  async embedText(text) {
+    try {
+      // Use built-in fetch if available (Node 18+ / Electron)
+      let embeddingModel = 'all-minilm';
+      try {
+        const fp = require('path').join(require('electron').app.getPath('userData'), 'app-config.json');
+        if (require('fs').existsSync(fp)) {
+          const cfg = JSON.parse(require('fs').readFileSync(fp, 'utf8'));
+          if (cfg.embeddingModel) embeddingModel = cfg.embeddingModel;
+        }
+      } catch (e) {}
+
+      const res = await fetch('http://127.0.0.1:11434/api/embeddings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: embeddingModel, prompt: text })
+      });
+      const data = await res.json();
+      if (data && data.embedding) {
+        return data.embedding; // plain number array
+      } else {
+        console.error('[MAIN] embedText: no embedding in response', data);
+      }
+      return null;
+    } catch (e) {
+      console.error('[MAIN] embedText error:', e);
+      return null;
     }
   }
 }

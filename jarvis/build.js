@@ -17,22 +17,37 @@ async function build() {
   }
 
   try {
-    // ── JS: main renderer (no bundling — uses browser globals) ──
-    await esbuild.build({
-      entryPoints: [path.join(__dirname, 'renderer', 'renderer.js')],
-      bundle: false,
-      minify: true,
-      outfile: path.join(distDir, 'renderer.js'),
-    });
+    const isWatch = process.argv.includes('--watch');
+    const runBuild = async (options) => {
+      if (isWatch) {
+        const ctx = await esbuild.context(options);
+        await ctx.watch();
+      } else {
+        await esbuild.build(options);
+      }
+    };
+
+    if (isWatch) console.log('👀 Watch mode enabled...');
+
+    // ── JS: main renderer & root modules (no bundling) ───────────
+    const rootFiles = fs.readdirSync(path.join(__dirname, 'renderer')).filter(f => f.endsWith('.js'));
+    for (const f of rootFiles) {
+      await runBuild({
+        entryPoints: [path.join(__dirname, 'renderer', f)],
+        bundle: false,
+        minify: !isWatch,
+        outfile: path.join(distDir, f),
+      });
+    }
 
     // ── JS: extracted modules ────────────────────────────────────
     if (fs.existsSync(modulesDir)) {
       const moduleFiles = fs.readdirSync(modulesDir).filter(f => f.endsWith('.js'));
       for (const f of moduleFiles) {
-        await esbuild.build({
+        await runBuild({
           entryPoints: [path.join(modulesDir, f)],
           bundle: false,
-          minify: true,
+          minify: !isWatch,
           outfile: path.join(modulesDist, f),
         });
       }
@@ -40,11 +55,11 @@ async function build() {
     }
 
     // ── CSS ──────────────────────────────────────────────────────
-    await esbuild.build({
+    await runBuild({
       entryPoints: [path.join(__dirname, 'renderer', 'style.css')],
       outdir: distDir,
       bundle: true,
-      minify: true,
+      minify: !isWatch,
       sourcemap: false,
       target: ['chrome120'],
       logLevel: 'info',
