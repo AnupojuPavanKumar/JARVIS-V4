@@ -343,7 +343,20 @@
 
           <!-- Input -->
           <footer id="input-bar">
+            <!-- Active Document Indicator (Hidden by default) -->
+            <div id="active-doc-indicator" style="display:none; position:absolute; top:-35px; left:10px; background:rgba(0,0,0,0.7); border:1px solid #444; border-radius:6px; padding:4px 10px; font-size:12px; color:#ddd; gap:8px; align-items:center;">
+              <span style="color:#00e5ff">📄</span> <span id="active-doc-name">Document.pdf</span>
+              <button id="clear-doc-btn" data-action="clearActiveDoc" style="background:none;border:none;color:#ff6b6b;cursor:pointer;font-size:14px;padding:0;">×</button>
+            </div>
             <div id="input-row">
+              <button id="doc-upload-btn" class="icon-btn" title="Upload Document for RAG" aria-label="Upload Document" data-action="openDocUpload">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="12" y1="18" x2="12" y2="12"></line>
+                  <line x1="9" y1="15" x2="15" y2="15"></line>
+                </svg>
+              </button>
               <button id="voice-btn" class="icon-btn" title="Voice Input" aria-label="Voice Input">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
@@ -1016,6 +1029,8 @@
   <!-- Feature modules: productivity widgets and UI tools          -->
   <script src="modules/productivity.js"></script>
   <script src="modules/uiFeatures.js"></script>
+  <!-- Document RAG module -->
+  <script src="modules/rag.js"></script>
   <!-- Dashboard panels (mode-specific dashboards)                 -->
   <script src="modules/dashboards.js"></script>
   <!-- Voice: wake word, Whisper, TTS — canonical implementation -->

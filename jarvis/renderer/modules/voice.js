@@ -113,6 +113,13 @@ function initVoiceInput() {
     // Switch to native Web Speech API listener (0% CPU, 0 dependencies)
     voiceBtn.addEventListener('click', toggleVoice);
   }
+  
+  // Register push-to-listen global shortcut listener
+  if (window.jarvis && window.jarvis.onToggleVoice) {
+    window.jarvis.onToggleVoice(() => {
+      toggleVoice();
+    });
+  }
 }
 
 // ─── Wake Word Detection — "Hey JARVIS" ────────────────────────

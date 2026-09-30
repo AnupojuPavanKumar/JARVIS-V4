@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   writeFile:   (filePath, content) => ipcRenderer.invoke('fs-write', filePath, content),
   listDir:     (dirPath, token)           => ipcRenderer.invoke('fs-list', dirPath, token),
   saveDialog:  (name, content)     => ipcRenderer.invoke('fs-dialog-save', name, content),
+  openDocDialog: ()                => ipcRenderer.invoke('fs-dialog-open-doc'),
+  readPdf:     (filePath)          => ipcRenderer.invoke('read-pdf', filePath),
+  readTextDoc: (filePath)          => ipcRenderer.invoke('read-text-doc', filePath),
 
   // ─── History ─────────────────────────────────────────────────
   saveHistory:   (id, data) => ipcRenderer.invoke('history-save', id, data),
@@ -29,7 +32,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   deleteHistory: (id)       => ipcRenderer.invoke('history-delete', id),
 
   // ─── Terminal ────────────────────────────────────────────────
-  runCommand: (cmd, cwd) => ipcRenderer.invoke('run-command', cmd, cwd),
+  runCommand: (cmd, cwd, timeout) => ipcRenderer.invoke('run-command', cmd, cwd, timeout),
 
   // ─── System ──────────────────────────────────────────────────
   getSystemInfo:   ()          => ipcRenderer.invoke('get-system-info'),
@@ -111,4 +114,6 @@ contextBridge.exposeInMainWorld('jarvis', {
   onOllamaOnline: (cb) => { ipcRenderer.removeAllListeners('ollama-online'); ipcRenderer.on('ollama-online', () => cb()); },
   // ─── Telemetry (main → renderer) ───────────────
   onTelemetry: (cb) => { ipcRenderer.removeAllListeners('telemetry'); ipcRenderer.on('telemetry', (_, data) => cb(data)); },
+  // ─── Voice Toggle (main → renderer) ───────────────
+  onToggleVoice: (cb) => { ipcRenderer.removeAllListeners('toggle-voice'); ipcRenderer.on('toggle-voice', () => cb()); },
 });

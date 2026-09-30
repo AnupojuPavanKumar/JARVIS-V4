@@ -207,6 +207,17 @@
       }
     },
     {
+      "id": "autonomous_search",
+      "name": "Autonomous Web Search",
+      "description": "Perform an invisible background search on the web to retrieve snippets, context, and URLs. Use this skill when you lack information and need to find the latest facts without opening the user's browser. You can chain this with the read_url skill to read the full pages found.",
+      "trigger": ["background search", "look up facts", "autonomous search"],
+      "script": "autonomous_search.js",
+      "type": "js",
+      "params": {
+        "query": { "type": "string", "required": true, "description": "The search query to look up" }
+      }
+    },
+    {
       "id": "read_url",
       "name": "Read URL",
       "description": "Fetches a webpage URL and extracts its main text content for you to read. Use this to read articles, docs, or blogs.",

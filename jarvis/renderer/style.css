@@ -1609,16 +1609,17 @@ input, textarea, select { font-family: inherit; }
   inset: 0;
   z-index: 5000;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  justify-content: flex-end; /* Align right for drawer */
 }
 .modal[hidden] { display: none; }
 
 .modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 5, 15, 0.75);
-  backdrop-filter: blur(10px);
+  background: rgba(0, 5, 15, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: opacity var(--dur-fast);
 }
 
 .modal-box {
@@ -1626,14 +1627,44 @@ input, textarea, select { font-family: inherit; }
   z-index: 1;
   width: 560px;
   max-width: 90vw;
-  max-height: 80vh;
+  height: 100vh;
+  max-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-hover);
+  background: rgba(10, 16, 26, 0.75);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border-left: 1px solid rgba(0, 229, 255, 0.3);
+  box-shadow: -15px 0 50px rgba(0, 0, 0, 0.9);
+  animation: drawerSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes drawerSlideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes drawerSlideOut {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+
+/* Modals that should stay in the center (e.g. poweroff) */
+.modal-box-sm {
+  width: 380px !important; 
+  height: auto !important;
+  max-height: 80vh !important;
+  margin: auto; /* Force it to the center */
+  align-self: center; /* Override stretch/drawer height */
+  border: 1px solid rgba(0, 229, 255, 0.3);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg), var(--glow-sm);
   animation: modalOpen 0.25s var(--ease) forwards;
+}
+.modal.closing .modal-box-sm {
+  animation: modalClose 0.25s var(--ease) forwards;
+}
+.modal.closing .modal-box:not(.modal-box-sm) {
+  animation: drawerSlideOut 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .modal-hdr {

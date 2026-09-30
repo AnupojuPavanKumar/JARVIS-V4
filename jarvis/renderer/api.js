@@ -68,9 +68,27 @@ export async function streamOllamaAPI(messages, { onChunk, onDone, onError }) {
     onError(new Error(r.error));
   });
 
-  const memCtx = jarvisMemory.getRelevantContext(messages[messages.length - 1]?.content || "");
-  if (memCtx && messages.length > 0 && messages[0].role === "system") {
-    messages[0].content += '\n' + memCtx;
+  const queryContent = messages[messages.length - 1]?.content || "";
+  const memCtx = await jarvisMemory.getRelevantContext(queryContent);
+  let ragCtx = null;
+  if (window.ragSystem) {
+    ragCtx = await window.ragSystem.getContextForQuery(queryContent);
+  }
+
+  if (messages.length > 0 && messages[0].role === "system") {
+    let extra = '';
+    if (memCtx) extra += '\n' + memCtx;
+    if (ragCtx) extra += '\n' + ragCtx;
+    const MAX = 24000;
+    const marker = '\n[... context truncated ...]';
+    if (messages[0].content.length + extra.length > MAX) {
+      const maxExtra = Math.floor(MAX / 2);
+      if (extra.length > maxExtra) extra = extra.slice(0, maxExtra);
+      const keep = Math.max(0, MAX - extra.length - marker.length);
+      messages[0].content = messages[0].content.slice(0, keep) + marker + extra;
+    } else {
+      messages[0].content += extra;
+    }
   }
 
   window.jarvis.ollamaStreamStart({

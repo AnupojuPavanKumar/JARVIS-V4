@@ -323,6 +323,16 @@ app.whenReady().then(() => {
       mainWindow.focus();
     }
   });
+
+  // Global hotkey: Ctrl+Shift+Space for Push-to-Listen
+  globalShortcut.register('Control+Shift+Space', () => {
+    if (!mainWindow) return;
+    // Show window if hidden so user can see it listening
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.webContents.send('toggle-voice');
+  });
 });
 
 app.on('will-quit', () => {

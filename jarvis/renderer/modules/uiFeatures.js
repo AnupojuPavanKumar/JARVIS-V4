@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════════════════════════
+﻿// ═══════════════════════════════════════════════════════════════
 // JARVIS — UI FEATURES MODULE
 // Chat Search, Message Bookmarks, Prompt Library, Snippet Manager,
 // Notes Scratchpad, Calculator, Keyboard Shortcuts
@@ -46,20 +46,47 @@ function runChatSearch(query) {
   const messages = Array.from(document.querySelectorAll('#chat-messages .message'));
   const hits = messages.map((el, idx) => ({ el, text: el.textContent || '', idx })).filter(h => h.text.toLowerCase().includes(q));
   if (countEl) countEl.textContent = hits.length ? `${hits.length} result${hits.length !== 1 ? 's' : ''}` : 'No results';
-  hitsEl.innerHTML = hits.slice(0, 20).map(h => {
+  
+  hitsEl.innerHTML = '';
+  if (hits.length === 0) {
+    const noMatch = document.createElement('div');
+    noMatch.className = 'chat-search-hit';
+    noMatch.innerHTML = '<div class="chat-search-hit-who">NO MATCHES</div>';
+    hitsEl.appendChild(noMatch);
+    return;
+  }
+
+  hits.slice(0, 20).forEach(h => {
     const who = h.el.classList.contains('message-user') ? 'YOU' : 'JARVIS';
     const preview = h.text.slice(0, 120).replace(/\n/g, ' ');
     const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    let highlighted = '';
+    
+    const container = document.createElement('div');
+    container.className = 'chat-search-hit';
+    container.setAttribute('data-action', 'scrollToMsg');
+    container.setAttribute('data-arg-json', h.idx.toString());
+    
+    const whoEl = document.createElement('div');
+    whoEl.className = 'chat-search-hit-who';
+    whoEl.textContent = who;
+    container.appendChild(whoEl);
+
     let lastIdx = 0, match;
     while ((match = re.exec(preview)) !== null) {
-      highlighted += _uiEscHtml(preview.slice(lastIdx, match.index));
-      highlighted += `<mark>${_uiEscHtml(match[0])}</mark>`;
+      if (match.index > lastIdx) {
+        container.appendChild(document.createTextNode(preview.slice(lastIdx, match.index)));
+      }
+      const mark = document.createElement('mark');
+      mark.textContent = match[0];
+      container.appendChild(mark);
       lastIdx = re.lastIndex;
     }
-    highlighted += _uiEscHtml(preview.slice(lastIdx));
-    return `<div class="chat-search-hit" data-action="scrollToMsg" data-arg-json="${h.idx}"><div class="chat-search-hit-who">${who}</div>${highlighted}</div>`;
-  }).join('') || '<div class="chat-search-hit"><div class="chat-search-hit-who">NO MATCHES</div></div>';
+    if (lastIdx < preview.length) {
+      container.appendChild(document.createTextNode(preview.slice(lastIdx)));
+    }
+    
+    hitsEl.appendChild(container);
+  });
 }
 window.runChatSearch = runChatSearch;
 
@@ -201,7 +228,7 @@ function renderSnippets(filter) {
   if (!list) return;
   const q = filter.toLowerCase();
   const items = q ? _snippets.filter(s => (s.title + s.code + s.lang).toLowerCase().includes(q)) : _snippets;
-  list.innerHTML = items.length ? items.map(s => `<div class="snip-item"><div class="snip-item-hdr"><span class="snip-title">${_uiEscHtml(s.title)}</span><span class="snip-tag ${s.lang}">${s.lang.toUpperCase()}</span></div><div class="snip-code-preview">${_uiEscHtml(s.code.slice(0, 200))}</div><div class="snip-actions"><button class="snip-btn use" data-action="useSnippet" data-arg-json="${JSON.stringify(s.id)}">▶ INSERT</button><button class="snip-btn" data-action="copySnip" data-arg-json="${JSON.stringify(s.id)}">⧉ COPY</button><button class="snip-btn del" data-action="deleteSnippet" data-arg-json="${JSON.stringify(s.id)}">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No snippets found</div>';
+  list.innerHTML = items.length ? items.map(s => `<div class="snip-item"><div class="snip-item-hdr"><span class="snip-title">${_uiEscHtml(s.title)}</span><span class="snip-tag ${_uiEscHtml(s.lang)}">${_uiEscHtml(s.lang.toUpperCase())}</span></div><div class="snip-code-preview">${_uiEscHtml(s.code.slice(0, 200))}</div><div class="snip-actions"><button class="snip-btn use" data-action="useSnippet" data-arg-json="${JSON.stringify(s.id)}">▶ INSERT</button><button class="snip-btn" data-action="copySnip" data-arg-json="${JSON.stringify(s.id)}">⧉ COPY</button><button class="snip-btn del" data-action="deleteSnippet" data-arg-json="${JSON.stringify(s.id)}">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No snippets found</div>';
 }
 window.renderSnippets = renderSnippets;
 
@@ -536,13 +563,13 @@ window.renderSchedulerJobs = async function() {
       <div>
         <div style="font-weight:bold; color:var(--text-bright);">${_uiEscHtml(job.name)}</div>
         <div style="font-size:11px; color:var(--text-dim);">
-          Type: ${job.type} | Active: ${job.active ? 'YES' : 'NO'}<br>
+          Type: ${_uiEscHtml(String(job.type))} | Active: ${job.active ? 'YES' : 'NO'}<br>
           ${job.type === 'one-off' ? `Triggers: ${new Date(job.triggerTime).toLocaleString()}` : `Interval: ${job.intervalMs / 1000}s`}
         </div>
         <div style="font-size:10px; color:var(--accent-blue); margin-top:4px;">Payload: ${_uiEscHtml(job.payload.text || '')}</div>
       </div>
       <div>
-        <button class="micro-btn" style="color:var(--accent-red); border-color:var(--accent-red);" data-action="deleteSchedulerJob" data-arg="${job.id}">✕ DELETE</button>
+        <button class="micro-btn" style="color:var(--accent-red); border-color:var(--accent-red);" data-action="deleteSchedulerJob" data-arg="${_uiEscHtml(String(job.id))}">✕ DELETE</button>
       </div>
     </div>
   `).join('');

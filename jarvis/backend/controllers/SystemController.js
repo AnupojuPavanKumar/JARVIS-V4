@@ -14,7 +14,7 @@ module.exports = function registerSystemController({ ipcMain, app, mainWindowPro
     uptime: os.uptime()
   }));
 
-  ipcMain.handle('run-command', async (_, command, cwd) => {
+  ipcMain.handle('run-command', async (_, command, cwd, timeout) => {
     if (!secCheckRate('runCommand', 15)) {
       return { ok: false, stdout: '', stderr: '', exitCode: 1, error: '⛔ Rate limit: max 15 commands/minute.' };
     }
@@ -107,7 +107,11 @@ module.exports = function registerSystemController({ ipcMain, app, mainWindowPro
       
       if (!cmdExe) return resolve({ ok: true, stdout: '', stderr: '', exitCode: 0, error: null });
 
-      const child = spawn(cmdExe, cmdArgs, { cwd, shell: false });
+      const spawnOptions = { cwd, shell: false };
+      if (timeout && timeout > 0) {
+        spawnOptions.timeout = timeout;
+      }
+      const child = spawn(cmdExe, cmdArgs, spawnOptions);
       
       let stdout = '';
       let stderr = '';

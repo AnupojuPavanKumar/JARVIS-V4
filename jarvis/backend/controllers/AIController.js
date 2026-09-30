@@ -34,11 +34,26 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
   ipcMain.handle('web-search', async (_, query) => {
     secAudit('WEB_SEARCH', query, 'ALLOWED');
     try {
-      // Safely spawn python script bypassing cmd.exe
-      const result = await spawnShellCommand('python', [
-        path.join(__dirname, '../../skills', 'duckduckgo_search.py'), 
-        JSON.stringify({ query, max_results: 5 })
-      ], { shell: false, windowsHide: true });
+// Pass payload via stdin to avoid Windows CLI length limit (8191 chars).
+      const scriptPath = path.join(__dirname, '../../skills', 'duckduckgo_search.py');
+      const payload = JSON.stringify({ query: query.slice(0, 512), max_results: 5 });
+      const result = await new Promise((resolve, reject) => {
+        const child = spawn(scriptPath.endsWith('.py') ? 'python' : 'node', [scriptPath], {
+          shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        let stdout = '', stderr = '';
+        child.stdout.on('data', chunk => { stdout += chunk; });
+        child.stderr.on('data', chunk => { stderr += chunk; });
+        const timeoutId = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Search timed out')); }, 60000);
+        child.on('error', err => { clearTimeout(timeoutId); reject(err); });
+        child.on('close', code => { clearTimeout(timeoutId); resolve({ code, stdout, stderr }); });
+        child.stdin.on('error', err => {
+          clearTimeout(timeoutId);
+          reject(err);
+        });
+        child.stdin.write(payload);
+        child.stdin.end();
+      });
       
       if (result.code !== 0) throw new Error(result.stderr || 'Search failed');
       return { ok: true, data: JSON.parse(result.stdout) };

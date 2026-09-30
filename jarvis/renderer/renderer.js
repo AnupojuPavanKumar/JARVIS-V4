@@ -9,56 +9,22 @@
 //             jarvisMemory.save()                     → void
 // ═══════════════════════════════════════════════════════════════════
 const jarvisMemory = (function () {
-  // ── Constants ────────────────────────────────────────────────────
   const LS_KEY = 'jarvis_memory';
   const MAX_FACTS = 200;   // hard cap — oldest evicted first
   const TOP_K = 4;     // memories returned per query
-  const MIN_SCORE = 0.12;  // cosine similarity threshold
+  const MIN_SCORE = 0.50;  // cosine similarity threshold
 
-  // ── Common English stop-words to exclude from TF-IDF ────────────
-  const STOPS = new Set([
-    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'is',
-    'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does',
-    'did', 'will', 'would', 'could', 'should', 'may', 'might', 'shall', 'can',
-    'this', 'that', 'these', 'those', 'with', 'from', 'by', 'as', 'not', 'it',
-    'its', 'my', 'i', 'you', 'he', 'she', 'we', 'they', 'me', 'him', 'her', 'us',
-    'them', 'what', 'which', 'who', 'how', 'when', 'where', 'why', 'there', 'then',
-    'so', 'if', 'out', 'up', 'about', 'into', 'than', 'more', 'just', 'also',
-  ]);
-
-  // ── Tokenise: lowercase, strip punctuation, remove stop-words ───
-  function tokenize(str) {
-    return (str || '').toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(w => w.length > 2 && !STOPS.has(w));
-  }
-
-  // ── TF: term frequency map for a token list ──────────────────────
-  function tf(tokens) {
-    const freq = {};
-    for (const t of tokens) freq[t] = (freq[t] || 0) + 1;
-    const total = tokens.length || 1;
-    const map = {};
-    for (const [t, f] of Object.entries(freq)) map[t] = f / total;
-    return map;
-  }
-
-  // ── Cosine similarity between two TF maps (IDF done inline) ─────
-  function cosine(qMap, dMap, idf) {
-    let dot = 0, qNorm = 0, dNorm = 0;
-    for (const [t, qv] of Object.entries(qMap)) {
-      const w = idf[t] || 1;
-      const dv = dMap[t] || 0;
-      dot += qv * dv * w * w;
-      qNorm += (qv * w) ** 2;
+  // Pure JS Vector Cosine Similarity
+  function cosineSimilarity(vecA, vecB) {
+    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+      dot += vecA[i] * vecB[i];
+      normA += vecA[i] * vecA[i];
+      normB += vecB[i] * vecB[i];
     }
-    for (const [t, dv] of Object.entries(dMap)) {
-      const w = idf[t] || 1;
-      dNorm += (dv * w) ** 2;
-    }
-    if (!qNorm || !dNorm) return 0;
-    return dot / (Math.sqrt(qNorm) * Math.sqrt(dNorm));
+    if (normA === 0 || normB === 0) return 0;
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
   // ── State ────────────────────────────────────────────────────────
@@ -66,27 +32,6 @@ const jarvisMemory = (function () {
 
   // ── Load from localStorage on boot ──────────────────────────────
   try { store.memories = JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { }
-
-  // ── Cache: pre-tokenised TF maps (rebuilt on write) ─────────────
-  let _tfCache = [];
-  let _idf = {};
-
-  function rebuildIndex() {
-    _tfCache = store.memories.map(m => tf(tokenize(m.text)));
-
-    // IDF: log(N / df) for each term across all memories
-    const N = _tfCache.length || 1;
-    const df = {};
-    for (const tfMap of _tfCache) {
-      for (const term of Object.keys(tfMap)) df[term] = (df[term] || 0) + 1;
-    }
-    _idf = {};
-    for (const [term, count] of Object.entries(df)) {
-      _idf[term] = Math.log((N + 1) / (count + 1)) + 1; // smoothed IDF
-    }
-  }
-
-  rebuildIndex();
 
   // ── Public: save to localStorage ─────────────────────────────────
   function save() {
@@ -101,7 +46,7 @@ const jarvisMemory = (function () {
     for (const f of facts) {
       const key = (f.text || '').trim().toLowerCase();
       if (key && !existing.has(key)) {
-        store.memories.push({ text: f.text.trim(), timestamp: f.timestamp || Date.now() });
+        store.memories.push({ text: f.text.trim(), timestamp: f.timestamp || Date.now(), embedding: f.embedding || null });
         existing.add(key);
       }
     }
@@ -109,24 +54,38 @@ const jarvisMemory = (function () {
     if (store.memories.length > MAX_FACTS) {
       store.memories = store.memories.slice(-MAX_FACTS);
     }
-    rebuildIndex();
     save();
   }
 
-  // ── Public: getRelevantContext — TF-IDF cosine retrieval ─────────
-  function getRelevantContext(query) {
+  // ── Public: getRelevantContext — Vector Semantic Retrieval ─────────
+  async function getRelevantContext(query) {
     if (!query || !store.memories.length) return '';
-    const qTokens = tokenize(query);
-    if (!qTokens.length) return '';
-    const qMap = tf(qTokens);
-    const scored = store.memories.map((m, i) => ({
-      text: m.text,
-      score: cosine(qMap, _tfCache[i] || {}, _idf),
-    }));
+    
+    // 1. Get embedding for the user's query via IPC
+    let qEmbedding = null;
+    try {
+      if (window.jarvis && window.jarvis.embedText) {
+        qEmbedding = await window.jarvis.embedText(query);
+      }
+    } catch(e) { console.warn("Embedding failed", e); }
+    
+    if (!qEmbedding) return '';
+
+    // 2. Score all memories using cosine similarity
+    let backfilled = false;
+    for (const m of store.memories) {
+      if (!m.embedding) {
+        try { m.embedding = await window.jarvis.embedText(m.text); backfilled = !!m.embedding || backfilled; } catch { }
+      }
+    }
+    if (backfilled) save();
+    const scored = store.memories.map(m => ({ text: m.text, score: cosineSimilarity(qEmbedding, m.embedding) }));
+
     const top = scored
       .filter(s => s.score >= MIN_SCORE)
       .sort((a, b) => b.score - a.score)
       .slice(0, TOP_K);
+
     if (!top.length) return '';
     return `[RELEVANT MEMORY]\n${top.map(s => `- ${s.text}`).join('\n')}\n[END MEMORY]`;
   }
@@ -150,18 +109,25 @@ const jarvisMemory = (function () {
     const cleaned = text.replace(/remember that|remember this|note that/ig, '').trim();
     if (!cleaned || cleaned.length < 5) return;
 
-    // Dedup: skip if very similar text already stored
-    const qTokens = tokenize(cleaned);
-    const qMap = tf(qTokens);
-    const isDupe = store.memories.some((_, i) => cosine(qMap, _tfCache[i] || {}, _idf) > 0.85);
+    // Generate embedding for the new memory
+    let embedding = null;
+    try {
+      if (window.jarvis && window.jarvis.embedText) {
+        embedding = await window.jarvis.embedText(cleaned);
+      }
+    } catch(e) {}
+
+    if (!embedding) return; // don't store if embedding fails
+
+    // Dedup using cosine similarity > 0.90
+    const isDupe = store.memories.some(m => m.embedding && cosineSimilarity(embedding, m.embedding) > 0.90);
     if (isDupe) return;
 
-    store.memories.push({ text: cleaned, timestamp: Date.now() });
+    store.memories.push({ text: cleaned, timestamp: Date.now(), embedding });
 
     // Enforce cap
     if (store.memories.length > MAX_FACTS) store.memories = store.memories.slice(-MAX_FACTS);
 
-    rebuildIndex();
     save();
 
     // Persist to userData/memory.json via IPC (fire-and-forget)
@@ -409,9 +375,27 @@ async function streamOllama(e, { onChunk: t, onDone: n, onError: s }) {
     s(new Error(r.error));
   });
 
-  const memCtx = jarvisMemory.getRelevantContext(e[e.length - 1]?.content || "");
-  if (memCtx && e.length > 0 && e[0].role === "system") {
-    e[0].content += '\n' + memCtx;
+  const queryContent = e[e.length - 1]?.content || "";
+  const memCtx = await jarvisMemory.getRelevantContext(queryContent);
+  let ragCtx = null;
+  if (window.ragSystem) {
+    ragCtx = await window.ragSystem.getContextForQuery(queryContent);
+  }
+
+  if (e.length > 0 && e[0].role === "system") {
+    let extra = '';
+    if (memCtx) extra += '\n' + memCtx;
+    if (ragCtx) extra += '\n' + ragCtx;
+    const MAX = 24000;
+    const marker = '\n[... context truncated ...]';
+    if (e[0].content.length + extra.length > MAX) {
+      const maxExtra = Math.floor(MAX / 2);
+      if (extra.length > maxExtra) extra = extra.slice(0, maxExtra);
+      const keep = Math.max(0, MAX - extra.length - marker.length);
+      e[0].content = e[0].content.slice(0, keep) + marker + extra;
+    } else {
+      e[0].content += extra;
+    }
   }
 
   window.jarvis.ollamaStreamStart({
@@ -604,22 +588,81 @@ Do NOT say "How can I help", "I am ready", or anything generic. Make it feel ali
     }
     // XSS protection via DOMPurify
     return typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(html) : html;
-  } function highlightBlock(e) { if (typeof hljs < "u" && !e.classList.contains("hljs")) try { hljs.highlightElement(e) } catch { } } function copyCode(e, t) { navigator.clipboard.writeText(t).then(() => { e.textContent = "COPIED!", e.classList.add("copied"), setTimeout(() => { e.textContent = "COPY", e.classList.remove("copied") }, 2e3) }).catch(() => showToast("Failed to copy.", "error")) } window.copyCode = copyCode; function setupVoice() { const e = window.SpeechRecognition || window.webkitSpeechRecognition; if (!e) { $voiceBtn && ($voiceBtn.title = "Voice not supported", $voiceBtn.style.opacity = "0.4"); return } state.recognition = new e, state.recognition.continuous = !1, state.recognition.interimResults = !0, state.recognition.lang = "en-US", state.recognition.onresult = t => { let n = "", s = ""; for (const o of t.results) o.isFinal ? s += o[0].transcript : n += o[0].transcript; $input.value = s || n, autoResizeInput() }, state.recognition.onend = () => { state.isRecording = !1, $voiceBtn.classList.remove("recording"), $input.value.trim() && sendMessage() }, state.recognition.onerror = t => { state.isRecording = !1, $voiceBtn.classList.remove("recording"), t.error !== "no-speech" && showToast(`Voice error: ${t.error}`, "error") } } function toggleVoice() { if (!state.recognition) { showToast("Voice input not available.", "error"); return } state.isRecording ? (state.recognition.stop(), state.isRecording = !1, $voiceBtn.classList.remove("recording")) : (state.recognition.start(), state.isRecording = !0, $voiceBtn.classList.add("recording"), showToast("Listening\u2026", "info")) } let _audioQueue = []; let _isPlaying = false; let _currentAudio = null; async function playNextAudio() { if (_audioQueue.length === 0) { _isPlaying = false; return; } _isPlaying = true; const data = _audioQueue.shift(); if (typeof data === 'string') { _currentAudio = new Audio("data:audio/wav;base64," + data); } else { const blob = new Blob([data], { type: "audio/wav" }); _currentAudio = new Audio(URL.createObjectURL(blob)); } _currentAudio.onended = () => { _currentAudio = null; playNextAudio(); }; try { await _currentAudio.play(); } catch (e) { console.error("Audio play failed:", e); _currentAudio = null; playNextAudio(); } } async function speakText(e, t = !0) { if (!state.ttsEnabled || !e.trim()) return; if (t) { _audioQueue = []; if (_currentAudio) { _currentAudio.pause(); _currentAudio = null; } _isPlaying = false; } try { const res = await window.jarvis.piperTTS(e); if (res && res.ok && res.data) { _audioQueue.push(res.data); if (!_isPlaying) playNextAudio(); } else { console.error("Piper TTS error:", res?.error); } } catch (err) { console.error("Piper IPC error:", err); } } function extractPlainText(e) { return e.replace(/```[\s\S]*?```/g, "code block").replace(/`[^`]+`/g, "").replace(/#{1,6}\s/g, "").replace(/[*_~]{1,3}/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/^\s*[-*+]\s/gm, "").replace(/^\s*\d+\.\s/gm, "").replace(/\|[^|\n]+/g, "").replace(/\n{2,}/g, ". ").replace(/\n/g, " ").replace(/\s{2,}/g, " ").trim() } function toggleTTS() { state.ttsEnabled = !state.ttsEnabled, $ttsBtn && ($ttsBtn.classList.toggle("active", state.ttsEnabled), $ttsBtn.setAttribute("aria-pressed", state.ttsEnabled)), !state.ttsEnabled && state.synth && state.synth.cancel(), showToast(`Voice output ${state.ttsEnabled ? "enabled" : "disabled"}.`, "info") } function startHUDClock() { const e = () => { const t = new Date; $hudTime && ($hudTime.textContent = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`), $hudDate && ($hudDate.textContent = t.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase()) }; e(), setInterval(e, 1e3) } function initWaveform() {
+  } function highlightBlock(e) { if (typeof hljs < "u" && !e.classList.contains("hljs")) try { hljs.highlightElement(e) } catch { } } function copyCode(e, t) { navigator.clipboard.writeText(t).then(() => { e.textContent = "COPIED!", e.classList.add("copied"), setTimeout(() => { e.textContent = "COPY", e.classList.remove("copied") }, 2e3) }).catch(() => showToast("Failed to copy.", "error")) } window.copyCode = copyCode; function setupVoice() { const e = window.SpeechRecognition || window.webkitSpeechRecognition; if (!e) { $voiceBtn && ($voiceBtn.title = "Voice not supported", $voiceBtn.style.opacity = "0.4"); return } state.recognition = new e, state.recognition.continuous = !1, state.recognition.interimResults = !0, state.recognition.lang = "en-US", state.recognition.onresult = t => { let n = "", s = ""; for (const o of t.results) o.isFinal ? s += o[0].transcript : n += o[0].transcript; $input.value = s || n, autoResizeInput() }, state.recognition.onend = () => { state.isRecording = !1, $voiceBtn.classList.remove("recording"), $input.value.trim() && sendMessage() }, state.recognition.onerror = t => { state.isRecording = !1, $voiceBtn.classList.remove("recording"), t.error !== "no-speech" && showToast(`Voice error: ${t.error}`, "error") } } function toggleVoice() { if (!state.recognition) { showToast("Voice input not available.", "error"); return } state.isRecording ? (state.recognition.stop(), state.isRecording = !1, $voiceBtn.classList.remove("recording")) : (state.recognition.start(), state.isRecording = !0, $voiceBtn.classList.add("recording"), showToast("Listening\u2026", "info")) } let _audioQueue = []; let _isPlaying = false; let _currentAudio = null; 
+window.audioCtx = null; window.audioAnalyser = null; window.audioDataArray = null;
+async function playNextAudio() { 
+  if (_audioQueue.length === 0) { _isPlaying = false; setWaveformActive(false); return; } 
+  _isPlaying = true; 
+  setWaveformActive(true);
+  if (!window.audioCtx) {
+    window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    window.audioAnalyser = window.audioCtx.createAnalyser();
+    window.audioAnalyser.fftSize = 64; 
+    window.audioDataArray = new Uint8Array(window.audioAnalyser.frequencyBinCount);
+  }
+  if (window.audioCtx.state === 'suspended') window.audioCtx.resume();
+
+  const data = _audioQueue.shift(); 
+  if (typeof data === 'string') { _currentAudio = new Audio("data:audio/wav;base64," + data); } 
+  else { const blob = new Blob([data], { type: "audio/wav" }); _currentAudio = new Audio(URL.createObjectURL(blob)); } 
+  
+  try {
+    const source = window.audioCtx.createMediaElementSource(_currentAudio);
+    source.connect(window.audioAnalyser);
+    window.audioAnalyser.connect(window.audioCtx.destination);
+  } catch(e) {}
+
+  _currentAudio.onended = () => { _currentAudio = null; playNextAudio(); }; 
+  try { await _currentAudio.play(); } catch (e) { console.error("Audio play failed:", e); _currentAudio = null; playNextAudio(); } 
+} async function speakText(e, t = !0) { if (!state.ttsEnabled || !e.trim()) return; if (t) { _audioQueue = []; if (_currentAudio) { _currentAudio.pause(); _currentAudio = null; } _isPlaying = false; } try { const res = await window.jarvis.piperTTS(e); if (res && res.ok && res.data) { _audioQueue.push(res.data); if (!_isPlaying) playNextAudio(); } else { console.error("Piper TTS error:", res?.error); } } catch (err) { console.error("Piper IPC error:", err); } } function extractPlainText(e) { return e.replace(/```[\s\S]*?```/g, "code block").replace(/`[^`]+`/g, "").replace(/#{1,6}\s/g, "").replace(/[*_~]{1,3}/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/^\s*[-*+]\s/gm, "").replace(/^\s*\d+\.\s/gm, "").replace(/\|[^|\n]+/g, "").replace(/\n{2,}/g, ". ").replace(/\n/g, " ").replace(/\s{2,}/g, " ").trim() } function toggleTTS() { state.ttsEnabled = !state.ttsEnabled, $ttsBtn && ($ttsBtn.classList.toggle("active", state.ttsEnabled), $ttsBtn.setAttribute("aria-pressed", state.ttsEnabled)), !state.ttsEnabled && state.synth && state.synth.cancel(), showToast(`Voice output ${state.ttsEnabled ? "enabled" : "disabled"}.`, "info") } function startHUDClock() { const e = () => { const t = new Date; $hudTime && ($hudTime.textContent = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`), $hudDate && ($hudDate.textContent = t.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase()) }; e(), setInterval(e, 1e3) } function initWaveform() {
     if (!$waveformCanvas) return;
     const e = $waveformCanvas.getContext("2d"), t = $waveformCanvas.width, n = $waveformCanvas.height;
-    let s = 0, o = new Array(32).fill(0), lastTime = 0;
+    let lastTime = 0, drewStandby = false;
     function i(timestamp) {
       if (document.hidden) { state.waveformAnim = null; return; }
       timestamp = timestamp || performance.now();
-      const fps = state.waveformActive ? 60 : 10;
-      if (timestamp - lastTime < 1000 / fps) { state.waveformAnim = requestAnimationFrame(i); return; }
+      
+      if (!state.waveformActive) {
+        if (!drewStandby) {
+          e.clearRect(0, 0, t, n);
+          $waveformLabel && ($waveformLabel.textContent = "STANDBY", $waveformLabel.style.color = "var(--text-muted)");
+          e.fillStyle = `rgba(0,212,255,0.15)`;
+          e.fillRect(0, n / 2 - 1, t, 2);
+          drewStandby = true;
+        }
+        // CPU Optimization: Poll at 5 FPS while inactive just to check if it wakes up
+        if (timestamp - lastTime < 200) { state.waveformAnim = requestAnimationFrame(i); return; }
+        lastTime = timestamp;
+        state.waveformAnim = requestAnimationFrame(i);
+        return;
+      }
+      
+      drewStandby = false;
+      if (timestamp - lastTime < 1000 / 60) { state.waveformAnim = requestAnimationFrame(i); return; }
       lastTime = timestamp;
-      e.clearRect(0, 0, t, n), state.waveformActive ? (o = o.map(() => Math.random() * n * .8 + n * .1), $waveformLabel && ($waveformLabel.textContent = state.isStreaming ? "PROCESSING" : "LISTENING", $waveformLabel.style.color = "var(--cyan)")) : (s += .04, $waveformLabel && ($waveformLabel.textContent = "STANDBY", $waveformLabel.style.color = "var(--text-muted)"));
-      const a = t / o.length;
-      o.forEach((c, r) => {
-        const l = state.waveformActive ? o[r] - n / 2 : Math.sin(r / o.length * Math.PI * 2 + s) * 8;
-        e.fillStyle = `rgba(0,212,255,${state.waveformActive ? .8 : .35})`, e.fillRect(r * a + 1, n / 2 - Math.abs(l), a - 2, Math.abs(l) * 2 || 2)
-      });
+      
+      e.clearRect(0, 0, t, n);
+      $waveformLabel && ($waveformLabel.textContent = _isPlaying ? "SPEAKING" : (state.isStreaming ? "PROCESSING" : "LISTENING"), $waveformLabel.style.color = "var(--cyan)");
+      
+      const barCount = 32;
+      const a = t / barCount;
+      
+      if (window.audioAnalyser && _isPlaying) {
+        window.audioAnalyser.getByteFrequencyData(window.audioDataArray);
+        for (let r = 0; r < barCount; r++) {
+          const val = window.audioDataArray[r] || 0;
+          const l = (val / 255) * (n * 0.9);
+          e.fillStyle = `rgba(0,212,255,0.8)`;
+          e.fillRect(r * a + 1, n / 2 - l / 2, a - 2, l || 2);
+        }
+      } else {
+        // Fallback fake waveform if thinking/processing but not speaking
+        for (let r = 0; r < barCount; r++) {
+          const l = Math.random() * n * 0.8;
+          e.fillStyle = `rgba(0,212,255,0.6)`;
+          e.fillRect(r * a + 1, n / 2 - l / 2, a - 2, l || 2);
+        }
+      }
       state.waveformAnim = requestAnimationFrame(i);
     }
     state.waveformAnim = requestAnimationFrame(i);
@@ -681,7 +724,9 @@ Do NOT say "How can I help", "I am ready", or anything generic. Make it feel ali
     if (!e.trim()) return; let t = "safe"; try { t = (await window.jarvis.secClassifyCmd(e))?.verdict || "safe" } catch { } if (t === "blocked") { termPrint("cmd", `JARVIS $> ${e}`), termPrint("err", "\u26D4 BLOCKED \u2014 Command rejected by JARVIS Security Policy."), termPrint("err", "This command is classified as destructive or dangerous."), termPrint("info", "[exit BLOCKED]"), showToast("\u26D4 Command blocked by security policy.", "error"); return } if (t === "warn" && !await showTerminalConfirm(e)) { termPrint("info", "[\u26A0 Command cancelled by user]"); return } state.terminalHistory.unshift(e), state.termHistoryIdx = -1, termPrint("cmd", `JARVIS $> ${e}${t === "warn" ? " \u26A0 CAUTION" : ""}`); const s = await window.jarvis.runCommand(e); if (s.error && (s.error.includes("\u26D4") || s.error.includes("BLOCKED"))) { termPrint("err", s.error), termPrint("info", "[exit BLOCKED]"); return } s.stdout && s.stdout.split(`
 `).forEach(o => o && termPrint("out", o)), s.stderr && s.stderr.split(`
 `).forEach(o => o && termPrint("err", o)), s.error && !s.stdout && !s.stderr && termPrint("err", s.error), termPrint("info", `[exit ${s.exitCode ?? 0}]`)
-  } function showTerminalConfirm(e) { return new Promise(t => { let n = document.getElementById("term-confirm-overlay"); n && n.remove(), n = document.createElement("div"), n.id = "term-confirm-overlay", n.className = "term-confirm-overlay", n.innerHTML = '<div class="term-confirm-box"><div class="term-confirm-icon">\u26A0</div><div class="term-confirm-title">CAUTION \u2014 SENSITIVE COMMAND</div><div class="term-confirm-desc">This command is classified as potentially dangerous. Review it carefully before proceeding.</div><pre class="term-confirm-cmd">' + escHtml(e) + '</pre><div class="term-confirm-btns"><button class="term-confirm-cancel" id="term-confirm-cancel">\u2715 Cancel</button><button class="term-confirm-run" id="term-confirm-run">\u25B6 Execute Anyway</button></div></div>', document.body.appendChild(n), document.getElementById("term-confirm-run").onclick = () => { n.remove(), t(!0) }, document.getElementById("term-confirm-cancel").onclick = () => { n.remove(), t(!1) } }) } function clearTerminal() { $termOutput.innerHTML = "" } window.clearTerminal = clearTerminal; async function quickAction(e) { switch (e) { case "new": newSession(); break; case "clear": clearCurrentChat(); break; case "export": exportChat(); break; case "terminal": openTerminalModal(); break; case "models": await refreshModels(), openModal("models-modal"); break } } window.quickAction = quickAction; function clearCurrentChat() { state.conversations[state.mode] = newConversation(state.mode), clearMessages(), showToast("Chat cleared, sir.", "info") } function newSession() { clearCurrentChat(), showToast("New session started.", "info") } function showModeDashboard(e) { if (state.dashCleanup.forEach(o => { try { o() } catch { } }), state.dashCleanup = [], !$dashboard) return; const t = { general: dashGeneral, code: dashCode, debug: dashDebug, research: dashResearch, automation: dashAutomation, business: dashBusiness, creative: dashCreative, productivity: dashProductivity }, n = (t[e] || t.general)(); $dashboard.innerHTML = n; const s = { general: () => { }, code: initCodeDash, debug: initDebugDash, research: initResearchDash, automation: initAutoDash, business: initBizDash, creative: initCreativeDash, productivity: initProdDash }; setTimeout(() => { const o = s[e]; if (o) { const i = o() || []; state.dashCleanup = Array.isArray(i) ? i : i ? [i] : [] } }, 60) } function dashGeneral() {
+  } function showTerminalConfirm(e) { return new Promise(t => { let n = document.getElementById("term-confirm-overlay"); n && n.remove(), n = document.createElement("div"), n.id = "term-confirm-overlay", n.className = "term-confirm-overlay", n.innerHTML = '<div class="term-confirm-box"><div class="term-confirm-icon">\u26A0</div><div class="term-confirm-title">CAUTION \u2014 SENSITIVE COMMAND</div><div class="term-confirm-desc">This command is classified as potentially dangerous. Review it carefully before proceeding.</div><pre class="term-confirm-cmd">' + escHtml(e) + '</pre><div class="term-confirm-btns"><button class="term-confirm-cancel" id="term-confirm-cancel">\u2715 Cancel</button><button class="term-confirm-run" id="term-confirm-run">\u25B6 Execute Anyway</button></div></div>', document.body.appendChild(n), document.getElementById("term-confirm-run").onclick = () => { n.remove(), t(!0) }, document.getElementById("term-confirm-cancel").onclick = () => { n.remove(), t(!1) } }) } function clearTerminal() { $termOutput.innerHTML = "" } window.clearTerminal = clearTerminal; async function quickAction(e) { switch (e) { case "new": newSession(); break; case "clear": clearCurrentChat(); break; case "export": exportChat(); break; case "terminal": openTerminalModal(); break; case "models": await refreshModels(), openModal("models-modal"); break } } window.quickAction = quickAction; function clearCurrentChat() { state.conversations[state.mode] = newConversation(state.mode), clearMessages(), showToast("Chat cleared, sir.", "info") } function newSession() { clearCurrentChat(), showToast("New session started.", "info") } 
+  window.clearCurrentChat = clearCurrentChat; window.newSession = newSession; window.exportChat = exportChat;
+  function showModeDashboard(e) { if (state.dashCleanup.forEach(o => { try { o() } catch { } }), state.dashCleanup = [], !$dashboard) return; const t = { general: dashGeneral, code: dashCode, debug: dashDebug, research: dashResearch, automation: dashAutomation, business: dashBusiness, creative: dashCreative, productivity: dashProductivity }, n = (t[e] || t.general)(); $dashboard.innerHTML = n; const s = { general: () => { }, code: initCodeDash, debug: initDebugDash, research: initResearchDash, automation: initAutoDash, business: initBizDash, creative: initCreativeDash, productivity: initProdDash }; setTimeout(() => { const o = s[e]; if (o) { const i = o() || []; state.dashCleanup = Array.isArray(i) ? i : i ? [i] : [] } }, 60) } function dashGeneral() {
     return `<div class="mode-dashboard dash-general">
     <div class="dash-hero-tech">
       <div class="tech-core-container">
@@ -1169,7 +1214,7 @@ ${state.memory.map(e => `\u2022 ${e}`).join(`
       <span class="cmd-name">${i.name}</span>
       ${i.shortcut ? `<span class="cmd-shortcut">${i.shortcut}</span>` : ""}
     </button>`}), n.innerHTML = s
-  } window.runCmdItem = function (e) { const t = cmdFiltered[e]; t && (closeCmdPalette(), setTimeout(() => t.action(), 80)) }, document.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(), document.getElementById("cmd-palette")?.hidden === !1 ? closeCmdPalette() : openCmdPalette(); return } const t = document.getElementById("cmd-palette"); if (!(!t || t.hidden)) { if (e.key === "Escape") { closeCmdPalette(); return } e.key === "ArrowDown" ? (e.preventDefault(), cmdActiveIdx = Math.min(cmdActiveIdx + 1, cmdFiltered.length - 1), updateCmdActive()) : e.key === "ArrowUp" ? (e.preventDefault(), cmdActiveIdx = Math.max(cmdActiveIdx - 1, 0), updateCmdActive()) : e.key === "Enter" && (e.preventDefault(), window.runCmdItem(cmdActiveIdx)) } }); function updateCmdActive() { document.querySelectorAll(".cmd-item").forEach((e, t) => { e.classList.toggle("active", t === cmdActiveIdx), t === cmdActiveIdx && e.scrollIntoView({ block: "nearest" }) }) } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", _initCmdInput, { once: !0 }) : _initCmdInput(); function _initCmdInput() { const e = document.getElementById("cmd-input"); e && !e.dataset.bound && (e.dataset.bound = "1", e.addEventListener("input", t => renderCmdResults(t.target.value))) } window.toggleWakeWord = function () { WakeWord.toggle() }; let gpuPollInterval = null; async function pollGPU() { if (document.hidden) return; try { const e = await window.jarvis.runCommand("nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name --format=csv,noheader,nounits", null); if (!e.ok || !e.stdout?.trim()) return; const t = e.stdout.trim().split(",").map(h => h.trim()); if (t.length < 5) return; const n = parseInt(t[0]) || 0, s = parseInt(t[1]) || 0, o = parseInt(t[2]) || 6144, i = parseInt(t[3]) || 0, a = t.slice(4).join(",").trim().replace("NVIDIA GeForce ", ""), c = Math.round(s / o * 100), r = Math.min(Math.round(i / 95 * 100), 100), l = document.getElementById("gpu-util-bar"), p = document.getElementById("gpu-util-val"); l && (l.style.width = `${n}%`, l.className = `gpu-bar-fill${n > 80 ? " hot" : n > 50 ? " warm" : ""}`), p && (p.textContent = `${n}%`); const g = document.getElementById("gpu-mem-bar"), d = document.getElementById("gpu-mem-val"); g && (g.style.width = `${c}%`, g.className = `gpu-bar-fill${c > 85 ? " hot" : c > 60 ? " warm" : ""}`), d && (d.textContent = `${s}/${o}MB`); const u = document.getElementById("gpu-temp-bar"), m = document.getElementById("gpu-temp-val"); u && (u.style.width = `${r}%`, u.className = `gpu-bar-fill${i > 80 ? " hot" : i > 65 ? " warm" : ""}`), m && (m.textContent = `${i}\xB0C`, m.className = `gpu-temp-val${i > 80 ? " hot" : i > 65 ? " warm" : ""}`); const v = document.getElementById("gpu-name-val"); v && a && (v.textContent = a) } catch { } } function startGPUMonitor() { gpuPollInterval || (pollGPU(), gpuPollInterval = setInterval(pollGPU, 15e3)) } (function () { document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => { setupFileDrop(), startGPUMonitor() }, { once: !0 }) : (setupFileDrop(), startGPUMonitor()) })(); const WEB_SEARCH_PATTERNS = [/\b(today|tonight|right now|this week|this month|this year|latest|recent|breaking|live|real.?time)\b/i, /\b(news|headlines|happening|update|event|story|report|announce|declare)\b/i, /\b(world|global|international|country|countries|politics|election|war|conflict|summit|protest|disaster)\b/i, /\b(trending|viral|popular|hot topic|who won|who is leading|score|result|outcome)\b/i, /\b(in 202[4-9]|202[4-9])\b/i, /\b(what is the price|stock price|weather|exchange rate|who is the current|who is president|prime minister|ceo of|founded when)\b/i]; function queryNeedsWebSearch(e) { return WEB_SEARCH_PATTERNS.some(t => t.test(e)) } function detectSearchType(e) { return /\b(news|headlines|breaking|today|happening|event|politics|election|war|conflict|protest)\b/i.test(e) ? "news" : /\b(who is|what is|price|stock|weather|capital|population|definition|explain|history of)\b/i.test(e) ? "fact" : "auto" } function buildWebSearchContext(e, t, n) {
+  } window.runCmdItem = function (e) { const t = cmdFiltered[e]; t && (closeCmdPalette(), setTimeout(() => t.action(), 80)) }, document.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(), document.getElementById("cmd-palette")?.hidden === !1 ? closeCmdPalette() : openCmdPalette(); return } const t = document.getElementById("cmd-palette"); if (!(!t || t.hidden)) { if (e.key === "Escape") { closeCmdPalette(); return } e.key === "ArrowDown" ? (e.preventDefault(), cmdActiveIdx = Math.min(cmdActiveIdx + 1, cmdFiltered.length - 1), updateCmdActive()) : e.key === "ArrowUp" ? (e.preventDefault(), cmdActiveIdx = Math.max(cmdActiveIdx - 1, 0), updateCmdActive()) : e.key === "Enter" && (e.preventDefault(), window.runCmdItem(cmdActiveIdx)) } }); function updateCmdActive() { document.querySelectorAll(".cmd-item").forEach((e, t) => { e.classList.toggle("active", t === cmdActiveIdx), t === cmdActiveIdx && e.scrollIntoView({ block: "nearest" }) }) } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", _initCmdInput, { once: !0 }) : _initCmdInput(); function _initCmdInput() { const e = document.getElementById("cmd-input"); e && !e.dataset.bound && (e.dataset.bound = "1", e.addEventListener("input", t => renderCmdResults(t.target.value))) } window.toggleWakeWord = function () { WakeWord.toggle() }; let gpuPollInterval = null; async function pollGPU() { if (document.hidden) return; try { const e = await window.jarvis.runCommand("nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name --format=csv,noheader,nounits", null, 5000); if (!e.ok || !e.stdout?.trim()) return; const t = e.stdout.trim().split(",").map(h => h.trim()); if (t.length < 5) return; const n = parseInt(t[0]) || 0, s = parseInt(t[1]) || 0, o = parseInt(t[2]) || 6144, i = parseInt(t[3]) || 0, a = t.slice(4).join(",").trim().replace("NVIDIA GeForce ", ""), c = Math.round(s / o * 100), r = Math.min(Math.round(i / 95 * 100), 100), l = document.getElementById("gpu-util-bar"), p = document.getElementById("gpu-util-val"); l && (l.style.width = `${n}%`, l.className = `gpu-bar-fill${n > 80 ? " hot" : n > 50 ? " warm" : ""}`), p && (p.textContent = `${n}%`); const g = document.getElementById("gpu-mem-bar"), d = document.getElementById("gpu-mem-val"); g && (g.style.width = `${c}%`, g.className = `gpu-bar-fill${c > 85 ? " hot" : c > 60 ? " warm" : ""}`), d && (d.textContent = `${s}/${o}MB`); const u = document.getElementById("gpu-temp-bar"), m = document.getElementById("gpu-temp-val"); u && (u.style.width = `${r}%`, u.className = `gpu-bar-fill${i > 80 ? " hot" : i > 65 ? " warm" : ""}`), m && (m.textContent = `${i}\xB0C`, m.className = `gpu-temp-val${i > 80 ? " hot" : i > 65 ? " warm" : ""}`); const v = document.getElementById("gpu-name-val"); v && a && (v.textContent = a) } catch { } } function startGPUMonitor() { gpuPollInterval || (pollGPU(), gpuPollInterval = setInterval(pollGPU, 15e3)) } (function () { document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => { setupFileDrop(), startGPUMonitor() }, { once: !0 }) : (setupFileDrop(), startGPUMonitor()) })(); const WEB_SEARCH_PATTERNS = [/\b(today|tonight|right now|this week|this month|this year|latest|recent|breaking|live|real.?time)\b/i, /\b(news|headlines|happening|update|event|story|report|announce|declare)\b/i, /\b(world|global|international|country|countries|politics|election|war|conflict|summit|protest|disaster)\b/i, /\b(trending|viral|popular|hot topic|who won|who is leading|score|result|outcome)\b/i, /\b(in 202[4-9]|202[4-9])\b/i, /\b(what is the price|stock price|weather|exchange rate|who is the current|who is president|prime minister|ceo of|founded when)\b/i]; function queryNeedsWebSearch(e) { return WEB_SEARCH_PATTERNS.some(t => t.test(e)) } function detectSearchType(e) { return /\b(news|headlines|breaking|today|happening|event|politics|election|war|conflict|protest)\b/i.test(e) ? "news" : /\b(who is|what is|price|stock|weather|capital|population|definition|explain|history of)\b/i.test(e) ? "fact" : "auto" } function buildWebSearchContext(e, t, n) {
     if (!e || !e.length) return '';
 
     // M-4 fix: strip prompt-injection patterns from web content before it
