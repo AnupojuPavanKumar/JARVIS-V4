@@ -1,18 +1,85 @@
 const os = require('os');
+const fs = require('fs');
+const http = require('http');
 const { exec, spawn } = require('child_process');
 const { shell, dialog } = require('electron');
 const path = require('path');
+
+function formatUptime(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.floor(secs % 60);
+  return `${h}h ${m}m ${s}s`;
+}
+
+function checkOllamaRunning() {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:11434/api/tags', { timeout: 800 }, (res) => {
+      resolve(res.statusCode >= 200 && res.statusCode < 300);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
 
 module.exports = function registerSystemController({ ipcMain, app, mainWindowProvider, secAudit, liveSecConfig, secCheckRate }) {
   
   ipcMain.handle('get-user-data-path', () => app.getPath('userData'));
   
-  ipcMain.handle('get-runtime-stats', () => ({
-    cpus: os.cpus(),
-    totalmem: os.totalmem(),
-    freemem: os.freemem(),
-    uptime: os.uptime()
-  }));
+  ipcMain.handle('get-runtime-stats', async () => {
+    const procMem = process.memoryUsage();
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const cpus = os.cpus();
+    const sysUptime = os.uptime();
+    const procUptime = process.uptime();
+
+    let session_count = 0;
+    try {
+      const histDir = path.join(app.getPath('userData'), 'history');
+      if (fs.existsSync(histDir)) {
+        session_count = fs.readdirSync(histDir).filter(f => f.endsWith('.json')).length;
+      }
+    } catch (_) {}
+
+    let skill_count = 0;
+    try {
+      const manifestPath = path.join(__dirname, '../../skills/manifest.json');
+      if (fs.existsSync(manifestPath)) {
+        const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        skill_count = m.skills?.length || 0;
+      }
+    } catch (_) {}
+
+    const ollama_running = await checkOllamaRunning();
+
+    return {
+      ok: true,
+      cpus,
+      totalmem: totalMem,
+      freemem: freeMem,
+      uptime: sysUptime,
+      process: {
+        uptime_human: formatUptime(procUptime),
+        heap_used_mb: (procMem.heapUsed / 1024 / 1024).toFixed(1),
+        heap_total_mb: (procMem.heapTotal / 1024 / 1024).toFixed(1),
+        rss_mb: (procMem.rss / 1024 / 1024).toFixed(1)
+      },
+      system: {
+        uptime_human: formatUptime(sysUptime),
+        free_mem_gb: (freeMem / 1024 / 1024 / 1024).toFixed(2),
+        total_mem_gb: (totalMem / 1024 / 1024 / 1024).toFixed(2),
+        cpu_cores: cpus.length
+      },
+      jarvis: {
+        ollama_running,
+        skill_count,
+        session_count,
+        electron_ver: process.versions.electron || app.getVersion(),
+        node_ver: process.versions.node
+      }
+    };
+  });
 
   ipcMain.handle('run-command', async (_, command, cwd, timeout) => {
     if (!secCheckRate('runCommand', 15)) {
