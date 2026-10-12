@@ -377,15 +377,10 @@ async function streamOllama(e, { onChunk: t, onDone: n, onError: s }) {
 
   const queryContent = e[e.length - 1]?.content || "";
   const memCtx = await jarvisMemory.getRelevantContext(queryContent);
-  let ragCtx = null;
-  if (window.ragSystem) {
-    ragCtx = await window.ragSystem.getContextForQuery(queryContent);
-  }
 
   if (e.length > 0 && e[0].role === "system") {
     let extra = '';
     if (memCtx) extra += '\n' + memCtx;
-    if (ragCtx) extra += '\n' + ragCtx;
     const MAX = 24000;
     const marker = '\n[... context truncated ...]';
     if (e[0].content.length + extra.length > MAX) {
