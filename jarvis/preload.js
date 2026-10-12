@@ -85,8 +85,10 @@ contextBridge.exposeInMainWorld('jarvis', {
   notesSave:    (c)      => ipcRenderer.invoke('notes-save', c),
 
   // ─── Skills System ───────────────────────────────────────────
-  skillsList:   ()                  => ipcRenderer.invoke('skills-list'),
-  skillsRun:    (skillId, args)     => ipcRenderer.invoke('skills-run', skillId, args),
+  skillsList:   ()                         => ipcRenderer.invoke('skills-list'),
+  skillsRun:    (skillId, args, taskId)    => ipcRenderer.invoke('skills-run', skillId, args, taskId),
+  agentStart:   ()                         => ipcRenderer.invoke('agent-start'),
+  agentAbort:   (taskId)                   => ipcRenderer.invoke('agent-abort', taskId),
 
   // ─── Runtime Diagnostics ─────────────────────────────────────
   getRuntimeStats: ()               => ipcRenderer.invoke('get-runtime-stats'),
@@ -113,7 +115,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   // Issue 8 fix: same listener accumulation guard as onWindowState above.
   onOllamaOnline: (cb) => { ipcRenderer.removeAllListeners('ollama-online'); ipcRenderer.on('ollama-online', () => cb()); },
   // ─── Telemetry (main → renderer) ───────────────
-  onTelemetry: (cb) => { ipcRenderer.removeAllListeners('telemetry'); ipcRenderer.on('telemetry', (_, data) => cb(data)); },
+  onTelemetry: (cb) => { ipcRenderer.removeAllListeners('telemetry-update'); ipcRenderer.on('telemetry-update', (_, data) => cb(data)); },
   // ─── Voice Toggle (main → renderer) ───────────────
   onToggleVoice: (cb) => { ipcRenderer.removeAllListeners('toggle-voice'); ipcRenderer.on('toggle-voice', () => cb()); },
 });
