@@ -369,3 +369,11 @@ const registerWindowController = require('./backend/controllers/WindowController
   registerSystemController({ ipcMain, app, mainWindowProvider, secAudit, liveSecConfig, secCheckRate });
   registerWindowController({ ipcMain, app, mainWindowProvider, liveSecConfig });
 
+  ipcMain.handle('sec-audit-read', async () => {
+    return {
+      ok: true,
+      entries: [..._secAuditLog],
+      data: _secAuditLog.map(e => `[${e.ts}] [${e.verdict}] ${e.action}: ${e.detail}`).join('\n')
+    };
+  });
+
