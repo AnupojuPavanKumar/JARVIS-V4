@@ -282,22 +282,27 @@ app.whenReady().then(() => {
     }
   } catch (e) { console.error('Error loading app config', e); }
 
-  // Check Ollama Models
-  setTimeout(() => {
-    http.get('http://127.0.0.1:11434/api/tags', (res) => {
+  // Check Ollama Models & Notify Online Status
+  let ollamaAnnounced = false;
+  function probeOllama(attempt = 1) {
+    const req = http.get('http://127.0.0.1:11434/api/tags', (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
+          if (!ollamaAnnounced && mainWindow && !mainWindow.isDestroyed()) {
+            ollamaAnnounced = true;
+            mainWindow.webContents.send('ollama-online');
+          }
           const json = JSON.parse(data);
-          const installed = json.models.map(m => m.name.split(':')[0]); // strip tags
+          const installed = (json.models || []).map(m => m.name.split(':')[0]); // strip tags
           const missing = [];
           if (!installed.includes(appConfig.embeddingModel.split(':')[0])) missing.push(appConfig.embeddingModel);
           // Text model check handled dynamically by the frontend UI
           
           if (missing.length > 0) {
             console.error(`[OLLAMA] WARNING: Required models missing: ${missing.join(', ')}. Please run 'ollama pull <model>'.`);
-            if (mainWindow) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('show-toast', { title: 'Missing Models', message: `Please pull: ${missing.join(', ')}`, type: 'error' });
             }
           } else {
@@ -305,10 +310,16 @@ app.whenReady().then(() => {
           }
         } catch (e) {}
       });
-    }).on('error', () => {
-      console.log('[OLLAMA] Failed to connect to Ollama API for startup check.');
     });
-  }, 10000); // 10s delay to allow Ollama to start
+    req.on('error', () => {
+      if (attempt < 15) {
+        setTimeout(() => probeOllama(attempt + 1), 2000);
+      } else {
+        console.log('[OLLAMA] Failed to connect to Ollama API for startup check.');
+      }
+    });
+  }
+  setTimeout(() => probeOllama(), 2000);
 
   createWindow();
   createTray();
