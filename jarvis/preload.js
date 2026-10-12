@@ -116,6 +116,8 @@ contextBridge.exposeInMainWorld('jarvis', {
   onOllamaOnline: (cb) => { ipcRenderer.removeAllListeners('ollama-online'); ipcRenderer.on('ollama-online', () => cb()); },
   // ─── Telemetry (main → renderer) ───────────────
   onTelemetry: (cb) => { ipcRenderer.removeAllListeners('telemetry-update'); ipcRenderer.on('telemetry-update', (_, data) => cb(data)); },
+  // ─── Toast Notification (main → renderer) ────────────────────
+  onShowToast: (cb) => { ipcRenderer.removeAllListeners('show-toast'); ipcRenderer.on('show-toast', (_, data) => cb(data)); },
   // ─── Voice Toggle (main → renderer) ───────────────
   onToggleVoice: (cb) => { ipcRenderer.removeAllListeners('toggle-voice'); ipcRenderer.on('toggle-voice', () => cb()); },
 });

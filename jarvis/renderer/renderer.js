@@ -1437,6 +1437,17 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
         if (pMem) pMem.textContent = data.memUsed + "/" + data.memTotal + "GB";
       });
     }
+    if (window.jarvis && window.jarvis.onShowToast) {
+      window.jarvis.onShowToast((data) => {
+        const msg = typeof data === 'object' && data !== null
+          ? (data.title ? `${data.title}: ${data.message || ''}` : (data.message || JSON.stringify(data)))
+          : String(data);
+        const type = (data && data.type) || 'info';
+        if (typeof showToast === 'function') {
+          showToast(msg, type);
+        }
+      });
+    }
   })();
 
 
