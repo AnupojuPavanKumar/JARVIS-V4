@@ -163,16 +163,11 @@ function createWindow() {
     return true;
   };
 
-  // Load index.html or Vite dev server
+  // Load renderer raw source
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     console.log(`[RENDERER] ${message}`);
   });
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  }
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
