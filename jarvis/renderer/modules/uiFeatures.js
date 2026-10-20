@@ -536,12 +536,52 @@ console.log('[JARVIS] UI Features module loaded.');
 // ─── Scheduler UI ────────────────────────────────────────────────
 window.openSchedulerModal = function() {
   openModal('scheduler-modal');
+  const form = document.getElementById('scheduler-add-form');
+  if (form && !form.hidden) {
+    prefillSchedulerTrigger();
+    syncSchedulerType();
+  }
   renderSchedulerJobs();
 };
 
+function schedulerLocalDateTime(date) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function prefillSchedulerTrigger() {
+  const input = document.getElementById('sched-datetime');
+  if (input && !input.value) {
+    input.value = schedulerLocalDateTime(new Date(Date.now() + 2 * 60 * 1000));
+  }
+}
+
+function syncSchedulerType() {
+  const type = document.getElementById('sched-type')?.value || 'one-off';
+  const oneOff = document.getElementById('sched-oneoff');
+  const recurring = document.getElementById('sched-recurring');
+  if (oneOff) oneOff.hidden = type === 'recurring';
+  if (recurring) recurring.hidden = type === 'one-off';
+}
+window.syncSchedulerType = syncSchedulerType;
+
+function schedulerNotify(message, type = 'error') {
+  if (typeof window.showToast === 'function') {
+    window.showToast(message, type);
+  } else {
+    console.warn('[scheduler]', message);
+  }
+}
+
 window.toggleSchedulerAddForm = function() {
   const form = document.getElementById('scheduler-add-form');
+  if (!form) return;
   form.hidden = !form.hidden;
+  if (!form.hidden) {
+    prefillSchedulerTrigger();
+    syncSchedulerType();
+    document.getElementById('sched-name')?.focus();
+  }
 };
 
 window.renderSchedulerJobs = async function() {
@@ -576,32 +616,54 @@ window.renderSchedulerJobs = async function() {
 };
 
 window.addSchedulerJob = async function() {
-  const name = document.getElementById('sched-name').value;
+  const nameInput = document.getElementById('sched-name');
   const type = document.getElementById('sched-type').value;
-  const text = document.getElementById('sched-payload').value;
-  
-  if (!text.trim()) { alert('Payload required!'); return; }
-  
-  const jobData = { name, type, payload: { text } };
-  
+  const payloadInput = document.getElementById('sched-payload');
+  const text = payloadInput.value;
+  const name = nameInput.value.trim() || 'Scheduled task';
+
+  if (!text.trim()) {
+    schedulerNotify('Enter a goal or prompt for the task.');
+    payloadInput.focus();
+    return;
+  }
+
+  const jobData = { name, type, payload: { text: text.trim() } };
+
   if (type === 'one-off') {
-    const dt = document.getElementById('sched-datetime').value;
-    if (!dt) { alert('Trigger date required!'); return; }
-    jobData.triggerTime = new Date(dt).getTime();
+    const dateInput = document.getElementById('sched-datetime');
+    if (!dateInput.value) {
+      schedulerNotify('Choose a trigger date and time.');
+      dateInput.focus();
+      return;
+    }
+    const triggerTime = new Date(dateInput.value).getTime();
+    if (!Number.isFinite(triggerTime) || triggerTime <= Date.now()) {
+      schedulerNotify('Trigger time must be in the future.');
+      dateInput.focus();
+      return;
+    }
+    jobData.triggerTime = triggerTime;
   } else {
-    const inv = parseInt(document.getElementById('sched-interval').value);
-    if (!inv || inv < 1) { alert('Valid interval required!'); return; }
+    const inv = parseInt(document.getElementById('sched-interval').value, 10);
+    if (!Number.isFinite(inv) || inv < 10) {
+      schedulerNotify('Interval must be at least 10 seconds.');
+      document.getElementById('sched-interval').focus();
+      return;
+    }
     jobData.intervalMs = inv * 1000;
   }
-  
+
   const res = await window.jarvis.schedulerAdd(jobData);
   if (res.ok) {
-    document.getElementById('sched-name').value = '';
-    document.getElementById('sched-payload').value = '';
+    nameInput.value = '';
+    payloadInput.value = '';
+    document.getElementById('sched-datetime').value = '';
     document.getElementById('scheduler-add-form').hidden = true;
+    schedulerNotify('Background task created.', 'success');
     renderSchedulerJobs();
   } else {
-    alert('Failed to create task: ' + res.error);
+    schedulerNotify('Failed to create task: ' + res.error);
   }
 };
 

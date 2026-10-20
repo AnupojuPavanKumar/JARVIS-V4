@@ -350,6 +350,7 @@ body {
 
 button { cursor: pointer; border: none; background: none; font-family: inherit; }
 input, textarea, select { font-family: inherit; }
+[hidden] { display: none !important; }
 *:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
 
 /* ─── 3. HUD Background ────────────────────────────────────────── */

@@ -1485,9 +1485,7 @@ window.JarvisSec = JarvisSec;
 function resolveAndCall(actionStr, argsArray) {
   if (!actionStr) return;
   if (actionStr === 'toggleSchedulerType') {
-    const val = argsArray[0];
-    document.getElementById('sched-oneoff').hidden = (val === 'recurring');
-    document.getElementById('sched-recurring').hidden = (val === 'one-off');
+    if (typeof window.syncSchedulerType === 'function') window.syncSchedulerType();
     return;
   }
   // Handle some hardcoded composite actions that were previously inline JS

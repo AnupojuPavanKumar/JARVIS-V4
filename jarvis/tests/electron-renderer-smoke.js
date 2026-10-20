@@ -108,6 +108,23 @@ app.whenReady().then(async () => {
         titlebar: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-h')),
       };
     })(),
+    schedulerForm: (() => {
+      const form = document.getElementById('scheduler-add-form');
+      const wasHidden = form.hidden;
+      if (wasHidden) window.toggleSchedulerAddForm();
+      const dateInput = document.getElementById('sched-datetime');
+      const oneOff = document.getElementById('sched-oneoff');
+      const recurring = document.getElementById('sched-recurring');
+      const triggerTime = new Date(dateInput.value).getTime();
+      const info = {
+        dateValue: dateInput.value,
+        dateFuture: Number.isFinite(triggerTime) && triggerTime > Date.now(),
+        recurringHidden: recurring.hidden && getComputedStyle(recurring).display === 'none',
+        oneOffVisible: !oneOff.hidden && getComputedStyle(oneOff).display !== 'none',
+      };
+      if (wasHidden) window.toggleSchedulerAddForm();
+      return info;
+    })(),
   })`);
 
   check('sidebar mode buttons are built', boot.sidebarButtons === 8, JSON.stringify(boot));
@@ -118,6 +135,8 @@ app.whenReady().then(async () => {
   check('jarvisMemory is exposed for procedural memory', boot.jarvisMemorySaveType === 'function', JSON.stringify(boot));
   check('scheduler modal starts below the titlebar', Math.abs(boot.schedulerModal.top - boot.schedulerModal.titlebar) < 1 && boot.schedulerModal.headerHeight > 0, JSON.stringify(boot.schedulerModal));
   check('scheduler add button is visible', boot.schedulerModal.addButtonWidth > 40 && boot.schedulerModal.addButtonBackground !== 'rgba(0, 0, 0, 0)', JSON.stringify(boot.schedulerModal));
+  check('scheduler form pre-fills a future trigger', boot.schedulerForm.dateFuture, JSON.stringify(boot.schedulerForm));
+  check('scheduler recurring field stays hidden for one-off', boot.schedulerForm.recurringHidden && boot.schedulerForm.oneOffVisible, JSON.stringify(boot.schedulerForm));
 
   const referenced = consoleLines.filter(line =>
     /dashProductivity is not defined|WakeWord is not defined/.test(line));

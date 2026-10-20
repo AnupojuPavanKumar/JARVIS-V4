@@ -36,7 +36,7 @@ if ($proc) {
     Write-Host ""
     Write-Host "Testing GPU inference..." -ForegroundColor Yellow
     try {
-        $probe = @{ model = "llama3.1:8b"; prompt = "reply only: CUDA OK"; stream = $false; options = @{ num_ctx = 3072; num_predict = 8 } } | ConvertTo-Json -Depth 4
+        $probe = @{ model = "llama3.1:8b"; prompt = "reply only: CUDA OK"; stream = $false; keep_alive = 0; options = @{ num_ctx = 3072; num_predict = 8 } } | ConvertTo-Json -Depth 4
         Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/generate" -Method Post -Body $probe -ContentType "application/json" | Out-Null
         Write-Host "CUDA inference OK." -ForegroundColor Green
     } catch {
