@@ -30,9 +30,88 @@ function verifyManifestSignature(manifestRaw, sigRaw, publicKeyPem = SKILLS_PUBL
   }
 }
 
+// Drop only the skills whose script bytes no longer match the signed hash.
+// A missing hash is allowed for backward compatibility; a present hash that
+// cannot be verified excludes that single entry, never the whole manifest.
+function filterSkillsByScriptHash(skills, skillsDir, { log = console.warn } = {}) {
+  const allowed = [];
+  const excluded = [];
+
+  let realSkillsDir = null;
+  try {
+    realSkillsDir = fs.realpathSync(skillsDir);
+  } catch {
+    realSkillsDir = null;
+  }
+
+  function exclude(id, detail) {
+    const reason = `Skill '${id}' excluded: ${detail}.`;
+    excluded.push({ id, reason });
+    if (typeof log === 'function') log(reason);
+  }
+
+  for (const skill of Array.isArray(skills) ? skills : []) {
+    if (!skill || typeof skill !== 'object') {
+      allowed.push(skill);
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(skill, 'scriptHash')) {
+      allowed.push(skill);
+      continue;
+    }
+
+    const id = typeof skill.id === 'string' && skill.id ? skill.id : '(unknown id)';
+
+    if (typeof skill.scriptHash !== 'string' || !skill.scriptHash) {
+      exclude(id, 'invalid scriptHash');
+      continue;
+    }
+    if (typeof skill.script !== 'string' || !skill.script) {
+      exclude(id, 'scriptHash present but script path missing');
+      continue;
+    }
+    if (!realSkillsDir) {
+      exclude(id, 'skills directory could not be resolved');
+      continue;
+    }
+
+    let scriptPath;
+    try {
+      scriptPath = fs.realpathSync(path.resolve(realSkillsDir, skill.script));
+    } catch {
+      exclude(id, `script file missing (${skill.script}) — re-run sign-skills.js or restore the file`);
+      continue;
+    }
+
+    const relative = path.relative(realSkillsDir, scriptPath);
+    if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+      exclude(id, `script path escapes skills directory (${skill.script})`);
+      continue;
+    }
+
+    let actualHash;
+    try {
+      actualHash = crypto.createHash('sha256').update(fs.readFileSync(scriptPath)).digest('hex');
+    } catch {
+      exclude(id, `script file could not be read (${skill.script})`);
+      continue;
+    }
+
+    if (actualHash !== skill.scriptHash) {
+      exclude(id, 'script hash mismatch — re-run sign-skills.js or script may have been tampered with');
+      continue;
+    }
+
+    allowed.push(skill);
+  }
+
+  return { skills: allowed, excluded };
+}
+
 async function loadVerifiedSkillsManifest({
   skillsDir,
   publicKeyPem = SKILLS_PUBLIC_KEY_PEM,
+  log = console.warn,
 } = {}) {
   if (typeof skillsDir !== 'string' || !skillsDir.trim()) {
     throw new Error('loadVerifiedSkillsManifest requires skillsDir');
@@ -40,7 +119,7 @@ async function loadVerifiedSkillsManifest({
 
   const manifestPath = path.join(skillsDir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) {
-    return { ok: true, skills: [], manifestRaw: '' };
+    return { ok: true, skills: [], excluded: [], manifestRaw: '' };
   }
 
   const manifestRaw = await fs.promises.readFile(manifestPath, 'utf8');
@@ -62,9 +141,15 @@ async function loadVerifiedSkillsManifest({
   }
 
   const manifest = JSON.parse(manifestRaw);
+  const filtered = filterSkillsByScriptHash(
+    Array.isArray(manifest.skills) ? manifest.skills : [],
+    skillsDir,
+    { log }
+  );
   return {
     ok: true,
-    skills: Array.isArray(manifest.skills) ? manifest.skills : [],
+    skills: filtered.skills,
+    excluded: filtered.excluded,
     manifestRaw,
   };
 }
@@ -73,5 +158,6 @@ module.exports = {
   SKILLS_PUBLIC_KEY_PEM,
   createPublicKey,
   verifyManifestSignature,
+  filterSkillsByScriptHash,
   loadVerifiedSkillsManifest,
 };

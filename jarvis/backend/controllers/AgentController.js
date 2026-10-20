@@ -218,6 +218,10 @@ module.exports = function registerAgentController({
           audit('AGENT_SKILLS_LOAD', skillsError, 'DENY');
         } else {
           skillsError = null;
+          const excluded = Array.isArray(loaded.excluded) ? loaded.excluded : [];
+          if (excluded.length > 0) {
+            audit('AGENT_SKILLS_LOAD', excluded.map(entry => entry.reason).join(' | '), 'EXCLUDED');
+          }
         }
 
         return { store, registry, policy };

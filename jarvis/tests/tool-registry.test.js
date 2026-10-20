@@ -14,6 +14,10 @@ function makeSignedRegistry() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
   const publicPem = publicKey.export({ type: 'spki', format: 'pem' });
 
+  const script = `
+    const args = JSON.parse(process.argv[2] || '{}');
+    console.log(JSON.stringify({ ok: true, result: args.text }));
+  `;
   const manifest = {
     version: '1.0',
     skills: [{
@@ -21,6 +25,7 @@ function makeSignedRegistry() {
       name: 'Echo',
       description: 'Echo text',
       script: 'echo.js',
+      scriptHash: crypto.createHash('sha256').update(script).digest('hex'),
       type: 'js',
       risk: 'read',
       params: {
@@ -33,10 +38,7 @@ function makeSignedRegistry() {
 
   fs.writeFileSync(path.join(dir, 'manifest.json'), manifestRaw);
   fs.writeFileSync(path.join(dir, 'manifest.sig'), signature);
-  fs.writeFileSync(path.join(dir, 'echo.js'), `
-    const args = JSON.parse(process.argv[2] || '{}');
-    console.log(JSON.stringify({ ok: true, result: args.text }));
-  `);
+  fs.writeFileSync(path.join(dir, 'echo.js'), script);
 
   return { dir, publicPem, manifestRaw };
 }
@@ -83,6 +85,26 @@ test('rejects unknown tools and invalid args before spawning', async () => {
     const missingArg = await registry.execute({ tool: 'echo', args: {} });
     assert.equal(missingArg.ok, false);
     assert.match(missingArg.error, /Missing required param/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('excludes a skill whose script was tampered with after signing', async () => {
+  const { dir, publicPem } = makeSignedRegistry();
+  try {
+    fs.appendFileSync(path.join(dir, 'echo.js'), '// tampered\n');
+
+    const registry = new ToolRegistry({ skillsDir: dir, publicKeyPem: publicPem });
+    const loaded = await registry.load();
+
+    assert.equal(loaded.ok, true);
+    assert.equal(loaded.excluded.length, 1);
+    assert.equal(loaded.excluded[0].id, 'echo');
+    assert.match(loaded.excluded[0].reason, /script hash mismatch/);
+    assert.deepEqual(registry.listSkills(), []);
+    assert.deepEqual(registry.listDefinitions(), []);
+    assert.equal(registry.getSkill('echo'), null);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

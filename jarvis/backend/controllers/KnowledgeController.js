@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { validateArgs, AgentTaskStore, authorize } = require('../../agent-policy');
+const { filterSkillsByScriptHash } = require('../../core/skills/manifest');
 
 module.exports = function registerKnowledgeController({ ipcMain, app, secAudit, secCheckRate }) {
   
@@ -77,7 +78,7 @@ MCowBQYDK2VwAyEADeCN7rDcMvMG0eMeWcEs6HGhpa24JSSDiycp4ne0YiE=
   
   async function loadVerifiedSkillsManifest() {
     const manifestPath = path.join(skillsDir, 'manifest.json');
-    if (!fs.existsSync(manifestPath)) return { ok: true, skills: [], manifestRaw: '' };
+    if (!fs.existsSync(manifestPath)) return { ok: true, skills: [], excluded: [], manifestRaw: '' };
     const manifestRaw = await fs.promises.readFile(manifestPath, 'utf8');
   
     const sigPath = path.join(skillsDir, 'manifest.sig');
@@ -91,14 +92,15 @@ MCowBQYDK2VwAyEADeCN7rDcMvMG0eMeWcEs6HGhpa24JSSDiycp4ne0YiE=
     }
   
     const manifest = JSON.parse(manifestRaw);
-    return { ok: true, skills: manifest.skills || [], manifestRaw };
+    const filtered = filterSkillsByScriptHash(manifest.skills || [], skillsDir);
+    return { ok: true, skills: filtered.skills, excluded: filtered.excluded, manifestRaw };
   }
   
   ipcMain.handle('skills-list', async () => {
     try {
       const res = await loadVerifiedSkillsManifest();
       if (!res.ok) return { ok: false, error: res.error, skills: [] };
-      return { ok: true, skills: res.skills };
+      return { ok: true, skills: res.skills, excluded: res.excluded || [] };
     } catch (e) { return { ok: false, error: e.message, skills: [] }; }
   });
 
@@ -159,7 +161,14 @@ MCowBQYDK2VwAyEADeCN7rDcMvMG0eMeWcEs6HGhpa24JSSDiycp4ne0YiE=
       if (!load.ok) return { ok: false, error: load.error, elapsed: Date.now() - start };
 
       const skill = (load.skills || []).find(s => s.id === skillId);
-      if (!skill) return { ok: false, error: 'Skill not found: ' + skillId, elapsed: Date.now() - start };
+      if (!skill) {
+        const excluded = (load.excluded || []).find(entry => entry.id === skillId);
+        return {
+          ok: false,
+          error: excluded ? excluded.reason : 'Skill not found: ' + skillId,
+          elapsed: Date.now() - start,
+        };
+      }
 
       // ── arg validation ──
       const argError = validateArgs(skill, args);
