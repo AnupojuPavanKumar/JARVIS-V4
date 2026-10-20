@@ -93,13 +93,18 @@ app.whenReady().then(async () => {
       modal.hidden = false;
       const box = modal.querySelector('.modal-box');
       const header = modal.querySelector('.modal-hdr');
+      const addButton = modal.querySelector('.scheduler-add-btn');
       const rect = box.getBoundingClientRect();
       const headerRect = header.getBoundingClientRect();
+      const addRect = addButton.getBoundingClientRect();
+      const addStyle = getComputedStyle(addButton);
       modal.hidden = wasHidden;
       return {
         top: rect.top,
         headerTop: headerRect.top,
         headerHeight: headerRect.height,
+        addButtonWidth: Math.round(addRect.width),
+        addButtonBackground: addStyle.backgroundColor,
         titlebar: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-h')),
       };
     })(),
@@ -112,6 +117,7 @@ app.whenReady().then(async () => {
   check('JarvisSec is exposed for data-action handlers', boot.jarvisSecSaveType === 'function', JSON.stringify(boot));
   check('jarvisMemory is exposed for procedural memory', boot.jarvisMemorySaveType === 'function', JSON.stringify(boot));
   check('scheduler modal starts below the titlebar', Math.abs(boot.schedulerModal.top - boot.schedulerModal.titlebar) < 1 && boot.schedulerModal.headerHeight > 0, JSON.stringify(boot.schedulerModal));
+  check('scheduler add button is visible', boot.schedulerModal.addButtonWidth > 40 && boot.schedulerModal.addButtonBackground !== 'rgba(0, 0, 0, 0)', JSON.stringify(boot.schedulerModal));
 
   const referenced = consoleLines.filter(line =>
     /dashProductivity is not defined|WakeWord is not defined/.test(line));

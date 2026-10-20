@@ -1703,6 +1703,54 @@ input, textarea, select { font-family: inherit; }
 .modal-body::-webkit-scrollbar { width: 5px; }
 .modal-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
+/* Scheduler modal */
+.scheduler-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.scheduler-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.scheduler-add-btn,
+.scheduler-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast),
+    color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.scheduler-add-btn {
+  color: #021018;
+  background: var(--cyan);
+  border: 1px solid var(--cyan);
+  box-shadow: 0 0 14px var(--cyan-glow);
+}
+.scheduler-add-btn:hover {
+  background: #5ce6ff;
+  border-color: #5ce6ff;
+  box-shadow: 0 0 22px var(--cyan-glow);
+}
+.scheduler-refresh-btn {
+  color: var(--cyan);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+}
+.scheduler-refresh-btn:hover {
+  background: var(--bg-active);
+  border-color: var(--border-hover);
+}
+
 /* History Modal */
 #history-search-row { margin-bottom: 12px; }
 #history-search {
