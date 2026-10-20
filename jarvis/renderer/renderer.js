@@ -541,12 +541,24 @@ Think step-by-step before answering. Prioritize logic, absolute accuracy, and co
     saveSession();
   }
 } async function triggerLLMGreeting() {
-  if (!state.ollamaOnline && !await checkOllama()) return; const e = new Date, t = e.getHours(), n = t < 12 ? "morning" : t < 17 ? "afternoon" : t < 21 ? "evening" : "night", s = e.toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }), o = e.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }), i = state.systemSpecs ? `(${state.systemSpecs.cpuCount}-core CPU, ${(state.systemSpecs.totalMem / 1073741824).toFixed(0)}GB RAM)` : "", _userName = (typeof localStorage !== 'undefined' && localStorage.getItem('jarvis_user_name')) || 'sir', a = `You are JARVIS, an AI assistant. Generate a brief intelligent greeting for ${_userName} on his system.
-Date: ${s}. Time: ${o} (good ${n}). System: ${i}.
-Rules: 1-2 sentences only. No markdown. No exclamation marks. Say "sir" once.
-Include one specific insightful detail: something about the time of day, day of week, or a subtle relevant observation.
-Do NOT say "How can I help", "I am ready", or anything generic. Make it feel alive and contextual.`, c = createStreamingMessage(); await streamOllama([{ role: "user", content: a }], { onChunk: (r, l) => updateStreamingEl(c, l), onDone: r => { if (!r || !r.trim()) { try { c.remove() } catch {} return } finalizeStreamingEl(c, r); state.conversations[state.mode].messages.push({ role: "assistant", content: r, timestamp: new Date().toISOString() }); if (state.ttsEnabled) { const l = extractPlainText(r); l && speakText(l, !0) } }, onError: () => { try { c.remove() } catch {} } })
-} function dashSend(e) { (window.sendMessageWithSearch || sendMessage)(e) } window.dashSend = dashSend; function injectPrompt(e) { $input.value = e, autoResizeInput(), $input.focus() } window.injectPrompt = injectPrompt; function appendUserMessage(e, t) {
+  // Do not ask the local model to invent small talk: small models hallucinate
+  // astronomy, weather, and news. Use the real clock instead, and avoid loading
+  // the chat model just to say hello.
+  const now = new Date();
+  const hour = now.getHours();
+  const part = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'night';
+  const date = now.toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  const time = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const userName = (typeof localStorage !== 'undefined' && localStorage.getItem('jarvis_user_name')) || 'sir';
+  const greeting = `Good ${part}, ${userName}. It is ${date}, ${time}. All systems are online.`;
+  const timestamp = now.toISOString();
+  appendJarvisMessage(greeting, timestamp);
+  if (state.conversations && state.conversations[state.mode]) {
+    state.conversations[state.mode].messages.push({ role: 'assistant', content: greeting, timestamp });
+  }
+  if (state.ttsEnabled) speakText(greeting, true);
+}
+function dashSend(e) { (window.sendMessageWithSearch || sendMessage)(e) } window.dashSend = dashSend; function injectPrompt(e) { $input.value = e, autoResizeInput(), $input.focus() } window.injectPrompt = injectPrompt; function appendUserMessage(e, t) {
   const n = document.createElement("div"); n.className = "message user-message", n.innerHTML = `
     <div class="msg-body">
       <div class="msg-meta"><span class="msg-sender">YOU</span><span class="msg-time">${window.formatTime(t)}</span></div>

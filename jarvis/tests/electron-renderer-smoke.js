@@ -87,6 +87,22 @@ app.whenReady().then(async () => {
     toggleWakeType: typeof window.toggleWakeWord,
     jarvisSecSaveType: typeof window.JarvisSec?.save,
     jarvisMemorySaveType: typeof window.jarvisMemory?.save,
+    schedulerModal: (() => {
+      const modal = document.getElementById('scheduler-modal');
+      const wasHidden = modal.hidden;
+      modal.hidden = false;
+      const box = modal.querySelector('.modal-box');
+      const header = modal.querySelector('.modal-hdr');
+      const rect = box.getBoundingClientRect();
+      const headerRect = header.getBoundingClientRect();
+      modal.hidden = wasHidden;
+      return {
+        top: rect.top,
+        headerTop: headerRect.top,
+        headerHeight: headerRect.height,
+        titlebar: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-h')),
+      };
+    })(),
   })`);
 
   check('sidebar mode buttons are built', boot.sidebarButtons === 8, JSON.stringify(boot));
@@ -95,6 +111,7 @@ app.whenReady().then(async () => {
   check('toggleWakeWord is callable', boot.toggleWakeType === 'function', JSON.stringify(boot));
   check('JarvisSec is exposed for data-action handlers', boot.jarvisSecSaveType === 'function', JSON.stringify(boot));
   check('jarvisMemory is exposed for procedural memory', boot.jarvisMemorySaveType === 'function', JSON.stringify(boot));
+  check('scheduler modal starts below the titlebar', Math.abs(boot.schedulerModal.top - boot.schedulerModal.titlebar) < 1 && boot.schedulerModal.headerHeight > 0, JSON.stringify(boot.schedulerModal));
 
   const referenced = consoleLines.filter(line =>
     /dashProductivity is not defined|WakeWord is not defined/.test(line));
