@@ -157,6 +157,9 @@ const jarvisMemory = (function () {
   };
 })();
 
+// Expose for modules and data-action handlers that resolve through window.
+window.jarvisMemory = jarvisMemory;
+
 (function () {
   const e = []; let t = null, n = null; async function s() { if (t) return t; try { if (window.jarvis && window.jarvis.getUserDataPath) { const r = await window.jarvis.getUserDataPath(); t = r ? r + "\\renderer_errors.log" : null } } catch { t = null } return t } function o() {
     n || (n = setTimeout(async () => {
@@ -1463,6 +1466,10 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
 
 // ─── GLOBAL EVENT DELEGATION (CSP FIX) ───────────────────────────
 
+// JarvisSec is a top-level const, so data-action="JarvisSec.save" cannot
+// resolve through window unless it is explicitly exposed.
+window.JarvisSec = JarvisSec;
+
 function resolveAndCall(actionStr, argsArray) {
   if (!actionStr) return;
   if (actionStr === 'toggleSchedulerType') {
@@ -1489,6 +1496,7 @@ function resolveAndCall(actionStr, argsArray) {
     if (!obj) return;
     obj = obj[parts[i]];
   }
+  if (!obj) return;
   const func = obj[parts[parts.length - 1]];
   if (typeof func === 'function') {
     func.apply(obj, argsArray);

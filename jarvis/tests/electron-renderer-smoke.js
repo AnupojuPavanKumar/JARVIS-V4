@@ -85,12 +85,16 @@ app.whenReady().then(async () => {
     sidebarButtons: document.querySelectorAll('#sidebar-modes .mode-btn').length,
     wakeWordType: typeof window.WakeWord,
     toggleWakeType: typeof window.toggleWakeWord,
+    jarvisSecSaveType: typeof window.JarvisSec?.save,
+    jarvisMemorySaveType: typeof window.jarvisMemory?.save,
   })`);
 
   check('sidebar mode buttons are built', boot.sidebarButtons === 8, JSON.stringify(boot));
   check('general dashboard renders content', boot.generalRendered && boot.dashboardLength > 200, JSON.stringify(boot));
   check('WakeWord module is loaded', boot.wakeWordType === 'object', JSON.stringify(boot));
   check('toggleWakeWord is callable', boot.toggleWakeType === 'function', JSON.stringify(boot));
+  check('JarvisSec is exposed for data-action handlers', boot.jarvisSecSaveType === 'function', JSON.stringify(boot));
+  check('jarvisMemory is exposed for procedural memory', boot.jarvisMemorySaveType === 'function', JSON.stringify(boot));
 
   const referenced = consoleLines.filter(line =>
     /dashProductivity is not defined|WakeWord is not defined/.test(line));
