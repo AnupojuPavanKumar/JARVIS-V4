@@ -8,6 +8,7 @@
       "trigger": ["what time", "what date", "current time", "today's date", "what day"],
       "script": "get_datetime.js",
       "type": "js",
+      "risk": "read",
       "params": {}
     },
     {
@@ -17,6 +18,7 @@
       "trigger": ["calculate", "compute", "what is", "solve", "math"],
       "script": "calculator.js",
       "type": "js",
+      "risk": "read",
       "params": {
         "expression": { "type": "string", "required": true, "description": "Math expression to evaluate" }
       }
@@ -28,6 +30,7 @@
       "trigger": ["system status", "memory usage", "how much ram", "system info"],
       "script": "system_status.js",
       "type": "js",
+      "risk": "read",
       "params": {}
     },
 
@@ -38,6 +41,8 @@
       "trigger": ["weather", "forecast", "temperature", "humidity", "raining", "sunny"],
       "script": "weather.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "location": { "type": "string", "required": false, "description": "City or location name (optional). If omitted, auto-detects from IP." }
       }
@@ -45,10 +50,12 @@
     {
       "id": "news",
       "name": "News Headlines",
-      "description": "Fetches the latest news headlines from BBC News. Supports topics: world, technology, business, science, health, sports, entertainment, politics, uk, us, asia, europe, africa.",
+      "description": "Fetches the latest news headlines from BBC News. Supports topics: world, technology, business, science, health, sports, entertainment, politics, uk, us, asia, europe, africa. NOTE: This only provides titles and short snippets. After reading the headlines to the user, you MUST ask the user if they want you to read the full article (using read_url) or open it in their browser (using open_url).",
       "trigger": ["news", "headlines", "latest news", "what's happening"],
       "script": "news.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "topic": { "type": "string", "required": false, "description": "News topic (world/technology/business/science/health/sports/entertainment/politics/uk/us/asia/europe/africa). Default: world." },
         "count": { "type": "number", "required": false, "description": "Number of headlines to return (1–10). Default: 5." }
@@ -62,6 +69,8 @@
       "trigger": ["what is", "tell me about", "who is", "wikipedia", "explain", "define", "history of"],
       "script": "wikipedia_summary.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "query": { "type": "string", "required": true, "description": "The topic or subject to look up on Wikipedia" }
       }
@@ -73,6 +82,8 @@
       "trigger": ["crypto", "bitcoin", "ethereum", "coin price", "btc", "eth", "cryptocurrency", "token price"],
       "script": "crypto_price.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "coin": { "type": "string", "required": true, "description": "Coin name or symbol (e.g. bitcoin, btc, ethereum, eth, solana, sol, dogecoin, doge)" }
       }
@@ -84,6 +95,7 @@
       "trigger": ["convert", "in celsius", "in fahrenheit", "to kg", "to miles", "to km", "to liters", "to gallons", "unit conversion", "how many"],
       "script": "unit_convert.js",
       "type": "js",
+      "risk": "read",
       "params": {
         "value": { "type": "number", "required": true, "description": "The numeric value to convert" },
         "from":  { "type": "string", "required": true, "description": "Source unit (e.g. celsius, kg, miles, mph, liters)" },
@@ -97,6 +109,8 @@
       "trigger": ["ip lookup", "ip address", "my ip", "lookup ip", "who owns", "trace ip"],
       "script": "ip_lookup.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "ip": { "type": "string", "required": false, "description": "IP address to look up. If omitted, returns the user's own public IP info." }
       }
@@ -108,6 +122,8 @@
       "trigger": ["define", "definition", "what does", "meaning of", "synonym", "antonym", "dictionary"],
       "script": "define_word.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "word": { "type": "string", "required": true, "description": "English word to look up" }
       }
@@ -119,6 +135,8 @@
       "trigger": ["translate", "in spanish", "in french", "in german", "in japanese", "how do you say", "what is this in"],
       "script": "translate_text.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "text":  { "type": "string", "required": true, "description": "Text to translate" },
         "to":    { "type": "string", "required": true, "description": "Target language name or BCP-47 tag (e.g. 'Spanish', 'fr', 'Japanese', 'zh')" },
@@ -133,6 +151,7 @@
       "trigger": ["list processes", "running apps", "kill process", "what's running", "task manager", "memory hog"],
       "script": "process_manager.js",
       "type": "js",
+      "risk": "destructive",
       "params": {
         "action": { "type": "string", "enum": ["list", "kill"], "required": false },
         "name":   { "type": "string", "required": false, "description": "Process name to kill" }
@@ -145,6 +164,7 @@
       "trigger": ["list files", "show directory", "read file", "search workspace", "find in project", "what files"],
       "script": "workspace_navigator.js",
       "type": "js",
+      "risk": "read",
       "params": {
         "command": { "type": "string", "enum": ["list-dir", "read-file", "search-workspace"], "required": true, "description": "Command to run" },
         "path": { "type": "string", "required": false, "description": "Directory or file path to inspect" },
@@ -158,8 +178,39 @@
       "trigger": ["inspect code", "read code file", "view source"],
       "script": "code_inspector.js",
       "type": "js",
+      "risk": "read",
       "params": {
-        "targetPath": { "type": "string", "required": true, "description": "Relative path to the file or directory to inspect." }
+        "targetPath": { "type": "string", "required": true, "description": "Relative path to the file or directory to inspect." },
+        "workspaceRoot": { "type": "string", "required": false, "description": "Optional workspace root directory. Falls back to the JARVIS install directory when omitted or invalid." }
+      }
+    },
+    {
+      "id": "propose_patch",
+      "name": "Propose Patch",
+      "description": "Creates a unified diff between a file's current contents and proposed new content without writing to disk.",
+      "trigger": ["propose patch", "show patch", "diff file", "preview change", "suggest edit"],
+      "script": "propose_patch.js",
+      "type": "js",
+      "risk": "read",
+      "params": {
+        "targetPath": { "type": "string", "required": true, "description": "Relative path to the file to patch." },
+        "newContent": { "type": "string", "required": true, "description": "The proposed new content for the file." },
+        "workspaceRoot": { "type": "string", "required": false, "description": "Optional workspace root directory. Falls back to the JARVIS install directory when omitted or invalid." }
+      }
+    },
+    {
+      "id": "apply_patch",
+      "name": "Apply Patch",
+      "description": "Applies a unified diff to a file, creating a .bak backup of the previous contents first.",
+      "trigger": ["apply patch", "apply diff", "apply edit", "commit patch"],
+      "script": "apply_patch.js",
+      "type": "js",
+      "risk": "write",
+      "untrusted": false,
+      "params": {
+        "targetPath": { "type": "string", "required": true, "description": "Relative path to the file to patch." },
+        "patch": { "type": "string", "required": true, "description": "Unified diff (patch) to apply." },
+        "workspaceRoot": { "type": "string", "required": false, "description": "Optional workspace root directory. Falls back to the JARVIS install directory when omitted or invalid." }
       }
     },
     {
@@ -169,6 +220,7 @@
       "trigger": ["open", "start", "launch"],
       "script": "open_app.js",
       "type": "js",
+      "risk": "write",
       "params": {
         "app": { "type": "string", "required": true, "description": "Application name to open" }
       }
@@ -180,6 +232,7 @@
       "trigger": ["open url", "go to", "navigate to", "open website"],
       "script": "open_url.js",
       "type": "js",
+      "risk": "write",
       "params": {
         "url": { "type": "string", "required": true, "description": "URL to open" }
       }
@@ -191,17 +244,20 @@
       "trigger": ["close", "kill", "stop process", "terminate"],
       "script": "kill_process.js",
       "type": "js",
+      "risk": "destructive",
       "params": {
         "name": { "type": "string", "required": true, "description": "Process name to terminate" }
       }
     },
     {
-      "id": "search_web",
+      "id": "open_search_in_browser",
       "name": "Search Web (browser)",
       "description": "Opens the default browser and searches the web for a query",
       "trigger": ["search the web for", "google", "bing"],
-      "script": "search_web.js",
+      "script": "open_search_in_browser.js",
       "type": "js",
+      "risk": "write",
+      "untrusted": true,
       "params": {
         "query": { "type": "string", "required": true, "description": "Search query" }
       }
@@ -213,6 +269,8 @@
       "trigger": ["background search", "look up facts", "autonomous search"],
       "script": "autonomous_search.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "query": { "type": "string", "required": true, "description": "The search query to look up" }
       }
@@ -224,6 +282,8 @@
       "trigger": ["read url", "scrape website", "summarize article"],
       "script": "read_url.js",
       "type": "js",
+      "risk": "read",
+      "untrusted": true,
       "params": {
         "url": { "type": "string", "required": true, "description": "The full URL to read (e.g. https://...)" }
       }
@@ -235,9 +295,10 @@
       "trigger": ["audit security", "check signatures", "scan processes", "is this safe", "security scan"],
       "script": "security_auditor.js",
       "type": "js",
+      "risk": "read",
       "params": {
         "processName": { "type": "string", "required": false, "description": "Specific process name to check. If omitted, checks top memory-consuming processes." }
       }
     }
   ]
-}   
+}

@@ -2,16 +2,32 @@
 // Orchestrates multi-step agentic execution over existing V4 systems.
 
 window.TaskController = (() => {
-  const MAX_STEPS = 15;
+  const MAX_STEPS = 15; // renderer-side guard; main-process cap is 8
   let currentTask = null;
 
-  function createTask(goal) {
+  async function createTask(goal) {
+    // Mint a main-process task token so skills-run can enforce per-task policy.
+    // Falls back to a local ID if IPC is unavailable (dev/offline).
+    let taskId;
+    try {
+      if (window.jarvis && window.jarvis.agentStart) {
+        const res = await window.jarvis.agentStart();
+        taskId = res && res.ok ? res.taskId : null;
+      }
+    } catch (_) { taskId = null; }
+
+    if (!taskId) {
+      // Fallback (should only happen in unit-test / disconnected environments)
+      taskId = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    }
+
     currentTask = {
-      id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: taskId,
       goal: goal,
       state: 'IDLE',
       stepCount: 0,
-      messages: [] // internal message history for the task
+      tainted: false,
+      messages: [],
     };
     return currentTask;
   }
@@ -143,7 +159,8 @@ window.TaskController = (() => {
       if (toolCall) {
         setStatus(`🔧 TOOL: ${toolCall.tool.toUpperCase()}`, 'task-status-tool');
 
-        const toolResult = await window.ToolExecutor.executeToolCall(toolCall);
+        // Pass taskId so main-process can track per-task stepCount and tainted state
+        const toolResult = await window.ToolExecutor.executeToolCall(toolCall, currentTask.id);
         currentTask.messages.push({ role: 'user', content: toolResult });
 
         // Append Tool result to log silently
@@ -178,7 +195,8 @@ window.TaskController = (() => {
         if (typeof window.scrollToBottom === 'function') window.scrollToBottom();
 
         // Trigger procedural memory extraction if it was a multi-step effort
-        if (window.ProceduralMemory && currentTask.stepCount > 1) {
+        // Skip extraction for tainted tasks (ran external-data skills)
+        if (window.ProceduralMemory && currentTask.stepCount > 1 && !currentTask.tainted) {
           window.ProceduralMemory.extract(currentTask);
         }
         break;
@@ -204,5 +222,20 @@ window.TaskController = (() => {
     }
   }
 
-  return { createTask, executeTask, getCurrentTask: () => currentTask };
+  async function abortTask(taskId) {
+    const id = taskId || (currentTask && currentTask.id);
+    if (!id) return;
+    if (currentTask && currentTask.id === id) {
+      currentTask.state = 'ABORTED';
+    }
+    try {
+      if (window.jarvis && window.jarvis.agentAbort) {
+        await window.jarvis.agentAbort(id);
+      }
+    } catch (e) {
+      console.error('[TaskController] agentAbort IPC failed:', e);
+    }
+  }
+
+  return { createTask, executeTask, getCurrentTask: () => currentTask, abortTask };
 })();

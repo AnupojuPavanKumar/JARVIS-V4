@@ -616,14 +616,20 @@ window.deleteSchedulerJob = async function(id) {
 
 window.jarvis.onSchedulerTrigger((job) => {
   console.log('[SCHEDULER] Job triggered:', job);
-  
-  // Directly append the message to the UI
-  if (typeof window.appendMessage === 'function') {
-    window.appendMessage('JARVIS', `[Scheduled Task Triggered: ${job.name}]\nExecuting payload...`, true);
-  }
-  
-  // Feed it back into the main execution loop
-  if (typeof window.executeCommand === 'function') {
-    window.executeCommand(job.payload.text);
+  // Execution happens in the main process through the durable agent runtime;
+  // this listener only reflects the trigger in the UI.
+  const durable = Boolean(
+    window.AgentClient
+    && typeof window.AgentClient.enabled === 'function'
+    && window.AgentClient.enabled()
+  );
+  const label = (job && (job.name || job.id)) || 'scheduled job';
+  if (typeof window.showToast === 'function') {
+    window.showToast(
+      durable
+        ? `Scheduled task started: ${label}`
+        : `Scheduled job fired (durable agent disabled): ${label}`,
+      durable ? 'info' : 'error'
+    );
   }
 });

@@ -83,7 +83,7 @@ function classifyCommand(cmdStr) {
 
   if (/\b(?:powershell|pwsh)\b/i.test(cNormLower)) {
     // Block encoded commands, download-exec patterns, and bypass flags
-    if (/\\s-e(?:n(?:c(?:o(?:d(?:e(?:d)?)?)?)?)?)?\\b/i.test(cNormLower) || /\\s-ec\\b/i.test(cNormLower)) return 'blocked';  // -EncodedCommand
+    if (/\s-(?:encodedcommand|encoded|encode|encod|enco|enc|en|ec|e)(?:\s|$)/i.test(cNormLower)) return 'blocked';  // -EncodedCommand (any prefix)
     if (/\s-nop(?:r(?:o(?:f(?:i(?:l(?:e)?)?)?)?)?)?\b/i.test(cNormLower)) return 'blocked'; // -NoProfile
     if (/\s-w(?:i(?:n(?:d(?:o(?:w(?:s(?:t(?:y(?:l(?:e)?)?)?)?)?)?)?)?)?)?\s+h/i.test(cNormLower)) return 'blocked'; // -WindowStyle Hidden
     return 'confirm';
@@ -93,9 +93,15 @@ function classifyCommand(cmdStr) {
   const readOnlyPattern = /^\s*(whoami|hostname|ver|dir|ipconfig|systeminfo|tasklist|where|node\s+-v|python\s+--version)(\s+.*)?$/i;
   if (readOnlyPattern.test(normalized)) return 'safe';
 
+  // --git-dir / --work-tree redirect git to an arbitrary directory. Block them
+  // before the safe-git check so they cannot slip through as global options.
+  const gitDirOrWorkTree = /(?:^|\s)--(?:git-dir|work-tree)(?:=|\b)/i;
+  if (/^\s*git\b/i.test(cNormLower) && gitDirOrWorkTree.test(normalized)) return 'blocked';
+
   if (/^git\s+(status|log|branch|diff|show|rev-parse|remote)(\s|$)/i.test(normalized)) {
     if (/^[A-Za-z0-9._\/=:@~^ %-]+$/.test(normalized)) {
-      if (!/(?:^|\s)(-c|--output|--exec-path|--upload-pack|--receive-pack|--ext-diff|--textconv|--open-files-in-pager)\b/.test(normalized)) {
+      if (!/(?:^|\s)(-c|--output|--exec-path|--upload-pack|--receive-pack|--ext-diff|--textconv|--open-files-in-pager)\b/.test(normalized) &&
+          !gitDirOrWorkTree.test(normalized)) {
         return 'safe';
       }
     }

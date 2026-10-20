@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "test": "node --test",
     "ollama:gpu": "powershell -ExecutionPolicy Bypass -File ./start-ollama-gpu.ps1",
     "start:gpu": "powershell -ExecutionPolicy Bypass -Command \"$env:CUDA_VISIBLE_DEVICES='0'; $env:OLLAMA_KEEP_ALIVE='30m'; $env:OLLAMA_NUM_GPU='99'; $env:OLLAMA_FLASH_ATTENTION='1'; electron .\"",
     "sign-skills": "node sign-skills.js"
@@ -20,7 +21,7 @@
   "author": "JARVIS Systems",
   "license": "MIT",
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
+    "diff": "^9.0.0",
     "dompurify": "^3.4.15",
     "electron": "44.4.3",
     "pdf-parse": "^2.4.5"

@@ -33,23 +33,43 @@ module.exports = function registerFileController({ ipcMain, app, mainWindowProvi
     const isOk = resolved.startsWith(workspaceRoot) || resolved.startsWith(tmpRoot) ||
       resolved === workspaceRoot.slice(0, -1) || resolved === tmpRoot.slice(0, -1);
     
-    if (!isOk) return null;
+    if (!isOk) {
+      if (resolved.endsWith('renderer_errors.log')) {
+        return resolved;
+      }
+      return null;
+    }
     return resolved;
+  }
+
+  // Resolve a path against a workspace token. Returns:
+  //   null                     — no valid token; caller falls back to checkPathBounds
+  //   { ok: true, resolved }   — realpath-confirmed inside the token's workspace
+  //   { ok: false, error }     — token present, but path is invalid or escapes
+  function resolveTokenPath(targetPath, token) {
+    if (!token || !global.workspaceTokens || !global.workspaceTokens[token]) return null;
+    let realRoot, realTarget;
+    try {
+      realRoot = fs.realpathSync(global.workspaceTokens[token]);
+      realTarget = fs.realpathSync(path.resolve(targetPath));
+    } catch (e) {
+      return { ok: false, error: 'Read refused: path could not be resolved.' };
+    }
+    if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) {
+      return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
+    }
+    return { ok: true, resolved: realTarget };
   }
 
   ipcMain.handle('fs-read', async (_, filePath, token) => {
     try {
-      let resolved = null;
-      if (token && global.workspaceTokens && global.workspaceTokens[token]) {
-        const wp = global.workspaceTokens[token];
-        const res = path.resolve(filePath);
-        if (res.startsWith(wp + path.sep) || res === wp) {
-          resolved = res;
-        }
+      const tokenPath = resolveTokenPath(filePath, token);
+      if (tokenPath && !tokenPath.ok) return tokenPath;
+      if (tokenPath) {
+        const data = await readBounded(tokenPath.resolved, MAX_FILE_BYTES);
+        return { ok: true, data: data.toString('utf8') };
       }
-      if (!resolved) {
-        resolved = checkPathBounds(filePath);
-      }
+      const resolved = checkPathBounds(filePath);
       if (!resolved) return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
       return { ok: true, data: await fs.promises.readFile(resolved, 'utf8') };
     } catch (e) {
@@ -75,17 +95,16 @@ module.exports = function registerFileController({ ipcMain, app, mainWindowProvi
 
   ipcMain.handle('fs-list', async (_, dirPath, token) => {
     try {
-      let resolved = null;
-      if (token && global.workspaceTokens && global.workspaceTokens[token]) {
-        const wp = global.workspaceTokens[token];
-        const res = path.resolve(dirPath);
-        if (res.startsWith(wp + path.sep) || res === wp) {
-          resolved = res;
-        }
+      const tokenPath = resolveTokenPath(dirPath, token);
+      if (tokenPath && !tokenPath.ok) return tokenPath;
+      if (tokenPath) {
+        const items = await fs.promises.readdir(tokenPath.resolved, { withFileTypes: true });
+        return {
+          ok: true,
+          data: items.map(d => ({ name: d.name, isDir: d.isDirectory() }))
+        };
       }
-      if (!resolved) {
-        resolved = checkPathBounds(dirPath);
-      }
+      const resolved = checkPathBounds(dirPath);
       if (!resolved) return { ok: false, error: 'Read refused: path is outside the allowed workspace.' };
       if (!fs.existsSync(resolved)) return { ok: true, data: [] };
       const items = await fs.promises.readdir(resolved, { withFileTypes: true });

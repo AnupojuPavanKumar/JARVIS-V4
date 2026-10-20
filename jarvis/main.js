@@ -35,7 +35,6 @@ const JarvisScheduler = require('./scheduler');
 // ─── State ───────────────────────────────────────────────────────
 let mainWindow = null;
 let tray = null;
-let ollamaProcess = null;   // reference to the spawned ollama serve process
 app.isQuitting = false;
 let liveSecConfig = { terminalEnabled: false, screenCaptureEnabled: false };
 
@@ -57,17 +56,6 @@ function secAudit(action, detail, verdict) {
   _secAuditLog.push(entry);
   if (_secAuditLog.length > 1000) _secAuditLog.shift(); // ring-buffer cap
   console.log(`[SEC] ${verdict} | ${action} | ${entry.detail}`);
-}
-
-function stopOllama() {
-  if (ollamaProcess) {
-    try {
-      process.kill(ollamaProcess.pid, 'SIGTERM');
-    } catch (e) {
-      // ignore
-    }
-    ollamaProcess = null;
-  }
 }
 
 // ─── Global IPC Sender Validation ──────────────────────────────────────────
@@ -152,17 +140,6 @@ function createWindow() {
     });
   });
 
-  // Rate limiting system for IPC handlers
-  const _rateLimits = {};
-  global.secCheckRate = function (action, maxPerMin) {
-    const now = Date.now();
-    if (!_rateLimits[action]) _rateLimits[action] = [];
-    _rateLimits[action] = _rateLimits[action].filter(t => now - t < 60000);
-    if (_rateLimits[action].length >= maxPerMin) return false;
-    _rateLimits[action].push(now);
-    return true;
-  };
-
   // Load renderer raw source
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     console.log(`[RENDERER] ${message}`);
@@ -235,24 +212,12 @@ app.whenReady().then(() => {
   const histDir = path.join(app.getPath('userData'), 'history');
   fs.mkdirSync(histDir, { recursive: true });
 
-  // Initialize JARVIS Memory (SQLite)
+  // Initialize JARVIS Memory (JSON file store)
   try {
     JarvisMemory.init(app.getPath('userData'));
-    console.log('[MAIN] JARVIS Memory (JSON Fallback Engine) initialized successfully.');
+    console.log('[MAIN] JARVIS Memory (JSON file store) initialized successfully.');
   } catch (err) {
     console.error('[MAIN] FATAL ERROR in JarvisMemory.init:', err);
-  }
-
-  // Initialize Autonomous Scheduler
-  try {
-    JarvisScheduler.init(app.getPath('userData'), (job) => {
-      // Send job trigger to frontend
-      if (mainWindow) {
-        mainWindow.webContents.send('scheduler-trigger', job);
-      }
-    });
-  } catch (err) {
-    console.error('[MAIN] FATAL ERROR in JarvisScheduler.init:', err);
   }
 
   // Load security config from disk at startup
@@ -355,6 +320,7 @@ app.on('window-all-closed', (e) => {
 // ═══════════════════════════════════════════════════════════════
 
 
+const registerAgentController = require('./backend/controllers/AgentController');
 const registerAIController = require('./backend/controllers/AIController');
 const registerFileController = require('./backend/controllers/FileController');
 const registerKnowledgeController = require('./backend/controllers/KnowledgeController');
@@ -366,7 +332,8 @@ const registerWindowController = require('./backend/controllers/WindowController
 
   const mainWindowProvider = () => mainWindow;
 
-  registerAIController({ ipcMain, app, mainWindowProvider, secAudit, _allowedRendererBase });
+  registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate, _allowedRendererBase });
+  const agentControllerApi = registerAgentController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate });
   registerFileController({ ipcMain, app, mainWindowProvider, secAudit });
   registerKnowledgeController({ ipcMain, app, secAudit, secCheckRate });
   registerMemoryController({ ipcMain, app, JarvisMemory });
@@ -374,6 +341,35 @@ const registerWindowController = require('./backend/controllers/WindowController
   registerSecurityController({ ipcMain, app, secAudit, liveSecConfig });
   registerSystemController({ ipcMain, app, mainWindowProvider, secAudit, liveSecConfig, secCheckRate });
   registerWindowController({ ipcMain, app, mainWindowProvider, liveSecConfig });
+
+  // Initialize Autonomous Scheduler — due jobs start durable agent tasks so
+  // they keep running while the window is hidden in the tray. Started after
+  // the agent controller so the callback always has a live API handle.
+  try {
+    JarvisScheduler.init(app.getPath('userData'), (job) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('scheduler-trigger', job);
+      }
+      // Headless execution shares the durable-agent feature flag.
+      if (process.env.JARVIS_DURABLE_AGENT !== '1') {
+        console.log(`[SCHEDULER] Job ${job.id} fired (durable agent disabled; no task started).`);
+        return;
+      }
+      agentControllerApi.startTaskFromJob(job)
+        .then((result) => {
+          if (result && result.ok) {
+            console.log(`[SCHEDULER] Job ${job.id} started durable task ${result.task.id}.`);
+          } else {
+            console.error(`[SCHEDULER] Job ${job.id} did not start a task:`, result && result.error);
+          }
+        })
+        .catch((error) => {
+          console.error(`[SCHEDULER] Job ${job.id} failed to start:`, error.message);
+        });
+    });
+  } catch (err) {
+    console.error('[MAIN] FATAL ERROR in JarvisScheduler.init:', err);
+  }
 
   ipcMain.handle('sec-audit-read', async () => {
     return {

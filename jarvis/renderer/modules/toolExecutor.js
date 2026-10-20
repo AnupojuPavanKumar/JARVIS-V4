@@ -72,7 +72,7 @@ const ToolExecutor = (() => {
   }
 
   // ── Execute a tool call and return its result string ───────
-  async function executeToolCall(toolCall) {
+  async function executeToolCall(toolCall, taskId) {
     const { tool, args = {} } = toolCall;
     if (!window.jarvis || !window.jarvis.skillsRun) {
       return `[TOOL_RESULT: error — Skills IPC not available]`;
@@ -84,7 +84,7 @@ const ToolExecutor = (() => {
       return `[TOOL_RESULT: error — ${validationError}]`;
     }
     try {
-      const res = await window.jarvis.skillsRun(tool, args);
+      const res = await window.jarvis.skillsRun(tool, args, taskId);
       if (res && res.ok) {
         const payload = res.result !== undefined ? res.result : (res.data !== undefined ? res.data : res);
         let output = typeof payload === 'object'

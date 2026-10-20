@@ -27,7 +27,7 @@ class JarvisMemory {
     if (!fs.existsSync(this.histDir)) {
       fs.mkdirSync(this.histDir, { recursive: true });
     }
-    console.log('[MAIN] JARVIS Memory (JSON Fallback Engine) initialized successfully.');
+    console.log('[MAIN] JARVIS Memory (JSON file store) initialized successfully.');
   }
 
   async saveSession(sessionId, data) {

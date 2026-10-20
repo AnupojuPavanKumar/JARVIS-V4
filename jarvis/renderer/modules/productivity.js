@@ -300,4 +300,90 @@ function initProdDash() {
 }
 window.initProdDash = initProdDash;
 
+// ─── Productivity Dashboard ────────────────────────────────────
+// The dashboard HTML builder was lost when dashboards.js was deleted;
+// renderer.js still resolves `dashProductivity` from this module.
+
+function _prodReadJSON(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch { return []; }
+}
+
+function dashProductivity() {
+  const tasks = _prodReadJSON('jarvis-tasks').map(t => ({
+    ...t,
+    priority: typeof t.priority === 'string' ? t.priority : 'MED',
+    done: Boolean(t.done),
+  }));
+  const tbs = _prodReadJSON('jarvis-tbs').map(tb => ({
+    ...tb,
+    task: typeof tb.task === 'string' ? tb.task : String(tb.task ?? ''),
+    mins: Number(tb.mins) || 0,
+    done: Boolean(tb.done),
+  }));
+  const tbTotal = tbs.reduce((sum, tb) => sum + tb.mins, 0);
+
+  return `<div class="mode-dashboard dash-prod">
+    <div class="prod-left">
+      <div class="pomo-panel">
+        <div class="pomo-title">⏱ POMODORO TIMER</div>
+        <div class="pomo-display">
+          <canvas id="pomo-canvas" width="148" height="148"></canvas>
+          <div class="pomo-overlay">
+            <div class="pomo-phase" id="pomo-phase">FOCUS</div>
+            <div class="pomo-time" id="pomo-time">25:00</div>
+          </div>
+        </div>
+        <div class="pomo-btns">
+          <button class="pomo-btn pomo-start" id="pomo-start" data-action="startPomodoro">▶ START</button>
+          <button class="pomo-btn" data-action="resetPomodoro">↺ RESET</button>
+          <button class="pomo-btn" data-action="skipPhase">⏭ SKIP</button>
+        </div>
+        <div class="pomo-stats-row">
+          <div class="pomo-stat"><span class="pomo-stat-val" id="pomo-count">0</span><span class="pomo-stat-lbl">POMODOROS</span></div>
+          <div class="pomo-stat"><span class="pomo-stat-val" id="pomo-focus">0m</span><span class="pomo-stat-lbl">FOCUS TIME</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="prod-middle">
+      <div class="prod-tasks-panel">
+        <div class="prod-phdr">
+          <span>✓ TODAY'S TASKS</span>
+          <div class="phdr-actions">
+            <button class="micro-btn" data-action="clearDoneTasks">CLEAR DONE</button>
+            <button class="micro-btn" data-action="prioritizeWithJarvis">⬡ PRIORITIZE</button>
+          </div>
+        </div>
+        <div id="tasks-list" class="tasks-list">${renderTasksHTML(tasks)}</div>
+        <div class="task-add-row">
+          <input type="text" id="task-input" class="list-input" placeholder="Add task…" data-keydown-enter="addTask">
+          <select id="task-priority" class="mini-sel"><option>HIGH</option><option selected>MED</option><option>LOW</option></select>
+          <button class="dash-btn-sm" data-action="addTask">+</button>
+        </div>
+        <button class="dash-btn fw-btn" data-action="planWithJarvis">⬡ PLAN MY DAY WITH JARVIS</button>
+      </div>
+    </div>
+    <div class="prod-right">
+      <div class="prod-tb-panel">
+        <div class="prod-phdr">
+          <span>⏰ TIME BLOCKS</span>
+          <div class="phdr-actions">
+            <span id="tb-total" class="meta-txt">Total: ${tbTotal}m (${(tbTotal / 60).toFixed(1)}h)</span>
+            <button class="micro-btn" data-action="clearTBs">CLEAR</button>
+          </div>
+        </div>
+        <div id="tb-list" class="tb-list">${renderTBsHTML(tbs)}</div>
+        <div class="tb-add-row">
+          <input type="text" id="tb-task" class="list-input" placeholder="Task name…" data-keydown-enter="addTimeBlock">
+          <input type="number" id="tb-mins" class="list-input" value="25" min="5" max="240" style="max-width:64px">
+          <button class="dash-btn-sm" data-action="addTimeBlock">+</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+window.dashProductivity = dashProductivity;
+
 console.log('[JARVIS] Productivity module loaded.');

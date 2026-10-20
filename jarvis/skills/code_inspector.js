@@ -6,8 +6,22 @@ const fs = require('fs');
 const args = JSON.parse(process.argv[2] || '{}');
 const targetPath = args.targetPath || '.';
 
-// Determine the true root of the workspace.
-const workspaceRoot = fs.realpathSync(path.resolve(__dirname, '../../'));
+// Determine the true root of the workspace. Prefer an explicitly supplied
+// workspace root, but only if it resolves to a valid existing directory.
+let workspaceRoot;
+if (args.workspaceRoot) {
+  try {
+    const candidate = fs.realpathSync(args.workspaceRoot);
+    if (fs.statSync(candidate).isDirectory()) {
+      workspaceRoot = candidate;
+    }
+  } catch (e) {
+    // Invalid workspace root, fall back to the default below.
+  }
+}
+if (!workspaceRoot) {
+  workspaceRoot = fs.realpathSync(path.resolve(__dirname, '../../'));
+}
 const absolutePath = path.resolve(workspaceRoot, targetPath);
 
 let realPath;

@@ -90,6 +90,22 @@ contextBridge.exposeInMainWorld('jarvis', {
   agentStart:   ()                         => ipcRenderer.invoke('agent-start'),
   agentAbort:   (taskId)                   => ipcRenderer.invoke('agent-abort', taskId),
 
+  // ─── Durable Agent Runtime (feature-flagged) ────────────────
+  // The old renderer agent path remains the default until the Phase 1
+  // acceptance gate passes and JARVIS_DURABLE_AGENT=1 is set.
+  durableAgentEnabled: process.env.JARVIS_DURABLE_AGENT === '1',
+  agentTaskStart:   (request)               => ipcRenderer.invoke('agent-task-start', request),
+  agentTaskList:    (options)               => ipcRenderer.invoke('agent-task-list', options),
+  agentTaskGet:     (taskId)                => ipcRenderer.invoke('agent-task-get', taskId),
+  agentTaskEvents:  (taskId, options)       => ipcRenderer.invoke('agent-task-events', taskId, options),
+  agentTaskCancel:  (taskId, reason)        => ipcRenderer.invoke('agent-task-cancel', taskId, reason),
+  agentTaskApprove: (taskId, options)       => ipcRenderer.invoke('agent-task-approve', taskId, options),
+  agentTaskResume:  (taskId, options)       => ipcRenderer.invoke('agent-task-resume', taskId, options),
+  onAgentTaskEvent: (cb) => {
+    ipcRenderer.removeAllListeners('agent-task-event');
+    ipcRenderer.on('agent-task-event', (_, event) => cb(event));
+  },
+
   // ─── Runtime Diagnostics ─────────────────────────────────────
   getRuntimeStats: ()               => ipcRenderer.invoke('get-runtime-stats'),
 

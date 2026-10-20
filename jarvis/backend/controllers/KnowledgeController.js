@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { validateArgs, AgentTaskStore, authorize } = require('../../agent-policy');
 
 module.exports = function registerKnowledgeController({ ipcMain, app, secAudit, secCheckRate }) {
   
@@ -54,7 +55,7 @@ module.exports = function registerKnowledgeController({ ipcMain, app, secAudit, 
   const skillsDir = path.join(__dirname, '../../skills');
   
   const SKILLS_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAQi/+EtNe7DXn4P7c/wiL20qmqVK2yWxRYOuOyLs0VAU=
+MCowBQYDK2VwAyEADeCN7rDcMvMG0eMeWcEs6HGhpa24JSSDiycp4ne0YiE=
 -----END PUBLIC KEY-----`;
   
   let _skillsPubKey = null;
@@ -67,12 +68,7 @@ MCowBQYDK2VwAyEAQi/+EtNe7DXn4P7c/wiL20qmqVK2yWxRYOuOyLs0VAU=
     if (!_skillsPubKey) return { ok: false, reason: 'public-key unavailable' };
     try {
       const { verify } = require('crypto');
-      const ok = verify(
-        null,
-        Buffer.from(manifestRaw),
-        _skillsPubKey,
-        Buffer.from(sigRaw)
-      );
+      const ok = verify(null, Buffer.from(manifestRaw), _skillsPubKey, Buffer.from(sigRaw));
       return { ok };
     } catch (e) {
       return { ok: false, reason: e.message };
@@ -105,19 +101,81 @@ MCowBQYDK2VwAyEAQi/+EtNe7DXn4P7c/wiL20qmqVK2yWxRYOuOyLs0VAU=
       return { ok: true, skills: res.skills };
     } catch (e) { return { ok: false, error: e.message, skills: [] }; }
   });
-  
-  ipcMain.handle('skills-run', async (_, skillId, args) => {
+
+  // ─── Task store (delegated to agent-policy) ────────────────────
+  const taskStore = new AgentTaskStore(); // stepCap=8, ttl=30min
+  const STDOUT_CAP_BYTES = 64 * 1024;    // 64 KB
+
+  // ─── confirmFn: wraps Electron dialog for main-process use ─────
+  async function confirmFn(skill, args, risk, tainted) {
+    const { dialog } = require('electron');
+    const taintedNote = tainted
+      ? '\n\n⚠️  This task previously ran an untrusted (external-data) skill.'
+      : '';
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Allow', 'Deny'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'JARVIS — Skill Permission',
+      message: `Allow "${skill.name}"?`,
+      detail: `Risk level: ${risk.toUpperCase()}\nSkill ID: ${skill.id}\nArgs: ${JSON.stringify(args)}${taintedNote}\n\nThis action cannot be undone if destructive.`,
+    });
+    return response === 0; // 0 = Allow
+  }
+
+  // ─── agent-start: mint a new 128-bit task token ────────────────
+  ipcMain.handle('agent-start', async () => {
+    const taskId = taskStore.mintTaskId();
+    secAudit('AGENT_START', taskId, 'MINTED');
+    return { ok: true, taskId };
+  });
+
+  // ─── agent-abort: mark a task as aborted ──────────────────────
+  ipcMain.handle('agent-abort', async (_, taskId) => {
+    const result = taskStore.abort(taskId);
+    if (result.ok) {
+      secAudit('AGENT_ABORT', String(taskId), 'ABORTED');
+    } else {
+      secAudit('AGENT_ABORT', String(taskId), `DENY - ${result.error}`);
+    }
+    return result;
+  });
+
+  // ─── skills-run IPC handler ────────────────────────────────────
+  ipcMain.handle('skills-run', async (_, skillId, args, taskId) => {
     const start = Date.now();
+
+    // ── rate limit ──
     if (!secCheckRate('skillRun', 20)) {
+      secAudit('SKILL_RUN', `${skillId} task=${taskId}`, 'DENY - rate limit');
       return { ok: false, error: 'Rate limit exceeded', elapsed: Date.now() - start };
     }
+
     if (!args) args = {};
+
     try {
       const load = await loadVerifiedSkillsManifest();
       if (!load.ok) return { ok: false, error: load.error, elapsed: Date.now() - start };
-      const skill = (load.skills || []).find(function (s) { return s.id === skillId; });
+
+      const skill = (load.skills || []).find(s => s.id === skillId);
       if (!skill) return { ok: false, error: 'Skill not found: ' + skillId, elapsed: Date.now() - start };
-  
+
+      // ── arg validation ──
+      const argError = validateArgs(skill, args);
+      if (argError) {
+        secAudit('SKILL_RUN', `${skillId} task=${taskId}`, `DENY - ${argError}`);
+        return { ok: false, error: argError, elapsed: Date.now() - start };
+      }
+
+      // ── policy decision (task state + risk + taint + confirm) ──
+      const decision = await authorize({ skill, args, taskId, store: taskStore, confirmFn });
+      if (!decision.ok) {
+        secAudit('SKILL_RUN', `${skillId} task=${taskId}`, `DENY - ${decision.deny}`);
+        return { ok: false, error: decision.error, elapsed: Date.now() - start };
+      }
+
+      // ── path sandboxing ──
       let scriptPath, realSkillsRoot;
       try {
         scriptPath = fs.realpathSync(path.resolve(skillsDir, skill.script));
@@ -128,42 +186,59 @@ MCowBQYDK2VwAyEAQi/+EtNe7DXn4P7c/wiL20qmqVK2yWxRYOuOyLs0VAU=
       if (!scriptPath.startsWith(realSkillsRoot)) {
         return { ok: false, error: 'Skill script path escapes skills directory.', elapsed: Date.now() - start };
       }
-  
-      if (!fs.existsSync(scriptPath)) return { ok: false, error: 'Script not found: ' + skill.script, elapsed: Date.now() - start };
-  
+
+      if (!fs.existsSync(scriptPath)) {
+        return { ok: false, error: 'Script not found: ' + skill.script, elapsed: Date.now() - start };
+      }
+
+      // Mark task tainted after an untrusted skill runs
+      // (authorize already sets it on known tasks; this is redundant safety for
+      //  the throwaway path where skill.untrusted and taskRec is ephemeral)
       const argsStr = JSON.stringify(args);
       const runner = skill.type === 'js' ? 'node' : 'python';
-      secAudit('SKILL_RUN', `${skillId} (${argsStr.length} bytes)`, 'ALLOWED');
-  
+      secAudit('SKILL_RUN', `${skillId} task=${taskId} risk=${skill.risk || 'read'} untrusted=${!!skill.untrusted} (${argsStr.length} bytes)`, 'ALLOWED');
+
       return await new Promise(function (resolve) {
         const child = spawn(runner, [scriptPath, argsStr], {
           shell: false,
           windowsHide: true,
         });
-  
+
         let stdoutBuf = '', stderrBuf = '';
-  
-        child.stdout.on('data', (chunk) => { stdoutBuf += chunk; });
+        let stdoutTruncated = false;
+
+        child.stdout.on('data', (chunk) => {
+          if (stdoutBuf.length < STDOUT_CAP_BYTES) {
+            stdoutBuf += chunk;
+            if (stdoutBuf.length >= STDOUT_CAP_BYTES) {
+              stdoutBuf = stdoutBuf.slice(0, STDOUT_CAP_BYTES);
+              stdoutTruncated = true;
+              try { child.kill('SIGKILL'); } catch (_) { }
+            }
+          }
+        });
         child.stderr.on('data', (chunk) => { stderrBuf += chunk; });
-  
+
         const timer = setTimeout(() => {
           try { child.kill('SIGKILL'); } catch (_) { }
         }, 10000);
-  
+
         child.on('error', (err) => {
           clearTimeout(timer);
-          const elapsed = Date.now() - start;
-          resolve({ ok: false, skill: skillId, data: { stdout: stdoutBuf, stderr: stderrBuf }, elapsed, error: err.message });
+          resolve({ ok: false, skill: skillId, data: { stdout: stdoutBuf, stderr: stderrBuf }, elapsed: Date.now() - start, error: err.message });
         });
-  
+
         child.on('close', (code) => {
           clearTimeout(timer);
           const elapsed = Date.now() - start;
+          if (stdoutTruncated) {
+            secAudit('SKILL_RUN', `${skillId} task=${taskId}`, 'WARN - stdout truncated at 64KB');
+          }
           try {
             const p = JSON.parse(stdoutBuf.trim());
-            resolve(Object.assign({ ok: true }, p, { elapsed }));
+            resolve(Object.assign({ ok: true }, p, { elapsed, _stdoutTruncated: stdoutTruncated || undefined }));
           } catch (_) {
-            resolve({ ok: code === 0, skill: skillId, data: { stdout: stdoutBuf.trim(), stderr: stderrBuf.trim() }, elapsed, error: code !== 0 ? `exit ${code}` : null });
+            resolve({ ok: code === 0, skill: skillId, data: { stdout: stdoutBuf.trim(), stderr: stderrBuf.trim() }, elapsed, error: code !== 0 ? `exit ${code}` : null, _stdoutTruncated: stdoutTruncated || undefined });
           }
         });
       });

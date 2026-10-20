@@ -5,22 +5,20 @@ Write-Host "=== JARVIS - Ollama GPU Launcher ===" -ForegroundColor Cyan
 Write-Host "GPU: NVIDIA GeForce RTX 4050 (6GB VRAM)" -ForegroundColor Cyan
 Write-Host ""
 
-# Kill any existing Ollama process
-$existing = Get-Process -Name "ollama" -ErrorAction SilentlyContinue
+# Kill any existing Ollama and llama-server processes
+$existing = Get-Process -Name "ollama", "llama-server" -ErrorAction SilentlyContinue
 if ($existing) {
-    Write-Host "Stopping existing Ollama process..." -ForegroundColor Yellow
-    Stop-Process -Name "ollama" -Force
+    Write-Host "Stopping existing Ollama and llama-server processes..." -ForegroundColor Yellow
+    Stop-Process -Name "ollama", "llama-server" -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 }
 
 # Set environment variables for GPU usage
+# Note: GPU layer offload is decided per-request via the "num_gpu" option (or
+# Ollama's automatic fit). OLLAMA_NUM_GPU / OLLAMA_GPU_LAYERS / OLLAMA_MAX_VRAM
+# are not real Ollama settings and have been removed.
 $env:CUDA_VISIBLE_DEVICES = "0"          # Use GPU 0 (RTX 4050)
-$env:OLLAMA_NUM_GPU       = "99"         # Offload all layers to GPU
-$env:OLLAMA_GPU_LAYERS    = "99"         # Alias for compatibility
 $env:OLLAMA_FLASH_ATTENTION = "1"        # Enable Flash Attention (faster on CUDA)
-
-# Workarounds for VRAM limits and context size on 6GB VRAM
-$env:OLLAMA_MAX_VRAM = "5368709120"      # Limit to 5GB (leave 1GB for OS/Display)
 $env:OLLAMA_KV_CACHE_TYPE = "q8_0"       # Quantize KV cache to save VRAM
 
 Write-Host "Environment configured for CUDA on RTX 4050." -ForegroundColor Green
@@ -37,7 +35,13 @@ if ($proc) {
     Write-Host "Ollama started (PID: $($proc.Id))" -ForegroundColor Green
     Write-Host ""
     Write-Host "Testing GPU inference..." -ForegroundColor Yellow
-    ollama run llama3.1:8b "reply only: CUDA OK" 2>&1
+    try {
+        $probe = @{ model = "llama3.1:8b"; prompt = "reply only: CUDA OK"; stream = $false; options = @{ num_ctx = 3072; num_predict = 8 } } | ConvertTo-Json -Depth 4
+        Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/generate" -Method Post -Body $probe -ContentType "application/json" | Out-Null
+        Write-Host "CUDA inference OK." -ForegroundColor Green
+    } catch {
+        Write-Host "CUDA probe failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
     Write-Host ""
     ollama ps
 } else {

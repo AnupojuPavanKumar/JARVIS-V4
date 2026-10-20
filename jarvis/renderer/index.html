@@ -3,7 +3,7 @@
 
 <head>
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; media-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:*; font-src 'self' https://fonts.gstatic.com data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; script-src 'self';">
+    content="default-src 'self'; media-src 'self' data: blob:; connect-src 'self' http://localhost:* http://127.0.0.1:*; font-src 'self' https://fonts.gstatic.com data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; script-src 'self';">
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -999,7 +999,7 @@
                 style="width:100px;">
             </div>
             <textarea id="sched-payload" class="prompt-form-textarea" style="min-height:60px;"
-              placeholder="Command or prompt to execute..."></textarea>
+              placeholder="Goal or prompt for the assistant..."></textarea>
             <div style="margin-top:10px; text-align:right;">
               <button class="prompt-form-save" data-action="addSchedulerJob">CREATE TASK</button>
             </div>
@@ -1024,8 +1024,11 @@
   <!-- Task Controller & Procedural Memory                         -->
   <script src="modules/taskController.js"></script>
   <script src="modules/procedural.js"></script>
+  <!-- Durable Agent Client (inactive unless JARVIS_DURABLE_AGENT=1) -->
+  <script src="modules/agentClient.js"></script>
   <!-- Feature modules: productivity widgets and UI tools          -->
   <script src="modules/productivity.js"></script>
+  <script src="modules/wakeWord.js"></script>
   <script src="modules/uiFeatures.js"></script>
 
 

@@ -4,7 +4,7 @@ const http = require('http');
 const { spawn, exec } = require('child_process');
 const os = require('os');
 
-module.exports = function registerAIController({ ipcMain, app, mainWindowProvider, secAudit, _allowedRendererBase }) {
+module.exports = function registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate, _allowedRendererBase }) {
   
   // ─── Web Search / DuckDuckGo ────────────────────────────────────────────────────
   // Issue 5 fix: replaced exec()+shell string with spawnShellCommand().
@@ -32,31 +32,40 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
   }
 
   ipcMain.handle('web-search', async (_, query) => {
+    if (!secCheckRate('webSearch', 10)) return { ok: false, error: 'Rate limit' };
     secAudit('WEB_SEARCH', query, 'ALLOWED');
     try {
-// Pass payload via stdin to avoid Windows CLI length limit (8191 chars).
-      const scriptPath = path.join(__dirname, '../../skills', 'duckduckgo_search.py');
-      const payload = JSON.stringify({ query: query.slice(0, 512), max_results: 5 });
-      const result = await new Promise((resolve, reject) => {
-        const child = spawn(scriptPath.endsWith('.py') ? 'python' : 'node', [scriptPath], {
-          shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-        });
-        let stdout = '', stderr = '';
-        child.stdout.on('data', chunk => { stdout += chunk; });
-        child.stderr.on('data', chunk => { stderr += chunk; });
-        const timeoutId = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Search timed out')); }, 60000);
-        child.on('error', err => { clearTimeout(timeoutId); reject(err); });
-        child.on('close', code => { clearTimeout(timeoutId); resolve({ code, stdout, stderr }); });
-        child.stdin.on('error', err => {
-          clearTimeout(timeoutId);
-          reject(err);
-        });
-        child.stdin.write(payload);
-        child.stdin.end();
+      const q = query.slice(0, 512);
+      const res = await fetch('https://lite.duckduckgo.com/lite/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'q=' + encodeURIComponent(q)
       });
       
-      if (result.code !== 0) throw new Error(result.stderr || 'Search failed');
-      return { ok: true, data: JSON.parse(result.stdout) };
+      if (!res.ok) {
+        throw new Error(`Search failed with status: ${res.status}`);
+      }
+      
+      const html = await res.text();
+      const results = [];
+      const linkRegex = /<a rel="nofollow" href="([^"]+)" class='result-link'>([^<]+)<\/a>/g;
+      const snippetRegex = /<td class='result-snippet'>\s*(.*?)\s*<\/td>/gs;
+
+      let linkMatch;
+      while ((linkMatch = linkRegex.exec(html)) !== null && results.length < 5) {
+        const url = linkMatch[1];
+        const title = linkMatch[2];
+        const snippetMatch = snippetRegex.exec(html);
+        const snippet = snippetMatch ? snippetMatch[1].replace(/<\/?[^>]+(>|$)/g, "").trim() : "";
+        
+        // Decode HTML entities (basic)
+        const cleanSnippet = snippet.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
+        const cleanTitle = title.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
+        
+        results.push({ url, title: cleanTitle, snippet: cleanSnippet });
+      }
+      
+      return { ok: true, results: results, query: q, fetchedAt: new Date().toISOString() };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -86,6 +95,7 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
   }
 
   ipcMain.handle('ollama-fetch', async (_, { path, method, body }) => {
+    if (!secCheckRate('ollamaFetch', 60)) return { ok: false, error: 'Rate limit' };
     if (!OLLAMA_ALLOWED.includes(path)) return { ok: false, error: 'Forbidden path' };
     
     return new Promise((resolve) => {
@@ -111,6 +121,10 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
   });
 
   ipcMain.on('ollama-stream-start', (event, { reqId, path, method, body }) => {
+    if (!secCheckRate('ollamaFetch', 60)) {
+      event.sender.send('ollama-stream-error', { reqId, error: 'Rate limit' });
+      return;
+    }
     const mainWindow = mainWindowProvider();
     const senderOk = mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
     const urlOk = event.senderFrame && typeof event.senderFrame.url === 'string' &&

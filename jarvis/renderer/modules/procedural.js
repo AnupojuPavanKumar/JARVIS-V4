@@ -8,6 +8,12 @@ window.ProceduralMemory = (() => {
       return;
     }
 
+    // Skip tainted tasks — they fetched external data and could poison memory
+    if (taskSnapshot.tainted) {
+      console.log("[Procedural] Skipping extraction: task was tainted by an untrusted skill.");
+      return;
+    }
+
     console.log("[Procedural] Extracting candidate from task:", taskSnapshot.goal);
     if (typeof window.showToast === 'function') {
       window.showToast('Extracting Procedural Memory...', 'info');

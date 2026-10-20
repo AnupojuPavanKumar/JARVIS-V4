@@ -7,6 +7,7 @@ class JarvisScheduler {
     this.timer = null;
     this.schedulerFile = null;
     this.onJobTriggered = null; // Callback for when a job fires
+    this._savePromise = Promise.resolve();
   }
 
   init(userDataPath, triggerCallback) {
@@ -38,13 +39,19 @@ class JarvisScheduler {
     }
   }
 
-  async saveJobs() {
-    if (!this.schedulerFile) return;
-    try {
-      await fs.promises.writeFile(this.schedulerFile, JSON.stringify(this.jobs, null, 2));
-    } catch (err) {
-      console.error('[MAIN] Error saving jobs:', err);
-    }
+  saveJobs() {
+    if (!this.schedulerFile) return Promise.resolve();
+    const file = this.schedulerFile;
+    const payload = JSON.stringify(this.jobs, null, 2);
+    // Serialize writes so a rapid tick/add/remove sequence cannot truncate a
+    // file that another read or a test is about to consume.
+    this._savePromise = this._savePromise
+      .catch(() => {})
+      .then(() => fs.promises.writeFile(file, payload))
+      .catch(err => {
+        console.error('[MAIN] Error saving jobs:', err);
+      });
+    return this._savePromise;
   }
 
   startLoop() {
