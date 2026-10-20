@@ -23,7 +23,7 @@ function makeFakeRegistry(ok = true) {
   };
 }
 
-async function setup({ skillsOk = true, holdRun = false, listModels } = {}) {
+async function setup({ skillsOk = true, holdRun = false, listModels, onAgentEvent = null } = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-agent-controller-test-'));
   const handlers = new Map();
   const audit = [];
@@ -65,6 +65,7 @@ async function setup({ skillsOk = true, holdRun = false, listModels } = {}) {
     mainWindowProvider() { return null; },
     createRuntime,
     listModels: listModels || (async () => ['llama3.1:8b', 'all-minilm']),
+    onAgentEvent,
     taskStoreFactory(baseDir) {
       store = new TaskStore({ baseDir });
       return store;
@@ -335,6 +336,25 @@ test('exposes startTask for non-IPC callers', async () => {
     const invalid = await context.controller.startTask({ goal: '' });
     assert.equal(invalid.ok, false);
     assert.equal(context.runs.length, 1);
+  } finally {
+    cleanup(context);
+  }
+});
+
+test('forwards runtime events to the main-process notification hook', async () => {
+  const events = [];
+  const context = await setup({ onAgentEvent: event => events.push(event) });
+  try {
+    const started = await context.controller.startTask({ goal: 'Notify on approval' });
+    assert.equal(started.ok, true);
+    events.length = 0;
+
+    const cancelled = await context.handlers.get('agent-task-cancel')({}, started.task.id, 'test');
+    assert.equal(cancelled.ok, true);
+    assert.equal(
+      events.some(event => event.type === 'task.updated' && event.taskId === started.task.id),
+      true
+    );
   } finally {
     cleanup(context);
   }

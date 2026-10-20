@@ -485,7 +485,10 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
       };
 
       const now = Date.now();
-      if (now - lastGpuFetchTime >= 10000) {
+      // GPU queries spawn an external nvidia-smi process. The performance HUD
+      // does not need a fresh sample every few seconds; 30s keeps it useful
+      // without keeping the GPU/CPU busy while JARVIS sits idle.
+      if (now - lastGpuFetchTime >= 30000) {
         lastGpuFetchTime = now;
         const child = spawn('nvidia-smi', ['--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name', '--format=csv,noheader,nounits'], { shell: false });
         let stdout = '';
@@ -525,6 +528,6 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
         mainWindow.webContents.send('telemetry-update', payload);
       }
     }
-  }, 2000);
+  }, 5000);
 
 };

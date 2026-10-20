@@ -6,7 +6,7 @@
 
 const {
   app, BrowserWindow, ipcMain, globalShortcut,
-  Tray, Menu, nativeImage, shell, dialog
+  Tray, Menu, nativeImage, shell, dialog, Notification
 } = require('electron');
 
 const _path = require('path');
@@ -37,6 +37,8 @@ let mainWindow = null;
 let tray = null;
 app.isQuitting = false;
 let liveSecConfig = { terminalEnabled: false, screenCaptureEnabled: false };
+const notifiedApprovals = new Set();
+const DEFAULT_TRAY_TOOLTIP = 'JARVIS — AI Operating System  [Ctrl+Space]';
 
 // ─── Security Rate Limiting ──────────────────────────────────────────
 const rateLimits = {};
@@ -161,6 +163,10 @@ function createWindow() {
 
   mainWindow.on('maximize', () => mainWindow.webContents.send('window-state', 'maximized'));
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('window-state', 'normal'));
+  mainWindow.on('focus', () => {
+    try { mainWindow.flashFrame(false); } catch (_) {}
+    try { if (tray) tray.setToolTip(DEFAULT_TRAY_TOOLTIP); } catch (_) {}
+  });
 }
 
 // ─── System Tray ─────────────────────────────────────────────────
@@ -191,7 +197,7 @@ function createTray() {
     }
   ]);
 
-  tray.setToolTip('JARVIS — AI Operating System  [Ctrl+Space]');
+  tray.setToolTip(DEFAULT_TRAY_TOOLTIP);
   tray.setContextMenu(contextMenu);
 
   tray.on('click', () => {
@@ -202,6 +208,76 @@ function createTray() {
       mainWindow?.focus();
     }
   });
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+  mainWindow.flashFrame(false);
+  if (tray) tray.setToolTip(DEFAULT_TRAY_TOOLTIP);
+}
+
+// A scheduler/task approval can arrive while JARVIS is hidden in the tray.
+// The renderer already posts an in-app message and toast; when the window is
+// not focused, also surface a native Windows notification and flash the
+// taskbar so the pending decision is not silently missed.
+function notifyApproval(taskId, approval) {
+  if (!approval || !approval.id || notifiedApprovals.has(approval.id)) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const focused = mainWindow.isVisible() && mainWindow.isFocused();
+  if (focused) return;
+
+  notifiedApprovals.add(approval.id);
+  const tool = String(approval.toolCall?.tool || 'a tool').slice(0, 80);
+  const reason = approval.reason ? ` (${String(approval.reason).slice(0, 120)})` : '';
+  const title = 'JARVIS — Approval required';
+  const body = `A background task needs permission to run ${tool}${reason}. Open JARVIS to approve or deny.`;
+
+  try {
+    if (Notification.isSupported()) {
+      const notification = new Notification({
+        title,
+        body,
+        icon: path.join(__dirname, 'assets', 'icon.png'),
+      });
+      notification.on('click', () => {
+        focusMainWindow();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('agent-task-event', {
+            taskId,
+            type: 'approval.focus',
+            at: new Date().toISOString(),
+            data: { approvalId: approval.id },
+          });
+        }
+      });
+      notification.on('failed', (_event, error) => {
+        console.warn('[AGENT] Native approval notification failed:', error || 'unknown error');
+      });
+      notification.show();
+      console.log(`[AGENT] Native approval notification shown for ${tool}.`);
+    }
+  } catch (error) {
+    console.warn('[AGENT] Could not show native approval notification:', error.message);
+  }
+
+  try {
+    if (tray) tray.setToolTip(`JARVIS — approval required: ${tool}`);
+    mainWindow.flashFrame(true);
+  } catch (_) {}
+}
+
+function handleAgentEvent(event) {
+  if (!event || !event.taskId) return;
+  const data = event.data || {};
+  const pending = Array.isArray(data.task?.approvals)
+    ? data.task.approvals.find(candidate => candidate && candidate.status === 'pending')
+    : null;
+  const approval = data.approval || pending;
+  if (approval) notifyApproval(event.taskId, approval);
 }
 
 // ─── App Lifecycle ───────────────────────────────────────────────
@@ -333,7 +409,10 @@ const registerWindowController = require('./backend/controllers/WindowController
   const mainWindowProvider = () => mainWindow;
 
   registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate, _allowedRendererBase });
-  const agentControllerApi = registerAgentController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate });
+  const agentControllerApi = registerAgentController({
+    ipcMain, app, mainWindowProvider, secAudit, secCheckRate,
+    onAgentEvent: handleAgentEvent,
+  });
   registerFileController({ ipcMain, app, mainWindowProvider, secAudit });
   registerKnowledgeController({ ipcMain, app, secAudit, secCheckRate });
   registerMemoryController({ ipcMain, app, JarvisMemory });

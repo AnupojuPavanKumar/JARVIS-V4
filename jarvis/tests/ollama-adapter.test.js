@@ -41,7 +41,7 @@ test('posts chat requests with merged options and native tools', async () => {
   const body = JSON.parse(calls[0].init.body);
   assert.equal(body.model, 'llama3.2');
   assert.equal(body.stream, false);
-  assert.equal(body.keep_alive, '30m');
+  assert.equal(body.keep_alive, '5m');
   assert.deepEqual(body.options, { temperature: 0.3, num_ctx: 4096, num_predict: 20 });
   assert.equal(body.tools.length, 1);
 });

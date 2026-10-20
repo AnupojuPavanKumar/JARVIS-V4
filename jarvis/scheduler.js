@@ -21,7 +21,10 @@ class JarvisScheduler {
   loadJobs() {
     try {
       if (fs.existsSync(this.schedulerFile)) {
-        const raw = JSON.parse(fs.readFileSync(this.schedulerFile, 'utf8'));
+        // Tolerate a UTF-8 BOM (common when the file is edited by hand or by
+        // PowerShell) and a single job object instead of an array.
+        const parsed = JSON.parse(fs.readFileSync(this.schedulerFile, 'utf8').replace(/^\uFEFF/, ''));
+        const raw = Array.isArray(parsed) ? parsed : (parsed && typeof parsed === 'object' ? [parsed] : []);
         // MED-04 fix: sanitize loaded jobs — reject any with invalid intervalMs
         this.jobs = raw.filter(j => {
           if (j.type === 'recurring') {

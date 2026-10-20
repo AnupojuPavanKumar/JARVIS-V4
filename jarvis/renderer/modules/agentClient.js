@@ -193,6 +193,8 @@ window.AgentClient = (() => {
     const reason = approval.reason ? ` (${approval.reason})` : '';
     const message = `Sir, a background task is paused and requires your approval. It wants to run **${tool}**${reason}.\n\nOpen the approval card and choose **APPROVE** or **DENY**.`;
 
+    // Make sure an idle HUD resumes so the approval card/toast is visible.
+    if (typeof window.wakeHud === 'function') window.wakeHud();
     toast(`Approval required: ${tool}`, 'info');
     if (typeof window.appendJarvisMessage === 'function') {
       try {
@@ -333,6 +335,17 @@ window.AgentClient = (() => {
     }, 50);
   }
 
+  function focusApproval(view) {
+    if (!view || !view.parentEl) return;
+    view.parentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const approveButton = view.approvalEl.querySelector('[data-approve]');
+    if (approveButton) {
+      setTimeout(() => {
+        try { approveButton.focus({ preventScroll: true }); } catch (_) {}
+      }, 250);
+    }
+  }
+
   function handleEvent(event) {
     if (!event || !event.taskId) return;
     const view = views.get(event.taskId);
@@ -343,6 +356,12 @@ window.AgentClient = (() => {
         attachTask(event.taskId, { allowTerminal: true }).catch(error => {
           console.error('[AgentClient] Failed to attach external task:', error);
         });
+      } else if (event.type === 'approval.focus') {
+        attachTask(event.taskId, { allowTerminal: true })
+          .then(focusApproval)
+          .catch(error => {
+            console.error('[AgentClient] Failed to focus approval task:', error);
+          });
       }
       return;
     }
@@ -382,6 +401,9 @@ window.AgentClient = (() => {
       case 'approval.requested':
         setStatus(view, '🔐 APPROVAL REQUIRED', 'task-status-error');
         showApproval(view, data.approval || data);
+        break;
+      case 'approval.focus':
+        focusApproval(view);
         break;
       case 'task.failed':
         setStatus(view, '❌ FAILED', 'task-status-error');

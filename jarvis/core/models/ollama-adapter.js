@@ -47,7 +47,11 @@ class OllamaAdapter {
     model = DEFAULT_MODEL,
     fetchImpl = globalThis.fetch,
     defaultOptions = DEFAULT_MODEL_OPTIONS,
-    keepAlive = '30m',
+    // Keep the model warm for a short window, then let Ollama unload it. A
+    // 30-minute idle residency pins several GB of VRAM and keeps the GPU from
+    // reaching its lowest power state. Set JARVIS_MODEL_KEEP_ALIVE=30m if
+    // faster first-token latency matters more than idle power.
+    keepAlive = process.env.JARVIS_MODEL_KEEP_ALIVE || '5m',
   } = {}) {
     if (typeof fetchImpl !== 'function') {
       throw new Error('OllamaAdapter requires a fetch implementation');

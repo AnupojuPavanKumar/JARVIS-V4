@@ -135,6 +135,7 @@ module.exports = function registerAgentController({
   promptBuilder: injectedPromptBuilder = null,
   defaultModel = DEFAULT_MODEL,
   listModels = defaultListModels,
+  onAgentEvent = null,
 } = {}) {
   if (!ipcMain || typeof ipcMain.handle !== 'function') {
     throw new Error('registerAgentController requires ipcMain');
@@ -188,6 +189,11 @@ module.exports = function registerAgentController({
       && typeof win.webContents.send === 'function'
     ) {
       win.webContents.send('agent-task-event', event);
+    }
+    // Main-process observers use this for native notifications when the
+    // renderer is hidden. Never let a notification failure break the runtime.
+    if (typeof onAgentEvent === 'function') {
+      try { onAgentEvent(event); } catch (_) {}
     }
   }
 

@@ -60,6 +60,15 @@ test('scheduler validates, triggers, persists, and removes jobs', async () => {
     );
     scheduler.loadJobs();
     assert.deepEqual(scheduler.listJobs().map(job => job.id), ['good', 'one']);
+
+    // A hand-edited file may have a UTF-8 BOM or contain a single job object
+    // instead of an array. Both should load without discarding the job.
+    fs.writeFileSync(
+      scheduler.schedulerFile,
+      `\uFEFF${JSON.stringify({ id: 'bom-one', type: 'one-off', triggerTime: Date.now() + 10000, active: true })}`
+    );
+    scheduler.loadJobs();
+    assert.deepEqual(scheduler.listJobs().map(job => job.id), ['bom-one']);
   } finally {
     clearInterval(scheduler.timer);
     scheduler.timer = null;
