@@ -1,13 +1,14 @@
 // JARVIS — Durable Agent Client
 // Thin renderer view over the main-process AgentRuntime. The main process owns
 // task state, approvals, and recovery; this module only starts tasks, renders
-// events, and forwards user decisions. It is inactive unless the preload
-// feature flag (JARVIS_DURABLE_AGENT=1) is enabled.
+// events, and forwards user decisions. It is enabled by default; setting
+// JARVIS_DURABLE_AGENT=0 disables the preload feature flag.
 
 window.AgentClient = (() => {
   const STORAGE_KEY = 'jarvis_active_agent_task';
   const MAX_PREVIEW = 4000;
   const views = new Map();
+  const announcedApprovals = new Set();
   let listening = false;
   let currentTaskId = null;
 
@@ -181,10 +182,32 @@ window.AgentClient = (() => {
     codeEl.textContent = preview(step.result) || '(no output)';
   }
 
+  function announceApproval(approval) {
+    if (!approval || approval.status !== 'pending') return;
+    const key = approval.id
+      || `${approval.toolCall?.tool || 'tool'}:${approval.requestedAt || ''}`;
+    if (!key || announcedApprovals.has(key)) return;
+    announcedApprovals.add(key);
+
+    const tool = approval.toolCall?.tool || 'a tool';
+    const reason = approval.reason ? ` (${approval.reason})` : '';
+    const message = `Sir, a background task is paused and requires your approval. It wants to run **${tool}**${reason}.\n\nOpen the approval card and choose **APPROVE** or **DENY**.`;
+
+    toast(`Approval required: ${tool}`, 'info');
+    if (typeof window.appendJarvisMessage === 'function') {
+      try {
+        window.appendJarvisMessage(message, Date.now());
+      } catch (error) {
+        console.error('[AgentClient] Failed to announce approval:', error);
+      }
+    }
+  }
+
   function showApproval(view, approval) {
     if (!view || !approval) return;
     if (view.approvalId === approval.id) return;
     view.approvalId = approval.id;
+    announceApproval(approval);
 
     const tool = approval.toolCall?.tool || 'tool';
     const args = preview(approval.toolCall?.args || {});
@@ -235,6 +258,7 @@ window.AgentClient = (() => {
   function showFinal(view, task) {
     if (!view || view.finalized || !isTerminal(task.status)) return;
     view.finalized = true;
+    if (view.cancelBtn) view.cancelBtn.hidden = true;
 
     let text = task.result || '';
     if (!text && task.status === 'failed') text = `[ERROR] ${task.error || 'Task failed'}`;

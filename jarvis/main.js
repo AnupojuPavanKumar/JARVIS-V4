@@ -350,8 +350,9 @@ const registerWindowController = require('./backend/controllers/WindowController
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('scheduler-trigger', job);
       }
-      // Headless execution shares the durable-agent feature flag.
-      if (process.env.JARVIS_DURABLE_AGENT !== '1') {
+      // Headless execution shares the durable-agent feature flag, which is
+      // enabled by default. JARVIS_DURABLE_AGENT=0 disables it.
+      if (process.env.JARVIS_DURABLE_AGENT === '0') {
         console.log(`[SCHEDULER] Job ${job.id} fired (durable agent disabled; no task started).`);
         return;
       }

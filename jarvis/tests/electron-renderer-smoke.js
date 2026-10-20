@@ -54,6 +54,8 @@ const benignHandlers = {
   'get-runtime-stats': { ok: false },
   'ollama-fetch': { ok: false, error: 'smoke' },
   'history-list': { ok: true, data: [] },
+  'agent-task-list': { ok: true, tasks: [] },
+  'agent-task-get': { ok: false, error: 'smoke' },
 };
 for (const [channel, response] of Object.entries(benignHandlers)) {
   ipcMain.handle(channel, async () => response);
@@ -87,6 +89,7 @@ app.whenReady().then(async () => {
     toggleWakeType: typeof window.toggleWakeWord,
     jarvisSecSaveType: typeof window.JarvisSec?.save,
     jarvisMemorySaveType: typeof window.jarvisMemory?.save,
+    jarvisNoticeType: typeof window.appendJarvisMessage,
     schedulerModal: (() => {
       const modal = document.getElementById('scheduler-modal');
       const wasHidden = modal.hidden;
@@ -133,6 +136,7 @@ app.whenReady().then(async () => {
   check('toggleWakeWord is callable', boot.toggleWakeType === 'function', JSON.stringify(boot));
   check('JarvisSec is exposed for data-action handlers', boot.jarvisSecSaveType === 'function', JSON.stringify(boot));
   check('jarvisMemory is exposed for procedural memory', boot.jarvisMemorySaveType === 'function', JSON.stringify(boot));
+  check('JARVIS chat notices are exposed to the agent client', boot.jarvisNoticeType === 'function', JSON.stringify(boot));
   check('scheduler modal starts below the titlebar', Math.abs(boot.schedulerModal.top - boot.schedulerModal.titlebar) < 1 && boot.schedulerModal.headerHeight > 0, JSON.stringify(boot.schedulerModal));
   check('scheduler add button is visible', boot.schedulerModal.addButtonWidth > 40 && boot.schedulerModal.addButtonBackground !== 'rgba(0, 0, 0, 0)', JSON.stringify(boot.schedulerModal));
   check('scheduler form pre-fills a future trigger', boot.schedulerForm.dateFuture, JSON.stringify(boot.schedulerForm));

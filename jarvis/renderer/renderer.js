@@ -1482,6 +1482,10 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
 // resolve through window unless it is explicitly exposed.
 window.JarvisSec = JarvisSec;
 
+// AgentClient uses this to announce pending approvals in the chat, not just
+// through a transient toast.
+window.appendJarvisMessage = appendJarvisMessage;
+
 function resolveAndCall(actionStr, argsArray) {
   if (!actionStr) return;
   if (actionStr === 'toggleSchedulerType') {

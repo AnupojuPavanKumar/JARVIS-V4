@@ -4,9 +4,9 @@
 //
 // Runs a hidden Electron window with the real preload, injects the real
 // agentClient.js into the page, and drives the same IPC events the main
-// process emits. Run with the durable flag enabled:
+// process emits. Durable mode is enabled by default:
 //
-//   $env:JARVIS_DURABLE_AGENT='1'; npx electron tests/electron-agent-smoke.js
+//   npx electron tests/electron-agent-smoke.js
 //
 // Exits 0 on success, 1 on the first failed check.
 
@@ -154,6 +154,13 @@ app.whenReady().then(async () => {
     JSON.stringify(preloadApi)
   );
 
+  await win.webContents.executeJavaScript(`
+    window.__jarvisNotices = [];
+    window.__toasts = [];
+    window.appendJarvisMessage = (text) => { window.__jarvisNotices.push(String(text)); };
+    window.showToast = (text, type) => { window.__toasts.push({ text: String(text), type: String(type || '') }); };
+    void 0;
+  `);
   const clientSource = fs.readFileSync(
     path.join(__dirname, '..', 'renderer', 'modules', 'agentClient.js'),
     'utf8'
@@ -216,6 +223,17 @@ app.whenReady().then(async () => {
   check('shows the approval panel', dom.approvalVisible === 'block', JSON.stringify(dom));
   check('renders an approve button', dom.approveButton === 'function', JSON.stringify(dom));
 
+  const notice = await win.webContents.executeJavaScript(`({
+    chat: (window.__jarvisNotices || []).join('\\n'),
+    toasts: (window.__toasts || []).map(entry => entry.text).join('\\n'),
+  })`);
+  check(
+    'announces pending approvals in chat',
+    /write_note/.test(notice.chat) && /requires your approval/i.test(notice.chat),
+    JSON.stringify(notice)
+  );
+  check('toasts pending approvals', /write_note/.test(notice.toasts), JSON.stringify(notice));
+
   await win.webContents.executeJavaScript(
     `document.querySelector('#agent-task-task_smoke_1 [data-approve]').click()`
   );
@@ -244,6 +262,7 @@ app.whenReady().then(async () => {
     status: document.querySelector('#agent-task-task_smoke_1 .task-status')?.textContent,
     finalVisible: document.querySelector('#agent-task-task_smoke_1 .task-final-output')?.style.display,
     finalText: document.querySelector('#agent-task-task_smoke_1 .task-final-output')?.textContent,
+    cancelHidden: document.querySelector('#agent-task-task_smoke_1 .task-cancel')?.hidden,
   })`);
   check('marks the task completed', /COMPLETED/.test(final.status || ''), JSON.stringify(final));
   check(
@@ -251,6 +270,7 @@ app.whenReady().then(async () => {
     final.finalVisible === 'block' && /Smoke test complete/.test(final.finalText || ''),
     JSON.stringify(final)
   );
+  check('hides cancel after the task is finished', final.cancelHidden === true, JSON.stringify(final));
 
   // ── Externally started tasks (headless scheduler path) ───────────
   win.webContents.send('agent-task-event', {

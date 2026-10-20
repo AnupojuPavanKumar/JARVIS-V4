@@ -90,10 +90,10 @@ contextBridge.exposeInMainWorld('jarvis', {
   agentStart:   ()                         => ipcRenderer.invoke('agent-start'),
   agentAbort:   (taskId)                   => ipcRenderer.invoke('agent-abort', taskId),
 
-  // ─── Durable Agent Runtime (feature-flagged) ────────────────
-  // The old renderer agent path remains the default until the Phase 1
-  // acceptance gate passes and JARVIS_DURABLE_AGENT=1 is set.
-  durableAgentEnabled: process.env.JARVIS_DURABLE_AGENT === '1',
+  // ─── Durable Agent Runtime ──────────────────────────────────
+  // Enabled by default. Set JARVIS_DURABLE_AGENT=0 to fall back to the
+  // legacy renderer path for troubleshooting.
+  durableAgentEnabled: process.env.JARVIS_DURABLE_AGENT !== '0',
   agentTaskStart:   (request)               => ipcRenderer.invoke('agent-task-start', request),
   agentTaskList:    (options)               => ipcRenderer.invoke('agent-task-list', options),
   agentTaskGet:     (taskId)                => ipcRenderer.invoke('agent-task-get', taskId),
