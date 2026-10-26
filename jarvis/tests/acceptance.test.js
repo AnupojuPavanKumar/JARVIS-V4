@@ -157,6 +157,11 @@ test('persists a pending write approval and resumes it after a restart', async (
     // Simulate a renderer/app restart: discard the runtime, keep the store.
     const restartedModel = createFakeModel([
       { text: 'The note is written.', toolCalls: [], finishReason: 'stop' },
+      {
+        text: '{"verdict":"accept","reason":"The write result and final answer agree.","guidance":""}',
+        toolCalls: [],
+        finishReason: 'stop',
+      },
     ]);
     const restartedRuntime = new AgentRuntime({
       store: harness.store,
@@ -240,7 +245,7 @@ test('denies an unknown tool without spawning it and continues the loop', async 
     assert.equal(completed.status, TASK_STATUS.COMPLETED);
     assert.equal(completed.result, 'Handled without that tool.');
     assert.equal(completed.steps.some(step => step.tool === 'does_not_exist' && step.status === 'failed'), true);
-    assert.equal(completed.messages.some(message => message.content.includes('unknown-tool')), true);
+    assert.equal(completed.messages.some(message => message.content.includes('Unknown tool')), true);
     assert.equal(completed.tainted, false);
   } finally {
     harness.cleanup();

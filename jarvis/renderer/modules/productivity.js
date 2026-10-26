@@ -132,7 +132,7 @@ function renderTasksHTML(tasks) {
   return sorted.map((t, si) => {
     const ri = tasks.indexOf(t);
     return `<div class="task-item ${t.done ? 'done' : ''}">
-      <input type="checkbox" ${t.done ? 'checked' : ''} data-change="toggleTask" data-arg="${ri}">
+      <input type="checkbox" ${t.done ? 'checked' : ''} data-change="toggleTask" data-arg-json="${ri}">
       <span class="task-text">${_kanbanEscHtml(t.text)}</span>
       <span class="task-pri task-${t.priority.toLowerCase()}">${t.priority}</span>
       <button class="item-del" data-action="deleteTask" data-arg-json="${ri}">✕</button>
@@ -180,7 +180,7 @@ window.prioritizeWithJarvis = function() {
 function renderTBsHTML(tbs) {
   return tbs.map((tb, i) => `
     <div class="tb-item ${tb.done ? 'done' : ''}">
-      <input type="checkbox" ${tb.done ? 'checked' : ''} data-change="toggleTB" data-arg="${i}">
+      <input type="checkbox" ${tb.done ? 'checked' : ''} data-change="toggleTB" data-arg-json="${i}">
       <span class="tb-task">${_kanbanEscHtml(tb.task)}</span>
       <span class="tb-dur">${tb.mins}m</span>
       <button class="item-del" data-action="deleteTB" data-arg-json="${i}">✕</button>
@@ -225,6 +225,20 @@ window.planWithJarvis = function() {
 };
 
 // ─── Pomodoro Timer ────────────────────────────────────────────
+
+// Stable handlers are captured once by the action registry. The dashboard
+// mounts only the controller that owns the live timer state.
+let pomodoroController = null;
+
+window.startPomodoro = function() {
+  if (pomodoroController) pomodoroController.start();
+};
+window.resetPomodoro = function() {
+  if (pomodoroController) pomodoroController.reset();
+};
+window.skipPhase = function() {
+  if (pomodoroController) pomodoroController.skip();
+};
 
 function initProdDash() {
   const canvas = document.getElementById('pomo-canvas');
@@ -272,30 +286,33 @@ function initProdDash() {
     updateDisplay();
   }
 
-  window.startPomodoro = function() {
-    if (isRunning) {
-      clearInterval(interval); isRunning = false;
-      const sb = document.getElementById('pomo-start'); if (sb) sb.textContent = '▶ RESUME';
-    } else {
-      isRunning = true;
-      const sb = document.getElementById('pomo-start'); if (sb) sb.textContent = '⏸ PAUSE';
-      interval = setInterval(() => {
-        if (!document.getElementById('pomo-canvas')) { clearInterval(interval); return; }
-        timeLeft--; updateDisplay(); if (timeLeft <= 0) phaseEnd();
-      }, 1000);
-    }
+  const controller = {
+    start() {
+      if (isRunning) {
+        clearInterval(interval); isRunning = false;
+        const sb = document.getElementById('pomo-start'); if (sb) sb.textContent = '▶ RESUME';
+      } else {
+        isRunning = true;
+        const sb = document.getElementById('pomo-start'); if (sb) sb.textContent = '⏸ PAUSE';
+        interval = setInterval(() => {
+          if (!document.getElementById('pomo-canvas')) { clearInterval(interval); return; }
+          timeLeft--; updateDisplay(); if (timeLeft <= 0) phaseEnd();
+        }, 1000);
+      }
+    },
+    reset() {
+      clearInterval(interval); isRunning = false; phase = 'FOCUS'; timeLeft = totalTime = 25 * 60;
+      const sb = document.getElementById('pomo-start'); if (sb) sb.textContent = '▶ START';
+      updateDisplay();
+    },
+    skip() { clearInterval(interval); isRunning = false; phaseEnd(); },
   };
-  window.resetPomodoro = function() {
-    clearInterval(interval); isRunning = false; phase = 'FOCUS'; timeLeft = totalTime = 25 * 60;
-    const sb = document.getElementById('pomo-start'); if (sb) sb.textContent = '▶ START';
-    updateDisplay();
-  };
-  window.skipPhase = function() { clearInterval(interval); isRunning = false; phaseEnd(); };
+  pomodoroController = controller;
 
   updateDisplay();
   return [() => {
     clearInterval(interval);
-    ['startPomodoro', 'resetPomodoro', 'skipPhase'].forEach(k => delete window[k]);
+    if (pomodoroController === controller) pomodoroController = null;
   }];
 }
 window.initProdDash = initProdDash;

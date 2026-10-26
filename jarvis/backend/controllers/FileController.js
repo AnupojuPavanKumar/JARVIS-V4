@@ -125,6 +125,7 @@ module.exports = function registerFileController({ ipcMain, app, mainWindowProvi
       filters: [
         { name: 'Markdown', extensions: ['md'] },
         { name: 'Text', extensions: ['txt'] },
+        { name: 'JSON', extensions: ['json'] },
       ]
     });
     if (!result.canceled && result.filePath) {
@@ -320,54 +321,6 @@ module.exports = function registerFileController({ ipcMain, app, mainWindowProvi
     } catch (e) {
       return { ok: false, error: e.message };
     }
-  });
-
-  // ─── Safe Code Runner ──────────────────────────────────────────────
-  // Executes a code snippet in a sandboxed child process (no shell).
-  // Only whitelisted runtimes are accepted. Timeout is 10 s.
-  const SAFE_CODE_RUNNERS = { python: 'python', javascript: 'node', js: 'node' };
-
-  ipcMain.handle('run-code-safe', async (_, lang, code) => {
-    if (typeof lang !== 'string' || typeof code !== 'string') {
-      return { ok: false, error: 'Invalid request: lang and code must be strings.' };
-    }
-    const runner = SAFE_CODE_RUNNERS[lang.toLowerCase()];
-    if (!runner) {
-      return { ok: false, error: `Unsupported language: ${lang}. Allowed: python, javascript.` };
-    }
-    if (code.length > 50000) {
-      return { ok: false, error: 'Code too large (max 50 KB).' };
-    }
-
-    const tmpDir = app.getPath('temp');
-    const ext = runner === 'node' ? '.js' : '.py';
-    const tmpFile = path.join(tmpDir, `jarvis_run_${Date.now()}_${process.pid}${ext}`);
-
-    try {
-      await fs.promises.writeFile(tmpFile, code, 'utf8');
-    } catch (e) {
-      return { ok: false, error: `Failed to write temp file: ${e.message}` };
-    }
-
-    return new Promise(resolve => {
-      const { spawn: _spawn } = require('child_process');
-      const child = _spawn(runner, [tmpFile], {
-        shell: false,
-        windowsHide: true,
-        timeout: 10000,
-      });
-      let stdout = '', stderr = '';
-      child.stdout.on('data', d => { stdout += d.toString(); });
-      child.stderr.on('data', d => { stderr += d.toString(); });
-      child.on('error', err => {
-        fs.promises.unlink(tmpFile).catch(() => {});
-        resolve({ ok: false, stdout, stderr, error: err.message });
-      });
-      child.on('close', code => {
-        fs.promises.unlink(tmpFile).catch(() => {});
-        resolve({ ok: code === 0, stdout, stderr, exitCode: code || 0 });
-      });
-    });
   });
 
   // Export checkPathBounds inside context for other controllers if needed

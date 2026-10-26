@@ -1,5 +1,13 @@
 'use strict';
 
+const {
+  CHARS_PER_TOKEN,
+  estimateTokens,
+  estimateMessagesTokens,
+  truncateToTokens,
+  resolveContextBudget,
+} = require('./token-budget');
+
 const DEFAULT_MAX_SYSTEM_CHARS = 24000;
 const DEFAULT_MAX_HISTORY_CHARS = 16000;
 const DEFAULT_MAX_HISTORY_MESSAGES = 40;
@@ -9,19 +17,49 @@ const DEFAULT_AGENT_PROMPT = `You are JARVIS, an autonomous desktop agent runnin
 Operating principles:
 - Work toward the user's goal one step at a time.
 - Use tools when they are needed; do not invent tool results.
+- For live measurements or time-series observations, use the system_metrics tool. Never guess or substitute measurements.
 - Before a risky, destructive, or externally visible action, wait for approval.
 - Keep the user informed through concise progress updates.
 - When the goal is complete, provide a final answer and stop.
 
-Tool protocol:
-- Prefer native tool calls when the model supports them.
-- If native tool calls are unavailable, emit exactly one block in this form and then stop generating:
-<tool_call>
-{"tool": "tool_id", "args": {}}
-</tool_call>
-- Never fabricate a result. The runtime will execute the tool and return [TOOL_RESULT].
-- Supply every required argument.
+Tool rules:
+- Use the provided tool interface, and call at most one tool per step.
+- Supply every required argument and never fabricate a tool result.
+- The runtime executes the tool and returns the real result.
 - Do not include tool-call examples in your final answer.`;
+
+const NATIVE_TOOL_PROTOCOL = `[TOOL PROTOCOL]
+Native function calling is enabled. Use the API's tool interface.
+- Call at most one tool per step.
+- After a tool call, stop and wait for the real tool result.
+- Never fabricate, guess, or repeat a tool result.
+[END TOOL PROTOCOL]`;
+
+const JSON_TOOL_PROTOCOL = `[TOOL PROTOCOL — JSON FALLBACK]
+Native tool calls are not available for this model. If you need a tool, respond with exactly one JSON object and no prose:
+{"tool":"tool_id","args":{}}
+- Use the exact tool ids and argument names below.
+- Do not use XML tags.
+- After emitting a tool call, stop and wait for the real tool result.
+- Never fabricate, guess, or repeat a tool result.`;
+
+const PLAN_STATUS_MARK = Object.freeze({
+  pending: '○',
+  active: '▶',
+  completed: '✓',
+  failed: '✗',
+  skipped: '–',
+  revised: '↻',
+});
+
+class ContextOverflowError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = 'ContextOverflowError';
+    this.code = 'context-overflow';
+    this.details = details;
+  }
+}
 
 function truncate(text, maxChars, marker = '\n[... truncated ...]') {
   if (typeof text !== 'string') return '';
@@ -94,15 +132,8 @@ function buildToolManifestText(tools) {
     return `  • ${tool.name}: ${tool.description}${params.length ? `\n${params.join('\n')}` : ''}`;
   }).join('\n\n');
 
-  return `[JARVIS TOOL SYSTEM]
-Available tools:
-${definitions}
-
-Rules:
-- Emit at most one tool call per step.
-- After a tool call, stop and wait for the [TOOL_RESULT].
-- Never fabricate, guess, or repeat a tool result.
-[END TOOL SYSTEM]`;
+  return `Available tools:
+${definitions}`;
 }
 
 function normalizeMemory(memory) {
@@ -125,7 +156,7 @@ function buildProjectContext(projectContext, budget = 8000) {
   for (const file of files) {
     if (remaining <= 0) break;
     if (!file.content) continue;
-    const text = file.content.slice(0, Math.min(6000, remaining));
+    const text = String(file.content).slice(0, Math.min(6000, remaining));
     remaining -= text.length;
     excerpts.push(`### ${file.relativePath || file.path || 'unknown'}\n\`\`\`\n${text}\n\`\`\``);
   }
@@ -148,6 +179,22 @@ CPU: ${specs.cpuModel || 'Unknown'} (${specs.cpuCount || 'Unknown'} cores)
 RAM: ${memoryGb} GB Total
 Platform: ${specs.platform || 'Unknown'} (${specs.arch || 'Unknown'})
 [END HARDWARE SPECIFICATIONS]`;
+}
+
+function buildPlanContext(plan, currentStepId = null) {
+  if (!Array.isArray(plan) || plan.length === 0) return '';
+  const lines = plan.map(step => {
+    const mark = PLAN_STATUS_MARK[step.status] || '○';
+    const current = step.id === currentStepId ? ' (current)' : '';
+    return `${mark} ${step.id}. ${step.description}${current}`;
+  });
+  return `[EXECUTION PLAN]
+${lines.join('\n')}
+[END EXECUTION PLAN]`;
+}
+
+function toCharBudget(tokens) {
+  return Math.max(0, Math.floor(tokens * CHARS_PER_TOKEN));
 }
 
 class PromptBuilder {
@@ -175,37 +222,89 @@ class PromptBuilder {
     return (tools || []).map(toNativeTool).filter(Boolean);
   }
 
-  build({ task, context = {}, tools = [] } = {}) {
+  build(options = {}) {
+    return this.buildWithBudget(options).messages;
+  }
+
+  buildWithBudget({ task, context = {}, tools = [], capabilities = null, toolMode = 'native' } = {}) {
     if (!task || typeof task !== 'object') throw new Error('PromptBuilder requires a task');
     if (typeof task.goal !== 'string' || !task.goal.trim()) {
       throw new Error('PromptBuilder requires a task goal');
     }
+    if (toolMode !== 'native' && toolMode !== 'json') {
+      throw new Error('toolMode must be "native" or "json"');
+    }
+
+    const budget = resolveContextBudget({
+      capabilities: capabilities || context.modelCapabilities || {},
+      modelOptions: context.modelOptions || {},
+      outputReserveTokens: context.outputReserveTokens,
+    });
+    const nativeTools = toolMode === 'native' ? this.buildToolDefinitions(tools) : [];
+    const toolSchemaTokens = nativeTools.length > 0
+      ? estimateTokens(JSON.stringify(nativeTools))
+      : 0;
+    const manifest = toolMode === 'json' ? buildToolManifestText(tools) : '';
+    const nativeNames = nativeTools.map(tool => tool.function.name).join(', ');
+    const protocol = toolMode === 'json'
+      ? `${JSON_TOOL_PROTOCOL}\n${manifest}\n[END TOOL PROTOCOL]`
+      : `${NATIVE_TOOL_PROTOCOL}${nativeNames ? `\nAvailable tool ids: ${nativeNames}` : ''}`;
+
+    if (toolSchemaTokens + estimateTokens(protocol) + 128 > budget.inputBudget) {
+      throw new ContextOverflowError(
+        `Tool schemas need ${toolSchemaTokens} tokens but the model has only ${budget.inputBudget} input tokens`,
+        { ...budget, toolSchemaTokens, toolMode }
+      );
+    }
 
     const now = context.now instanceof Date ? context.now : new Date(context.now ?? Date.now());
-    const sections = [];
+    let truncated = false;
+    const available = budget.inputBudget - toolSchemaTokens;
+    const systemCap = Math.max(160, Math.floor(available * 0.58));
+    const memoryCap = Math.max(0, Math.floor(available * 0.12));
+    const projectCap = Math.max(0, Math.floor(available * 0.18));
+    const webCap = Math.max(0, Math.floor(available * 0.08));
 
-    sections.push(context.systemPrompt || DEFAULT_AGENT_PROMPT);
-    sections.push(`[CURRENT SYSTEM TIME: ${now.toLocaleDateString('en-GB', {
+    const timeSection = `[CURRENT SYSTEM TIME: ${now.toLocaleDateString('en-GB', {
       weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
     })}, ${now.toLocaleTimeString('en-GB', {
       hour: '2-digit', minute: '2-digit', second: '2-digit',
-    })}]`);
-
+    })}]`;
     const hardware = buildHardwareContext(context.systemSpecs);
-    if (hardware) sections.push(hardware);
+    const plan = buildPlanContext(task.plan, task.currentPlanStepId);
+    const fixedSections = [timeSection, hardware, plan, protocol].filter(Boolean);
+    const fixedTokens = estimateTokens(fixedSections.join('\n\n'));
+    const systemPrompt = String(context.systemPrompt || DEFAULT_AGENT_PROMPT);
+    const systemPromptBudget = Math.max(64, systemCap - fixedTokens);
+    const systemPromptText = truncateToTokens(systemPrompt, systemPromptBudget);
+    if (systemPromptText !== systemPrompt) truncated = true;
+
+    const sections = [systemPromptText, ...fixedSections];
 
     const memory = normalizeMemory(context.memory);
-    if (memory.length > 0) {
+    if (memory.length > 0 && memoryCap > 0) {
+      const memoryText = memory.slice(0, 50).map(item => `• ${item}`).join('\n');
+      const fitted = truncateToTokens(memoryText, memoryCap);
+      if (fitted !== memoryText) truncated = true;
       sections.push(`[USER MEMORY — always remember these facts about the user]
-${memory.slice(0, 50).map(item => `• ${item}`).join('\n')}
+${fitted}
 [END MEMORY]`);
     }
 
-    const project = buildProjectContext(context.projectContext);
-    if (project) sections.push(project);
+    if (context.projectContext && projectCap > 0) {
+      const project = buildProjectContext(context.projectContext, toCharBudget(projectCap));
+      if (project) {
+        const fitted = truncateToTokens(project, projectCap);
+        if (fitted !== project) truncated = true;
+        sections.push(fitted);
+      }
+    }
 
-    if (context.webSearchContext) {
-      sections.push(`[WEB SEARCH CONTEXT]\n${String(context.webSearchContext).slice(0, 3000)}\n[END WEB SEARCH CONTEXT]`);
+    if (context.webSearchContext && webCap > 0) {
+      const web = `[WEB SEARCH CONTEXT]\n${String(context.webSearchContext)}\n[END WEB SEARCH CONTEXT]`;
+      const fitted = truncateToTokens(web, webCap);
+      if (fitted !== web) truncated = true;
+      sections.push(fitted);
     }
 
     sections.push(`[DIRECTIVE]
@@ -213,17 +312,56 @@ ${context.deepWorkEnabled
     ? 'Work step by step. Be precise. Use tools when needed. Keep progress updates brief.'
     : 'Respond concisely. Do not expose hidden reasoning. Keep answers short unless detail is requested.'}`);
 
-    const manifest = buildToolManifestText(tools);
-    if (manifest) sections.push(manifest);
-
     let system = sections.join('\n\n');
     system = truncate(system, this.maxSystemChars);
+    const systemTokens = estimateTokens(system);
+    if (systemTokens + toolSchemaTokens > budget.inputBudget) {
+      throw new ContextOverflowError(
+        `System prompt and tool schemas need ${systemTokens + toolSchemaTokens} tokens; input budget is ${budget.inputBudget}`,
+        { ...budget, systemTokens, toolSchemaTokens, toolMode }
+      );
+    }
 
-    const history = this._normalizeHistory(task, context);
-    return [{ role: 'system', content: system }, ...history];
+    const historyBudget = Math.max(64, budget.inputBudget - systemTokens - toolSchemaTokens);
+    const history = this._normalizeHistory(task, context, {
+      maxTokens: historyBudget,
+      maxChars: this.maxHistoryChars,
+    });
+    const historyTokens = estimateMessagesTokens(history);
+    const promptTokens = systemTokens + historyTokens + toolSchemaTokens;
+    if (promptTokens > budget.inputBudget) {
+      throw new ContextOverflowError(
+        `Prompt needs ${promptTokens} tokens but input budget is ${budget.inputBudget}`,
+        {
+          ...budget,
+          promptTokens,
+          systemTokens,
+          historyTokens,
+          toolSchemaTokens,
+          toolMode,
+        }
+      );
+    }
+
+    const messages = [{ role: 'system', content: system }, ...history];
+    Object.defineProperty(messages, 'budget', {
+      configurable: true,
+      enumerable: false,
+      value: {
+        ...budget,
+        promptTokens,
+        systemTokens,
+        historyTokens,
+        toolSchemaTokens,
+        toolMode,
+        truncated,
+        nativeTools,
+      },
+    });
+    return { messages, budget: messages.budget };
   }
 
-  _normalizeHistory(task, context) {
+  _normalizeHistory(task, context, { maxTokens, maxChars } = {}) {
     let messages = Array.isArray(task.messages) ? task.messages.slice() : [];
 
     if (messages.length === 0) {
@@ -259,22 +397,40 @@ ${context.deepWorkEnabled
       messages = [first, ...messages.slice(-(this.maxHistoryMessages - 1))];
     }
 
-    // Keep the newest messages within the character budget. Always retain the
-    // first goal message so a long tool transcript cannot erase the objective.
+    const tokenLimit = Number.isInteger(maxTokens) ? maxTokens : estimateTokens(String(task.goal || '')) + 512;
+    const charLimit = Number.isInteger(maxChars) ? maxChars : this.maxHistoryChars;
+    const first = messages[0];
     const kept = [];
-    let total = 0;
+    let totalTokens = 0;
+    let totalChars = 0;
+
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
-      const size = message.content.length + 32;
-      if (kept.length > 0 && total + size > this.maxHistoryChars) break;
+      if (message === first) continue;
+      const size = estimateMessagesTokens([message]);
+      const chars = message.content.length + 32;
+      if (kept.length > 0 && (totalTokens + size > tokenLimit || totalChars + chars > charLimit)) break;
       kept.push(message);
-      total += size;
+      totalTokens += size;
+      totalChars += chars;
     }
     kept.reverse();
 
-    if (messages.length > 0 && kept[0] !== messages[0]) {
-      kept.unshift(messages[0]);
+    const firstSize = estimateMessagesTokens([first]);
+    while (kept.length > 0 && totalTokens + firstSize > tokenLimit) {
+      const removed = kept.shift();
+      totalTokens -= estimateMessagesTokens([removed]);
+      totalChars -= removed.content.length + 32;
     }
+    if (totalTokens + firstSize > tokenLimit) {
+      throw new ContextOverflowError(
+        `The goal message needs ${firstSize} tokens but only ${tokenLimit} history tokens are available`,
+        { goalTokens: firstSize, historyBudget: tokenLimit }
+      );
+    }
+    // Preserve the original goal even when it alone exceeds the soft character
+    // cap; the hard token budget above is what prevents model context overflow.
+    kept.unshift(first);
 
     return kept;
   }
@@ -282,10 +438,14 @@ ${context.deepWorkEnabled
 
 module.exports = {
   PromptBuilder,
+  ContextOverflowError,
   buildToolManifestText,
   buildJsonSchema,
   toNativeTool,
+  buildPlanContext,
   DEFAULT_AGENT_PROMPT,
+  NATIVE_TOOL_PROTOCOL,
+  JSON_TOOL_PROTOCOL,
   DEFAULT_MAX_SYSTEM_CHARS,
   DEFAULT_MAX_HISTORY_CHARS,
   DEFAULT_MAX_HISTORY_MESSAGES,

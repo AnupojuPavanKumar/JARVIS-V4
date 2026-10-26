@@ -1,7 +1,9 @@
 'use strict';
 
+const { capabilitiesFromOllamaShow } = require('./model-capabilities');
+
 const DEFAULT_BASE_URL = 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = 'llama3.2';
+const DEFAULT_MODEL = 'llama3.1:8b';
 const DEFAULT_MODEL_OPTIONS = Object.freeze({
   temperature: 0.3,
   top_p: 0.85,
@@ -47,11 +49,11 @@ class OllamaAdapter {
     model = DEFAULT_MODEL,
     fetchImpl = globalThis.fetch,
     defaultOptions = DEFAULT_MODEL_OPTIONS,
-    // Keep the model warm for a short window, then let Ollama unload it. A
-    // 30-minute idle residency pins several GB of VRAM and keeps the GPU from
-    // reaching its lowest power state. Set JARVIS_MODEL_KEEP_ALIVE=30m if
-    // faster first-token latency matters more than idle power.
-    keepAlive = process.env.JARVIS_MODEL_KEEP_ALIVE || '5m',
+    // Keep the model warm for a sliding idle window, then let Ollama unload
+    // it. Ten minutes balances fast first-token latency against holding several
+    // GB of VRAM. Set JARVIS_MODEL_KEEP_ALIVE to override (for example 30m, or
+    // 0 to unload immediately after each request).
+    keepAlive = process.env.JARVIS_MODEL_KEEP_ALIVE || '10m',
   } = {}) {
     if (typeof fetchImpl !== 'function') {
       throw new Error('OllamaAdapter requires a fetch implementation');
@@ -68,6 +70,37 @@ class OllamaAdapter {
     this.fetchImpl = fetchImpl;
     this.defaultOptions = { ...defaultOptions };
     this.keepAlive = keepAlive;
+  }
+
+  async getCapabilities() {
+    let response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/api/show`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: this.model }),
+      });
+    } catch (error) {
+      throw new Error(`Ollama capability probe failed: ${error.message}`);
+    }
+
+    if (!response.ok) {
+      let detail = '';
+      try { detail = (await response.text()).slice(0, 500); } catch { /* best effort */ }
+      throw new Error(`Ollama capability probe returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+    }
+
+    let show;
+    try {
+      show = await response.json();
+    } catch (error) {
+      throw new Error(`Ollama capability probe returned invalid JSON: ${error.message}`);
+    }
+
+    return capabilitiesFromOllamaShow(show, {
+      model: this.model,
+      defaultOptions: this.defaultOptions,
+    });
   }
 
   async chat({ messages, tools = [], options = {}, signal = null } = {}) {

@@ -14,6 +14,7 @@ class PolicyEngine {
     untrackedReadLimit = DEFAULT_UNTRACKED_READ_LIMIT,
     untrackedWindowMs = DEFAULT_UNTRACKED_WINDOW_MS,
     now = Date.now,
+    backgroundApprovalAvailable = true,
   } = {}) {
     if (!taskStore || typeof taskStore.getTask !== 'function') {
       throw new Error('PolicyEngine requires a TaskStore');
@@ -29,6 +30,7 @@ class PolicyEngine {
     this.untrackedReadLimit = untrackedReadLimit;
     this.untrackedWindowMs = untrackedWindowMs;
     this.now = now;
+    this.backgroundApprovalAvailable = backgroundApprovalAvailable !== false;
     this._untrackedCalls = [];
   }
 
@@ -50,6 +52,7 @@ class PolicyEngine {
 
     const risk = typeof skill.risk === 'string' ? skill.risk : 'read';
     const untrusted = Boolean(skill.untrusted);
+    const alwaysAllow = Boolean(skill.alwaysAllow);
 
     if (!taskId) {
       if (risk !== 'read') {
@@ -79,6 +82,20 @@ class PolicyEngine {
       return { decision: 'deny', reason: 'tool-cap' };
     }
 
+    // Scheduled tasks run without a foreground user. If the host has no
+    // approval channel at all, writes must fail closed instead of leaving an
+    // invisible task parked forever. With a channel (the normal tray app), the
+    // runtime persists an approval request and the main process notifies the
+    // user.
+    const backgroundRestricted = task.permissions && task.permissions.profile === 'background-restricted';
+    if (backgroundRestricted && !this.backgroundApprovalAvailable && (risk === 'write' || risk === 'destructive')) {
+      return {
+        decision: 'deny',
+        reason: 'background-write-without-approval-channel',
+        taint: untrusted,
+      };
+    }
+
     if (risk === 'write' || risk === 'destructive') {
       return {
         decision: 'require_approval',
@@ -95,7 +112,7 @@ class PolicyEngine {
       };
     }
 
-    if (task.tainted) {
+    if (task.tainted && !alwaysAllow) {
       return {
         decision: 'require_approval',
         reason: 'tainted-task',

@@ -1,5 +1,11 @@
 'use strict';
 
+const {
+  normalizeCapabilities,
+  DEFAULT_CONTEXT_LENGTH,
+  DEFAULT_OUTPUT_TOKENS,
+} = require('./model-capabilities');
+
 const DEFAULT_TIMEOUT_MS = 90_000;
 const VALID_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
 
@@ -98,6 +104,7 @@ class ModelGateway {
     adapter,
     defaultOptions = {},
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    capabilities = null,
   } = {}) {
     if (!adapter || typeof adapter.chat !== 'function') {
       throw new Error('ModelGateway requires an adapter with a chat() method');
@@ -109,6 +116,45 @@ class ModelGateway {
     this.adapter = adapter;
     this.defaultOptions = defaultOptions;
     this.timeoutMs = timeoutMs;
+    this._capabilities = capabilities
+      ? normalizeCapabilities(capabilities, { model: adapter.model })
+      : null;
+  }
+
+  async getCapabilities({ refresh = false } = {}) {
+    if (this._capabilities && !refresh) return { ...this._capabilities };
+    if (this._capabilities && refresh) this._capabilities = null;
+
+    let raw = null;
+    try {
+      if (typeof this.adapter.getCapabilities === 'function') {
+        raw = await this.adapter.getCapabilities();
+      } else if (this.adapter.capabilities && typeof this.adapter.capabilities === 'object') {
+        raw = this.adapter.capabilities;
+      }
+    } catch (error) {
+      raw = null;
+      this._capabilitiesError = error.message;
+    }
+
+    this._capabilities = normalizeCapabilities(raw, {
+      model: this.adapter.model,
+      defaultContextLength: DEFAULT_CONTEXT_LENGTH,
+      defaultOutputTokens: DEFAULT_OUTPUT_TOKENS,
+    });
+    if (!raw) {
+      this._capabilities.source = this._capabilitiesError ? 'default-after-error' : 'default';
+    }
+    return { ...this._capabilities };
+  }
+
+  markNativeToolsUnsupported(reason = 'provider rejected native tools') {
+    this._capabilities = {
+      ...(this._capabilities || normalizeCapabilities(null, { model: this.adapter.model })),
+      tools: false,
+      source: `downgraded: ${reason}`,
+    };
+    return { ...this._capabilities };
   }
 
   async chat({ messages, tools = [], options = {}, signal = null } = {}) {
@@ -169,4 +215,6 @@ module.exports = {
   normalizeResponse,
   normalizeToolCall,
   DEFAULT_TIMEOUT_MS,
+  DEFAULT_CONTEXT_LENGTH,
+  DEFAULT_OUTPUT_TOKENS,
 };

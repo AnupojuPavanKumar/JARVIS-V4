@@ -10,3 +10,4 @@ Always abide by the following rules when interacting with the user:
    - Explain *why* it is the best option.
    - Mention the cons (disadvantages) of the best option.
 4. **Test Scripts**: When creating test scripts, create them in a folder named `tests` (create the folder if it does not already exist). 
+	If those scripts are no longer useful, u can remove them.

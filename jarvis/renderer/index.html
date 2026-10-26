@@ -27,54 +27,79 @@
         <div class="auth-hex-ring auth-ring-1"></div>
         <div class="auth-hex-ring auth-ring-2"></div>
         <div class="auth-core">◈</div>
+        <div id="auth-face-live" class="hidden" aria-hidden="true">
+          <video id="auth-face-video" autoplay muted playsinline></video>
+          <div class="auth-face-scanline" aria-hidden="true"></div>
+        </div>
       </div>
       <div id="auth-title">J.A.R.V.I.S</div>
       <div id="auth-subtitle" class="auth-state-msg">IDENTITY VERIFICATION REQUIRED</div>
-      <div id="auth-pin-display">
-        <span class="pin-dot" id="pin-d1"></span>
-        <span class="pin-dot" id="pin-d2"></span>
-        <span class="pin-dot" id="pin-d3"></span>
-        <span class="pin-dot" id="pin-d4"></span>
+      <div class="auth-body">
+        <div class="auth-pin-section">
+          <div id="auth-pin-display">
+            <span class="pin-dot" id="pin-d1"></span>
+            <span class="pin-dot" id="pin-d2"></span>
+            <span class="pin-dot" id="pin-d3"></span>
+            <span class="pin-dot" id="pin-d4"></span>
+          </div>
+          <div id="auth-keypad">
+            <button class="keypad-btn" data-key="1">1</button>
+            <button class="keypad-btn" data-key="2">2</button>
+            <button class="keypad-btn" data-key="3">3</button>
+            <button class="keypad-btn" data-key="4">4</button>
+            <button class="keypad-btn" data-key="5">5</button>
+            <button class="keypad-btn" data-key="6">6</button>
+            <button class="keypad-btn" data-key="7">7</button>
+            <button class="keypad-btn" data-key="8">8</button>
+            <button class="keypad-btn" data-key="9">9</button>
+            <button class="keypad-btn keypad-clear" data-key="clear">⌫</button>
+            <button class="keypad-btn" data-key="0">0</button>
+            <button class="keypad-btn keypad-enter" data-key="enter">↵</button>
+          </div>
+          <div id="auth-hint">Enter your 4-digit PIN to access JARVIS</div>
+          <div id="auth-keyboard-hint"
+            style="font-size:9px;letter-spacing:0.12em;color:rgba(0,212,255,0.4);">KEYBOARD · NUMPAD ·
+            BACKSPACE · ENTER</div>
+          <input type="password" id="auth-hidden-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" autofocus
+            style="position:absolute; opacity:0; pointer-events:none; z-index:-1;">
+          <div id="auth-error" class="hidden">Incorrect PIN. Access denied.</div>
+        </div>
+        <div id="auth-face-panel" class="hidden" aria-live="polite">
+          <button id="auth-face-btn" class="auth-face-btn" type="button">◈ UNLOCK WITH FACE</button>
+          <button id="auth-face-cancel" class="auth-face-cancel hidden" type="button">USE PIN INSTEAD</button>
+          <div id="auth-face-error" class="auth-face-error hidden" role="alert"></div>
+          <div id="auth-face-status" class="auth-face-status-sr" role="status">LOCAL FACE SCAN READY</div>
+          <div class="auth-face-note">LOCAL ONLY · NO IMAGE STORAGE</div>
+        </div>
       </div>
-      <div id="auth-keypad" id="auth-keypad">
-        <button class="keypad-btn" data-key="1">1</button>
-        <button class="keypad-btn" data-key="2">2</button>
-        <button class="keypad-btn" data-key="3">3</button>
-        <button class="keypad-btn" data-key="4">4</button>
-        <button class="keypad-btn" data-key="5">5</button>
-        <button class="keypad-btn" data-key="6">6</button>
-        <button class="keypad-btn" data-key="7">7</button>
-        <button class="keypad-btn" data-key="8">8</button>
-        <button class="keypad-btn" data-key="9">9</button>
-        <button class="keypad-btn keypad-clear" data-key="clear">⌫</button>
-        <button class="keypad-btn" data-key="0">0</button>
-        <button class="keypad-btn keypad-enter" data-key="enter">↵</button>
-      </div>
-      <div id="auth-hint">Enter your 4-digit PIN to access JARVIS</div>
-      <div id="auth-keyboard-hint"
-        style="font-size:9px;letter-spacing:0.12em;color:rgba(0,212,255,0.4);margin-top:4px;">KEYBOARD · NUMPAD ·
-        BACKSPACE · ENTER</div>
-      <input type="password" id="auth-hidden-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" autofocus
-        style="position:absolute; opacity:0; pointer-events:none; z-index:-1;">
-      <div id="auth-error" class="hidden">Incorrect PIN. Access denied.</div>
       <div id="auth-setup" class="hidden">
         <div class="auth-setup-msg">First time? Set a 4-digit PIN to secure JARVIS.</div>
-        <button class="auth-skip-btn" id="auth-skip-btn">Skip — No PIN</button>
+        <button class="auth-skip-btn" id="auth-skip-btn" type="button">Skip — No PIN</button>
+      </div>
+      <div id="auth-recovery" class="hidden">
+        <div class="auth-setup-msg" id="auth-recovery-msg">
+          Recovery deletes the local PIN and enrolled face data, then returns JARVIS to first-run setup.
+        </div>
+        <button class="auth-skip-btn" id="auth-recovery-btn" type="button">Recover Local Lock</button>
       </div>
     </div>
   </div>
 
-  <!-- Cinematic Boot Sequence -->
-  <div id="boot-screen">
-    <div id="boot-terminal"></div>
-    <div id="boot-core-flash">
-      <div class="boot-data-grid"></div>
-      <div class="boot-ring boot-ring-1"></div>
-      <div class="boot-ring boot-ring-2"></div>
-      <div class="boot-ring boot-ring-3"></div>
-      <div class="boot-hex boot-hex-outer"></div>
-      <div class="boot-hex boot-hex-inner"></div>
+  <!-- Calm Boot Sequence -->
+  <div id="boot-screen" class="hidden" role="status" aria-label="JARVIS is starting">
+    <div id="boot-core-flash" aria-hidden="true">
+      <div class="boot-emblem">
+        <span class="boot-orbit boot-orbit-outer"></span>
+        <span class="boot-orbit boot-orbit-inner"></span>
+        <span class="boot-core"></span>
+      </div>
+      <div class="boot-wordmark">
+        <span class="boot-name">J.A.R.V.I.S</span>
+        <span class="boot-sub">PERSONAL INTELLIGENCE</span>
+      </div>
     </div>
+    <div id="boot-terminal" aria-hidden="true"></div>
+    <div class="boot-progress" aria-hidden="true"><span id="boot-progress-fill"></span></div>
   </div>
 
   <!-- Cinematic Shutdown Sequence -->
@@ -102,9 +127,9 @@
       </div>
     </div>
     <div id="titlebar-controls">
-      <button id="btn-min" data-action="window.jarvis.minimize" title="Minimize">─</button>
-      <button id="btn-max" data-action="window.jarvis.maximize" title="Maximize">□</button>
-      <button id="btn-close" data-action="window.jarvis.close" title="Close">✕</button>
+      <button id="btn-min" data-action="windowMinimize" title="Minimize">─</button>
+      <button id="btn-max" data-action="windowMaximize" title="Maximize">□</button>
+      <button id="btn-close" data-action="windowClose" title="Close">✕</button>
     </div>
   </header>
 
@@ -324,6 +349,7 @@
               <span class="cph-label">JARVIS CHAT</span>
             </div>
             <div class="cph-right">
+              <button class="micro-btn" id="btn-browser-stop" title="Emergency stop the isolated browser">⏹ WEB</button>
               <button class="micro-btn dw-off" id="btn-deepwork" data-action="toggleDeepWork" title="Toggle Deep Work Mode">🧠 FAST</button>
               <button class="micro-btn" data-action="newSession" title="New session">NEW</button>
               <button class="micro-btn" data-action="clearCurrentChat" title="Clear">CLEAR</button>
@@ -565,6 +591,43 @@
           </label>
         </div>
         <div class="cfg-section">
+          <label class="cfg-label">🖥 BACKGROUND PRESENCE</label>
+          <label class="toggle-row">
+            <input type="checkbox" id="cfg-start-at-login">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span>Start JARVIS when I log in</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" id="cfg-start-hidden">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span>Start hidden in the tray at login</span>
+          </label>
+          <div class="integration-meta" style="margin-top:2px;">Opening JARVIS manually still shows the window.</div>
+          <div id="ambient-status" class="integration-meta" role="status" aria-live="polite"
+            style="margin-top:6px;">Checking background presence…</div>
+          <div class="integration-meta" style="margin-top:4px;">Closing the window keeps JARVIS resident in the tray.
+          </div>
+        </div>
+        <div class="cfg-section" id="cfg-face-section">
+          <label class="cfg-label">◈ LOCAL FACE UNLOCK</label>
+          <label class="toggle-row">
+            <input type="checkbox" id="cfg-face-enabled">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span>Enable face unlock</span>
+          </label>
+          <div id="face-settings-status" class="integration-meta" role="status" aria-live="polite"
+            style="margin-top:6px;">Checking face enrollment…</div>
+          <input id="face-delete-pin" class="cfg-input hidden" type="password" inputmode="numeric"
+            maxlength="4" autocomplete="off" placeholder="Current 4-digit PIN" aria-label="Current PIN for face deletion">
+          <div class="face-settings-actions">
+            <button id="face-enroll-btn" class="integration-btn" type="button">ENROLL FACE</button>
+            <button id="face-delete-btn" class="integration-btn danger" type="button">REMOVE FACE DATA</button>
+          </div>
+          <div class="integration-meta" style="margin-top:6px;">Face samples are processed on this device. Only
+            encrypted embeddings are stored with Windows DPAPI; raw frames are discarded and never uploaded. Face
+            unlock only opens JARVIS — it never approves commands, integrations, or other actions.</div>
+        </div>
+        <div class="cfg-section">
           <label class="cfg-label" for="cfg-speech-rate">SPEECH RATE <span id="cfg-rate-val">1.0×</span></label>
           <input type="range" id="cfg-speech-rate" class="cfg-range" min="0.5" max="2" step="0.1" value="1.0">
         </div>
@@ -623,6 +686,35 @@
             <button class="font-size-btn" data-size="font-xl" data-action="setFontSize" data-arg="font-xl"
               title="Extra Large">XL</button>
           </div>
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label">🔌 PERSONAL INTEGRATIONS</label>
+          <div id="integration-panel" class="integration-panel">
+            <div class="panel-placeholder" style="padding:12px">Loading integrations…</div>
+          </div>
+        </div>
+        <div class="cfg-section">
+          <label class="cfg-label">📁 DOCUMENT INDEX</label>
+          <div class="document-toolbar">
+            <select id="document-scope" class="cfg-select document-scope" aria-label="Document scope">
+              <option value="work">work</option>
+              <option value="personal">personal</option>
+              <option value="project">project</option>
+              <option value="general">general</option>
+            </select>
+            <button type="button" class="integration-btn" id="btn-document-add">ADD FOLDER</button>
+            <button type="button" class="integration-btn" id="btn-document-reindex">REINDEX</button>
+          </div>
+          <div id="document-panel" class="integration-panel">
+            <div class="panel-placeholder" style="padding:12px">Open settings to load approved folders.</div>
+          </div>
+          <div class="document-retention">
+            <label for="document-retention">Retention (days)</label>
+            <input id="document-retention" class="cfg-input" type="number" min="1" max="3650" placeholder="Keep until deleted">
+            <button type="button" class="integration-btn" id="btn-document-retention">SAVE</button>
+            <button type="button" class="integration-btn" id="btn-document-prune">PRUNE</button>
+          </div>
+          <button type="button" class="integration-btn danger document-delete-all" id="btn-document-delete-all">DELETE INDEX</button>
         </div>
         <div class="cfg-actions">
           <button class="cfg-btn-primary" data-action="saveSettings">◈ SAVE CONFIGURATION</button>
@@ -749,13 +841,31 @@
         <button class="modal-close-btn" data-action="closeModal" data-arg="memory-modal">✕</button>
       </div>
       <div class="modal-body">
-        <p class="mem-desc">Facts stored here are injected into every conversation as persistent context. JARVIS will
-          always know these things about you.</p>
+        <p class="mem-desc">One unified memory store for manual facts, learned preferences, verified procedures, and
+          task/conversation summaries. Sensitive personal and secret records are never injected into prompts by default.</p>
         <div id="mem-list"></div>
         <div id="mem-add-row">
           <input id="mem-input" class="mem-input" type="text"
-            placeholder="Add a fact… e.g. My name is Pavan, I use Python" maxlength="200">
+            placeholder="Add a fact… e.g. My name is Pavan, I use Python" maxlength="2000">
+          <select id="mem-type" class="mem-input" aria-label="Memory type">
+            <option value="fact">Fact</option>
+            <option value="preference">Preference</option>
+            <option value="relationship">Relationship</option>
+            <option value="procedure">Procedure</option>
+            <option value="episode">Episode</option>
+          </select>
+          <select id="mem-sensitivity" class="mem-input" aria-label="Sensitivity">
+            <option value="">Auto sensitivity</option>
+            <option value="public">Public</option>
+            <option value="personal">Personal</option>
+            <option value="secret">Secret</option>
+          </select>
           <button class="mem-add-btn" data-action="memoryAdd">＋ Add</button>
+        </div>
+        <div class="mem-toolbar">
+          <button class="micro-btn" data-action="memoryRefresh">↻ REFRESH</button>
+          <button class="micro-btn" data-action="memoryExport">⤓ EXPORT</button>
+          <button class="micro-btn" data-action="memoryClear" style="color:var(--accent-red);border-color:var(--accent-red)">CLEAR ALL</button>
         </div>
       </div>
     </div>
@@ -993,10 +1103,31 @@
               <input type="datetime-local" id="sched-datetime" class="prompt-form-input"
                 style="flex:1; max-width:200px;">
             </div>
-            <div id="sched-recurring" hidden style="margin-bottom:10px; display:flex; gap:10px; align-items:center;">
-              <span style="color:var(--text-dim); font-size:12px;">Interval (seconds):</span>
-              <input type="number" id="sched-interval" class="prompt-form-input" min="10" value="60"
-                style="width:100px;">
+            <div id="sched-recurring" hidden style="margin-bottom:10px;">
+              <div style="display:flex; gap:10px; align-items:center; margin-bottom:8px;">
+                <span style="color:var(--text-dim); font-size:12px;">Repeat:</span>
+                <select id="sched-recurring-mode" class="dash-select" style="width:130px" data-change="syncSchedulerRecurringMode">
+                  <option value="interval">Interval</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+                <span id="sched-interval-wrap" style="display:flex; gap:8px; align-items:center;">
+                  <span style="color:var(--text-dim); font-size:12px;">Seconds:</span>
+                  <input type="number" id="sched-interval" class="prompt-form-input" min="10" value="60" style="width:100px;">
+                </span>
+                <span id="sched-time-wrap" hidden style="display:flex; gap:8px; align-items:center;">
+                  <span style="color:var(--text-dim); font-size:12px;">Time:</span>
+                  <input type="time" id="sched-time" class="prompt-form-input" value="09:00" style="width:110px;">
+                </span>
+                <span id="sched-days-wrap" hidden style="display:flex; gap:8px; align-items:center;">
+                  <span style="color:var(--text-dim); font-size:12px;">Days (0 Sun–6 Sat):</span>
+                  <input type="text" id="sched-days" class="prompt-form-input" value="1,2,3,4,5" style="width:110px;">
+                </span>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span style="color:var(--text-dim); font-size:12px;">Time zone:</span>
+                <input type="text" id="sched-timezone" class="prompt-form-input" style="flex:1; max-width:260px;">
+              </div>
             </div>
             <textarea id="sched-payload" class="prompt-form-textarea" style="min-height:60px;"
               placeholder="Goal or prompt for the assistant..."></textarea>
@@ -1004,6 +1135,25 @@
               <button class="prompt-form-save" data-action="addSchedulerJob">CREATE TASK</button>
             </div>
           </div>
+
+          <details class="scheduler-settings" style="margin-bottom:12px; padding:10px; border:1px solid var(--hud-border); border-radius:4px; background:rgba(0,0,0,0.2);">
+            <summary style="cursor:pointer; color:var(--text-dim); font-size:12px; letter-spacing:.04em;">QUIET HOURS &amp; INTERRUPTION LIMITS</summary>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:10px;">
+              <label style="display:flex; gap:6px; align-items:center; font-size:12px; color:var(--text-dim);">
+                <input type="checkbox" id="sched-quiet-enabled"> Quiet hours
+              </label>
+              <input type="time" id="sched-quiet-start" class="prompt-form-input" value="22:00" style="width:110px;">
+              <span style="color:var(--text-dim); font-size:12px;">to</span>
+              <input type="time" id="sched-quiet-end" class="prompt-form-input" value="07:00" style="width:110px;">
+              <input type="text" id="sched-quiet-tz" class="prompt-form-input" placeholder="Time zone" style="width:180px;">
+              <label style="display:flex; gap:6px; align-items:center; font-size:12px; color:var(--text-dim);">
+                Max runs/hour:
+                <input type="number" id="sched-max-runs" class="prompt-form-input" min="0" value="0" style="width:80px;">
+              </label>
+              <button class="micro-btn" data-action="saveSchedulerSettings">SAVE LIMITS</button>
+            </div>
+            <div style="margin-top:6px; font-size:10px; color:var(--text-muted);">0 means unlimited. Quiet-hour and rate-limit deferrals are recorded in run history.</div>
+          </details>
 
           <div class="scheduler-list" id="scheduler-list" style="max-height: 400px; overflow-y: auto;">
             <!-- Jobs injected here -->
@@ -1013,27 +1163,77 @@
     </div>
   </div>
 
+  <!-- Local face enrollment -->
+  <div id="face-setup-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-backdrop" data-action="closeModal" data-arg="face-setup-modal"></div>
+    <div class="modal-box modal-box-sm face-setup-box">
+      <div class="modal-hdr">
+        <span>◈ LOCAL FACE ENROLLMENT</span>
+        <button class="modal-close-btn" data-action="closeModal" data-arg="face-setup-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="face-setup-pin" class="hidden">
+          <div class="integration-meta" style="margin-bottom:10px;">Set a 4-digit PIN first. It remains the fallback if
+            the camera, face engine, or liveness check is unavailable.</div>
+          <input id="face-pin" class="cfg-input" type="password" inputmode="numeric" maxlength="4"
+            autocomplete="new-password" placeholder="NEW 4-DIGIT PIN" style="margin-bottom:8px;">
+          <input id="face-pin-confirm" class="cfg-input" type="password" inputmode="numeric" maxlength="4"
+            autocomplete="new-password" placeholder="CONFIRM PIN" style="margin-bottom:8px;">
+          <div id="face-pin-error" class="auth-face-error hidden" role="alert"></div>
+          <button id="face-pin-save" class="integration-btn" type="button">SAVE PIN &amp; CONTINUE</button>
+        </div>
+        <div id="face-setup-camera" class="hidden">
+          <video id="face-setup-video" autoplay muted playsinline></video>
+          <div class="auth-face-scanline" aria-hidden="true"></div>
+          <div id="face-setup-status" class="auth-face-status" role="status">PREPARING LOCAL CAMERA…</div>
+          <div class="face-progress"><div id="face-progress-bar"></div></div>
+          <div class="integration-meta" style="margin-top:8px;">Look at the camera, center your face, and blink once.
+            Nothing is uploaded. Raw frames are discarded after each local inference.</div>
+          <button id="face-setup-cancel" class="integration-btn" type="button" style="margin-top:10px;">CANCEL</button>
+        </div>
+        <div id="face-setup-done" class="hidden">
+          <div class="face-setup-success">◈ FACE PROFILE ENCRYPTED</div>
+          <div class="integration-meta" style="margin-top:8px;">Face unlock is ready. JARVIS will ask for face or PIN
+            when it starts and whenever it is reopened from the tray.</div>
+          <button id="face-setup-close" class="integration-btn" type="button" style="margin-top:12px;">DONE</button>
+        </div>
+        <div id="face-setup-error" class="auth-face-error hidden" role="alert"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Calculator panel (inside right sidebar, injected by JS) -->
   <script src="vendor/marked.min.js"></script>
   <script src="vendor/purify.min.js"></script>
   <script src="vendor/highlight.min.js"></script>
+<script src="action-manifest.js"></script>
+<script src="action-registry.js"></script>
+<script src="untrusted-content.js"></script>
 
   <!-- ═══ JARVIS MODULES — loaded before renderer.js ════════════ -->
-  <!-- Agentic loop: tool/skill calling system                     -->
-  <script src="modules/toolExecutor.js"></script>
-  <!-- Task Controller & Procedural Memory                         -->
-  <script src="modules/taskController.js"></script>
-  <script src="modules/procedural.js"></script>
-  <!-- Durable Agent Client (inactive unless JARVIS_DURABLE_AGENT=1) -->
+  <!-- Legacy renderer-side task loop and procedural memory retired; the
+       durable agent/runtime owns task execution and the main process owns
+       memory extraction. -->
+  <script src="modules/memoryClient.js"></script>
+  <!-- Durable Agent Client (enabled by default; JARVIS_DURABLE_AGENT=0 disables) -->
   <script src="modules/agentClient.js"></script>
+  <!-- Personal integration status and revoke/delete controls -->
+  <script src="modules/integrationClient.js"></script>
+  <!-- User-approved local document index -->
+  <script src="modules/documentClient.js"></script>
+  <!-- Tray residency, login auto-start, and sleep/resume status -->
+  <script src="modules/ambientClient.js"></script>
   <!-- Feature modules: productivity widgets and UI tools          -->
   <script src="modules/productivity.js"></script>
+  <script src="modules/voiceUtils.js"></script>
   <script src="modules/wakeWord.js"></script>
   <script src="modules/uiFeatures.js"></script>
 
 
   <!-- Main renderer — references all module globals above -->
   <script type="module" src="./renderer.js"></script>
+  <!-- Local face unlock: lock screen, enrollment, and tray-reopen locking -->
+  <script type="module" src="modules/faceUnlock.js"></script>
 </body>
 
 </html>

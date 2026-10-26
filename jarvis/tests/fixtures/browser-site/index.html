@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Phase 4 Browser Fixture</title>
+</head>
+<body>
+  <h1>JARVIS Browser Fixture</h1>
+  <p>This local page is used to verify grounded browser actions without touching a real website.</p>
+
+  <label for="name-input">Name</label>
+  <input id="name-input" name="name-input" placeholder="Your name">
+
+  <button id="greet" type="button">Greet</button>
+  <p id="output">No greeting yet.</p>
+
+  <label for="color">Color</label>
+  <select id="color" name="color">
+    <option value="red">Red</option>
+    <option value="blue">Blue</option>
+  </select>
+  <p id="choice">Choice: red</p>
+
+  <a id="second-link" href="/second.html">Second page</a>
+
+  <div style="height: 2200px" aria-hidden="true"></div>
+  <p id="bottom">Bottom of the fixture page.</p>
+
+  <script>
+    const nameInput = document.getElementById('name-input');
+    const output = document.getElementById('output');
+    document.getElementById('greet').addEventListener('click', () => {
+      output.textContent = `Hello, ${nameInput.value || 'stranger'}!`;
+    });
+    document.getElementById('color').addEventListener('change', event => {
+      document.getElementById('choice').textContent = `Choice: ${event.target.value}`;
+    });
+  </script>
+</body>
+</html>

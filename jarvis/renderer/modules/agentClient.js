@@ -21,6 +21,36 @@ window.AgentClient = (() => {
     );
   }
 
+  function bindBrowserEmergencyStop() {
+    const button = document.getElementById('btn-browser-stop');
+    if (!button) return;
+    if (!window.jarvis || typeof window.jarvis.browserEmergencyStop !== 'function') {
+      button.style.display = 'none';
+      return;
+    }
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const result = await window.jarvis.browserEmergencyStop();
+        if (result && result.ok) {
+          toast(result.stopped ? 'Browser stopped and session cleared.' : 'Browser stop requested.', 'info');
+        } else {
+          toast((result && result.error) || 'Could not stop the browser.', 'error');
+        }
+      } catch (error) {
+        toast(error.message || 'Could not stop the browser.', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindBrowserEmergencyStop, { once: true });
+  } else {
+    bindBrowserEmergencyStop();
+  }
+
   function toast(message, kind = 'info') {
     if (typeof window.showToast === 'function') window.showToast(message, kind);
   }
@@ -80,6 +110,7 @@ window.AgentClient = (() => {
           <button type="button" class="task-cancel" title="Cancel task">Cancel</button>
         </div>
         <div class="msg-bubble task-bubble">
+          <div class="task-plan" style="display: none;"></div>
           <details class="task-details" open>
             <summary>Agent Process &amp; Logs</summary>
             <div class="task-log-content"></div>
@@ -99,6 +130,7 @@ window.AgentClient = (() => {
       request: null,
       parentEl,
       statusEl: parentEl.querySelector('.task-status'),
+      planEl: parentEl.querySelector('.task-plan'),
       logEl: parentEl.querySelector('.task-log-content'),
       approvalEl: parentEl.querySelector('.task-approval'),
       finalEl: parentEl.querySelector('.task-final-output'),
@@ -182,7 +214,7 @@ window.AgentClient = (() => {
     codeEl.textContent = preview(step.result) || '(no output)';
   }
 
-  function announceApproval(approval) {
+  function announceApproval(approval, taskId) {
     if (!approval || approval.status !== 'pending') return;
     const key = approval.id
       || `${approval.toolCall?.tool || 'tool'}:${approval.requestedAt || ''}`;
@@ -195,6 +227,26 @@ window.AgentClient = (() => {
 
     // Make sure an idle HUD resumes so the approval card/toast is visible.
     if (typeof window.wakeHud === 'function') window.wakeHud();
+    // Recovered approvals were not emitted by AgentRuntime, so the main
+    // process has not seen them yet. Ask it for a native alert as well; this
+    // is deduplicated by approval id against the live event path.
+    if (
+      taskId
+      && approval.id
+      && window.jarvis
+      && typeof window.jarvis.notifyApproval === 'function'
+    ) {
+      try {
+        window.jarvis.notifyApproval({
+          taskId,
+          approvalId: approval.id,
+          tool,
+          reason: approval.reason || '',
+        });
+      } catch (error) {
+        console.error('[AgentClient] Failed to request native approval alert:', error);
+      }
+    }
     toast(`Approval required: ${tool}`, 'info');
     if (typeof window.appendJarvisMessage === 'function') {
       try {
@@ -209,7 +261,7 @@ window.AgentClient = (() => {
     if (!view || !approval) return;
     if (view.approvalId === approval.id) return;
     view.approvalId = approval.id;
-    announceApproval(approval);
+    announceApproval(approval, view.taskId);
 
     const tool = approval.toolCall?.tool || 'tool';
     const args = preview(approval.toolCall?.args || {});
@@ -257,6 +309,69 @@ window.AgentClient = (() => {
     view.approvalEl.innerHTML = '';
   }
 
+  function planStepIcon(status) {
+    switch (status) {
+      case 'completed': return '✓';
+      case 'active': return '▶';
+      case 'failed': return '✕';
+      case 'skipped': return '–';
+      case 'unknown': return '?';
+      default: return '·';
+    }
+  }
+
+  function renderPlan(view) {
+    if (!view || !view.planEl) return;
+    const task = view.task || {};
+    const plan = Array.isArray(task.plan) ? task.plan : [];
+    const verification = task.verification;
+    const hasVerification = verification && typeof verification === 'object';
+
+    if (plan.length === 0 && !hasVerification && task.planStatus !== 'invalid') {
+      view.planEl.style.display = 'none';
+      return;
+    }
+
+    view.planEl.textContent = '';
+    const header = document.createElement('div');
+    header.className = 'task-plan-header';
+    const planLabel = task.planStatus === 'invalid'
+      ? 'PLAN UNAVAILABLE'
+      : `PLAN ${String(task.planStatus || 'pending').toUpperCase()}`;
+    header.textContent = plan.length > 0 ? planLabel : 'VERIFICATION';
+    view.planEl.appendChild(header);
+
+    for (const step of plan) {
+      const row = document.createElement('div');
+      row.className = `task-plan-step plan-step-${step.status || 'pending'}`;
+      const icon = document.createElement('span');
+      icon.className = 'task-plan-icon';
+      icon.textContent = planStepIcon(step.status);
+      row.appendChild(icon);
+
+      const text = document.createElement('span');
+      text.className = 'task-plan-text';
+      const description = step.description || `Step ${step.id || ''}`;
+      text.textContent = `${description}${step.tool ? ` [${step.tool}]` : ''}${step.revision ? ` · revised ${step.revision}×` : ''}`;
+      row.appendChild(text);
+      view.planEl.appendChild(row);
+    }
+
+    if (hasVerification) {
+      const check = document.createElement('div');
+      check.className = `task-plan-verification verification-${verification.status || 'pending'}`;
+      const label = verification.status === 'accepted'
+        ? 'Verifier accepted the result'
+        : verification.status === 'rejected'
+          ? `Verifier rejected the result${verification.reason ? `: ${verification.reason}` : ''}`
+          : 'Verification pending';
+      check.textContent = label;
+      view.planEl.appendChild(check);
+    }
+
+    view.planEl.style.display = 'block';
+  }
+
   function showFinal(view, task) {
     if (!view || view.finalized || !isTerminal(task.status)) return;
     view.finalized = true;
@@ -270,8 +385,8 @@ window.AgentClient = (() => {
     if (text) {
       if (typeof window.renderMarkdown === 'function') {
         view.finalEl.innerHTML = window.renderMarkdown(text);
-        if (typeof window.highlightBlock === 'function') {
-          view.finalEl.querySelectorAll('pre code').forEach(window.highlightBlock);
+        if (typeof window.enhanceCodeBlocks === 'function') {
+          window.enhanceCodeBlocks(view.finalEl);
         }
       } else {
         view.finalEl.textContent = text;
@@ -318,6 +433,8 @@ window.AgentClient = (() => {
       if (step.kind === 'tool') updateToolBlock(view, step);
       else updateStepBlock(view, step);
     }
+
+    renderPlan(view);
 
     const pending = (task.approvals || []).find(approval => approval.status === 'pending');
     if (pending) showApproval(view, pending);
@@ -405,6 +522,22 @@ window.AgentClient = (() => {
       case 'approval.focus':
         focusApproval(view);
         break;
+      case 'plan.created':
+      case 'plan.step.started':
+      case 'plan.step.completed':
+      case 'plan.step.failed':
+      case 'plan.step.revised':
+      case 'plan.closed':
+        refreshTask(view);
+        break;
+      case 'verification.rejected':
+        setStatus(view, '🔎 VERIFIER REJECTED', 'task-status-error');
+        refreshTask(view);
+        break;
+      case 'verification.accepted':
+        setStatus(view, '✅ VERIFIED', 'task-status-completed');
+        refreshTask(view);
+        break;
       case 'task.failed':
         setStatus(view, '❌ FAILED', 'task-status-error');
         break;
@@ -464,7 +597,7 @@ window.AgentClient = (() => {
     const request = {
       goal,
       source: options.source || 'deep-work',
-      model: options.model || (window.state && window.state.model) || 'llama3.2',
+      model: options.model || (window.state && window.state.model) || 'llama3.1:8b',
       mode: options.mode || (window.state && window.state.mode) || 'general',
       maxSteps: Number.isInteger(options.maxSteps) ? options.maxSteps : 15,
       systemSpecs: options.systemSpecs,

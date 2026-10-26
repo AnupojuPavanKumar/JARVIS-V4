@@ -27,6 +27,11 @@ function finish(code) {
 let approved = null;
 let approvedExternal = null;
 let cancelled = null;
+let startupNotification = null;
+
+ipcMain.on('agent-approval-notify', (_, payload) => {
+  startupNotification = payload;
+});
 
 ipcMain.handle('agent-task-start', async (_, request) => ({
   ok: true,
@@ -87,6 +92,24 @@ const smokeTasks = {
     tainted: false,
     metadata: { runtime: { model: 'llama3.1:8b', mode: 'general', modelOptions: {} } },
   }),
+  task_smoke_4: () => ({
+    id: 'task_smoke_4',
+    goal: 'Recovered approval',
+    status: 'waiting_approval',
+    stepCount: 1,
+    maxSteps: 15,
+    steps: [],
+    messages: [],
+    approvals: [{
+      id: 'approval_startup',
+      status: 'pending',
+      toolCall: { tool: 'open_url', args: { url: 'https://example.com' } },
+      reason: 'risk=write',
+      requestedAt: Date.now(),
+    }],
+    tainted: false,
+    metadata: { runtime: { model: 'llama3.1:8b', mode: 'general', modelOptions: {} } },
+  }),
 };
 
 ipcMain.handle('agent-task-get', async (_, taskId) => ({
@@ -99,6 +122,7 @@ ipcMain.handle('agent-task-list', async () => ({
   ok: true,
   tasks: [
     smokeTasks.task_smoke_3(),
+    smokeTasks.task_smoke_4(),
     { id: 'task_done', goal: 'An old finished job', status: 'completed', steps: [], approvals: [] },
   ],
 }));
@@ -141,16 +165,24 @@ app.whenReady().then(async () => {
 
   const preloadApi = await win.webContents.executeJavaScript(`({
     enabled: window.jarvis.durableAgentEnabled,
+    modelKeepAlive: window.jarvis.modelKeepAlive,
     hasStart: typeof window.jarvis.agentTaskStart,
     hasApprove: typeof window.jarvis.agentTaskApprove,
     hasEvents: typeof window.jarvis.onAgentTaskEvent,
+    hasNotifyApproval: typeof window.jarvis.notifyApproval,
   })`);
   check('preload exposes the durable flag', preloadApi.enabled === true, JSON.stringify(preloadApi));
+  check(
+    'preload exposes the model keep-alive window',
+    preloadApi.modelKeepAlive === (process.env.JARVIS_MODEL_KEEP_ALIVE || '10m'),
+    JSON.stringify(preloadApi)
+  );
   check(
     'preload exposes durable methods',
     preloadApi.hasStart === 'function'
       && preloadApi.hasApprove === 'function'
-      && preloadApi.hasEvents === 'function',
+      && preloadApi.hasEvents === 'function'
+      && preloadApi.hasNotifyApproval === 'function',
     JSON.stringify(preloadApi)
   );
 
@@ -180,6 +212,16 @@ app.whenReady().then(async () => {
   })`);
   check('surfaces live tasks found at startup', listed.surfaced === true, JSON.stringify(listed));
   check('skips terminal tasks when listing', listed.skippedTerminal === true, JSON.stringify(listed));
+  await wait(100);
+  check(
+    'notifies main about recovered pending approvals',
+    Boolean(
+      startupNotification
+      && startupNotification.taskId === 'task_smoke_4'
+      && startupNotification.approvalId === 'approval_startup'
+    ),
+    JSON.stringify(startupNotification)
+  );
 
   const started = await win.webContents.executeJavaScript(
     'window.AgentClient.runDeepWork("Inspect the smoke test", { model: "llama3.2" })'
@@ -250,6 +292,9 @@ app.whenReady().then(async () => {
         id: 'task_smoke_1',
         status: 'completed',
         result: 'Smoke test complete.',
+        plan: [{ id: '1', description: 'Inspect the smoke test', status: 'completed', tool: 'read_file' }],
+        planStatus: 'completed',
+        verification: { status: 'accepted', attempts: 1 },
         steps: [],
         approvals: [{ id: 'approval_1', status: 'approved' }],
         metadata: { runtime: { mode: 'general' } },
@@ -263,6 +308,8 @@ app.whenReady().then(async () => {
     finalVisible: document.querySelector('#agent-task-task_smoke_1 .task-final-output')?.style.display,
     finalText: document.querySelector('#agent-task-task_smoke_1 .task-final-output')?.textContent,
     cancelHidden: document.querySelector('#agent-task-task_smoke_1 .task-cancel')?.hidden,
+    planVisible: document.querySelector('#agent-task-task_smoke_1 .task-plan')?.style.display,
+    planText: document.querySelector('#agent-task-task_smoke_1 .task-plan')?.textContent,
   })`);
   check('marks the task completed', /COMPLETED/.test(final.status || ''), JSON.stringify(final));
   check(
@@ -271,6 +318,8 @@ app.whenReady().then(async () => {
     JSON.stringify(final)
   );
   check('hides cancel after the task is finished', final.cancelHidden === true, JSON.stringify(final));
+  check('shows the completed plan', final.planVisible === 'block' && /Inspect the smoke test/.test(final.planText || ''), JSON.stringify(final));
+  check('shows verifier acceptance', /Verifier accepted/.test(final.planText || ''), JSON.stringify(final));
 
   // ── Externally started tasks (headless scheduler path) ───────────
   win.webContents.send('agent-task-event', {

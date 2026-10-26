@@ -166,7 +166,7 @@ function renderPrompts(filter) {
   if (!grid) return;
   const q = filter.toLowerCase();
   const list = q ? _prompts.filter(p => (p.title + p.body + p.category).toLowerCase().includes(q)) : _prompts;
-  grid.innerHTML = list.length ? list.map(p => `<div class="prompt-card"><div class="prompt-card-cat">${_uiEscHtml(p.category)}</div><div class="prompt-card-title">${_uiEscHtml(p.title)}</div><div class="prompt-card-body">${_uiEscHtml(p.body)}</div><div class="prompt-card-actions"><button class="prompt-card-use" data-action="usePrompt" data-arg-json="${JSON.stringify(p.id)}">▶ USE</button><button class="prompt-card-del" data-action="deletePrompt" data-arg-json="${JSON.stringify(p.id)}">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No prompts found</div>';
+  grid.innerHTML = list.length ? list.map(p => `<div class="prompt-card"><div class="prompt-card-cat">${_uiEscHtml(p.category)}</div><div class="prompt-card-title">${_uiEscHtml(p.title)}</div><div class="prompt-card-body">${_uiEscHtml(p.body)}</div><div class="prompt-card-actions"><button class="prompt-card-use" data-action="usePrompt" data-arg-json="${_uiEscHtml(JSON.stringify(p.id))}">▶ USE</button><button class="prompt-card-del" data-action="deletePrompt" data-arg-json="${_uiEscHtml(JSON.stringify(p.id))}">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No prompts found</div>';
 }
 window.renderPrompts = renderPrompts;
 
@@ -228,7 +228,7 @@ function renderSnippets(filter) {
   if (!list) return;
   const q = filter.toLowerCase();
   const items = q ? _snippets.filter(s => (s.title + s.code + s.lang).toLowerCase().includes(q)) : _snippets;
-  list.innerHTML = items.length ? items.map(s => `<div class="snip-item"><div class="snip-item-hdr"><span class="snip-title">${_uiEscHtml(s.title)}</span><span class="snip-tag ${_uiEscHtml(s.lang)}">${_uiEscHtml(s.lang.toUpperCase())}</span></div><div class="snip-code-preview">${_uiEscHtml(s.code.slice(0, 200))}</div><div class="snip-actions"><button class="snip-btn use" data-action="useSnippet" data-arg-json="${JSON.stringify(s.id)}">▶ INSERT</button><button class="snip-btn" data-action="copySnip" data-arg-json="${JSON.stringify(s.id)}">⧉ COPY</button><button class="snip-btn del" data-action="deleteSnippet" data-arg-json="${JSON.stringify(s.id)}">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No snippets found</div>';
+  list.innerHTML = items.length ? items.map(s => `<div class="snip-item"><div class="snip-item-hdr"><span class="snip-title">${_uiEscHtml(s.title)}</span><span class="snip-tag ${_uiEscHtml(s.lang)}">${_uiEscHtml(s.lang.toUpperCase())}</span></div><div class="snip-code-preview">${_uiEscHtml(s.code.slice(0, 200))}</div><div class="snip-actions"><button class="snip-btn use" data-action="useSnippet" data-arg-json="${_uiEscHtml(JSON.stringify(s.id))}">▶ INSERT</button><button class="snip-btn" data-action="copySnip" data-arg-json="${_uiEscHtml(JSON.stringify(s.id))}">⧉ COPY</button><button class="snip-btn del" data-action="deleteSnippet" data-arg-json="${_uiEscHtml(JSON.stringify(s.id))}">✕</button></div></div>`).join('') : '<div class="panel-placeholder">No snippets found</div>';
 }
 window.renderSnippets = renderSnippets;
 
@@ -380,7 +380,7 @@ function buildCalcPanel() {
     if (['+', '-', '×', '÷'].includes(b)) c += ' calc-btn-op';
     if (b === '=') c += ' calc-btn-eq';
     if (b === 'C') c += ' calc-btn-clear';
-    return `<button class="${c}" data-action="calcPress" data-arg-json="${JSON.stringify(b)}">${b}</button>`;
+    return `<button class="${c}" data-action="calcPress" data-arg-json="${_uiEscHtml(JSON.stringify(b))}">${b}</button>`;
   }).join('')).join('');
   panel.querySelector('.panel-body').innerHTML = `<div class="calc-expr" id="calc-expr"></div><div class="calc-display" id="calc-display">0</div><div class="calc-grid">${btns}</div>`;
 }
@@ -541,7 +541,57 @@ window.openSchedulerModal = function() {
     prefillSchedulerTrigger();
     syncSchedulerType();
   }
+  loadSchedulerSettings();
   renderSchedulerJobs();
+};
+
+function schedulerDefaultTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+}
+
+function fillSchedulerSettings(settings = {}) {
+  const quiet = settings.quietHours || {};
+  const enabled = document.getElementById('sched-quiet-enabled');
+  const start = document.getElementById('sched-quiet-start');
+  const end = document.getElementById('sched-quiet-end');
+  const tz = document.getElementById('sched-quiet-tz');
+  const maxRuns = document.getElementById('sched-max-runs');
+  if (enabled) enabled.checked = quiet.enabled === true;
+  if (start && quiet.start) start.value = quiet.start;
+  if (end && quiet.end) end.value = quiet.end;
+  if (tz) tz.value = quiet.timeZone || schedulerDefaultTimeZone();
+  if (maxRuns) maxRuns.value = String(Number.isInteger(settings.maxRunsPerHour) ? settings.maxRunsPerHour : 0);
+}
+
+async function loadSchedulerSettings() {
+  try {
+    const result = await window.jarvis.schedulerList();
+    if (result?.ok && result.settings) fillSchedulerSettings(result.settings);
+  } catch (error) {
+    schedulerNotify(error.message || 'Could not load scheduler settings.');
+  }
+}
+
+window.saveSchedulerSettings = async function() {
+  const quietHours = {
+    enabled: Boolean(document.getElementById('sched-quiet-enabled')?.checked),
+    start: document.getElementById('sched-quiet-start')?.value || '22:00',
+    end: document.getElementById('sched-quiet-end')?.value || '07:00',
+    timeZone: document.getElementById('sched-quiet-tz')?.value?.trim() || schedulerDefaultTimeZone(),
+  };
+  const maxRunsPerHour = parseInt(document.getElementById('sched-max-runs')?.value || '0', 10);
+  if (!Number.isInteger(maxRunsPerHour) || maxRunsPerHour < 0) {
+    schedulerNotify('Max runs/hour must be a non-negative integer.');
+    return;
+  }
+  try {
+    const response = await window.jarvis.schedulerSettingsUpdate({ quietHours, maxRunsPerHour });
+    if (!response?.ok) throw new Error(response?.error || 'Could not save scheduler settings');
+    fillSchedulerSettings(response.settings);
+    schedulerNotify('Scheduler limits saved.', 'success');
+  } catch (error) {
+    schedulerNotify(error.message || 'Could not save scheduler settings.');
+  }
 };
 
 function schedulerLocalDateTime(date) {
@@ -554,7 +604,22 @@ function prefillSchedulerTrigger() {
   if (input && !input.value) {
     input.value = schedulerLocalDateTime(new Date(Date.now() + 2 * 60 * 1000));
   }
+  const timeZone = document.getElementById('sched-timezone');
+  if (timeZone && !timeZone.value) {
+    try { timeZone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { timeZone.value = 'UTC'; }
+  }
 }
+
+function syncSchedulerRecurringMode() {
+  const mode = document.getElementById('sched-recurring-mode')?.value || 'interval';
+  const interval = document.getElementById('sched-interval-wrap');
+  const time = document.getElementById('sched-time-wrap');
+  const days = document.getElementById('sched-days-wrap');
+  if (interval) { interval.hidden = mode !== 'interval'; interval.style.display = mode === 'interval' ? 'flex' : 'none'; }
+  if (time) { time.hidden = mode === 'interval'; time.style.display = mode === 'interval' ? 'none' : 'flex'; }
+  if (days) { days.hidden = mode !== 'weekly'; days.style.display = mode === 'weekly' ? 'flex' : 'none'; }
+}
+window.syncSchedulerRecurringMode = syncSchedulerRecurringMode;
 
 function syncSchedulerType() {
   const type = document.getElementById('sched-type')?.value || 'one-off';
@@ -562,6 +627,7 @@ function syncSchedulerType() {
   const recurring = document.getElementById('sched-recurring');
   if (oneOff) oneOff.hidden = type === 'recurring';
   if (recurring) recurring.hidden = type === 'one-off';
+  if (type === 'recurring') syncSchedulerRecurringMode();
 }
 window.syncSchedulerType = syncSchedulerType;
 
@@ -584,35 +650,54 @@ window.toggleSchedulerAddForm = function() {
   }
 };
 
+function schedulerScheduleLabel(job) {
+  if (job.type === 'one-off') {
+    return `Triggers: ${job.triggerTime ? new Date(job.triggerTime).toLocaleString() : 'not set'}`;
+  }
+  if (job.schedule) {
+    const days = job.schedule.days ? ` | Days: ${job.schedule.days.join(',')}` : '';
+    return `${job.schedule.frequency} at ${job.schedule.time} ${job.schedule.timeZone || ''}${days}`;
+  }
+  return `Interval: ${Math.round((job.intervalMs || 0) / 1000)}s${job.timeZone ? ` | ${job.timeZone}` : ''}`;
+}
+
 window.renderSchedulerJobs = async function() {
   const list = document.getElementById('scheduler-list');
   if (!list) return;
   const res = await window.jarvis.schedulerList();
   if (!res.ok) {
-    list.innerHTML = `<div style="color:red">Failed to load tasks.</div>`;
+    list.innerHTML = `<div style="color:red">Failed to load tasks: ${_uiEscHtml(res.error || 'unknown error')}</div>`;
     return;
   }
-  const jobs = res.jobs;
+  const jobs = res.jobs || [];
   if (jobs.length === 0) {
-    list.innerHTML = `<div style="padding:10px; color:var(--text-dim); text-align:center;">No active background tasks.</div>`;
+    list.innerHTML = `<div style="padding:10px; color:var(--text-dim); text-align:center;">No background tasks. Scheduled tasks run headlessly, even when this window is hidden.</div>`;
     return;
   }
 
-  list.innerHTML = jobs.map(job => `
-    <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--hud-border); padding: 10px; margin-bottom: 8px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
-      <div>
+  const runs = Array.isArray(res.runs) ? res.runs : [];
+  list.innerHTML = jobs.map(job => {
+    const jobRuns = runs.filter(run => run.jobId === job.id).slice(0, 3);
+    return `
+    <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--hud-border); padding: 10px; margin-bottom: 8px; border-radius: 4px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+      <div style="min-width:0">
         <div style="font-weight:bold; color:var(--text-bright);">${_uiEscHtml(job.name)}</div>
         <div style="font-size:11px; color:var(--text-dim);">
-          Type: ${_uiEscHtml(String(job.type))} | Active: ${job.active ? 'YES' : 'NO'}<br>
-          ${job.type === 'one-off' ? `Triggers: ${new Date(job.triggerTime).toLocaleString()}` : `Interval: ${job.intervalMs / 1000}s`}
+          ${_uiEscHtml(String(job.type))} | ${job.active ? 'ACTIVE' : 'INACTIVE'}<br>
+          ${_uiEscHtml(schedulerScheduleLabel(job))}<br>
+          Next: ${job.nextRun ? _uiEscHtml(new Date(job.nextRun).toLocaleString()) : 'event/manual'}${job.timeZone ? ` | ${_uiEscHtml(job.timeZone)}` : ''}<br>
+          Last: ${_uiEscHtml(job.lastRunStatus || 'never')}${job.lastDeferredReason ? ` | deferred: ${_uiEscHtml(job.lastDeferredReason)}` : ''}
         </div>
-        <div style="font-size:10px; color:var(--accent-blue); margin-top:4px;">Payload: ${_uiEscHtml(job.payload.text || '')}</div>
+        <div style="font-size:10px; color:var(--accent-blue); margin-top:4px; white-space:pre-wrap;">${_uiEscHtml(job.payload.goal || job.payload.text || '')}</div>
+        ${job.lastRunResult ? `<div style="font-size:10px; color:var(--text-dim); margin-top:4px; white-space:pre-wrap; max-height:80px; overflow:auto;">${_uiEscHtml(job.lastRunResult)}</div>` : ''}
+        ${jobRuns.length ? `<div style="font-size:10px; color:var(--text-dim); margin-top:6px;">${jobRuns.map(run => `${_uiEscHtml(run.status)} · attempt ${run.attempt}${run.finishedAt ? ` · ${_uiEscHtml(new Date(run.finishedAt).toLocaleTimeString())}` : ''}`).join('<br>')}</div>` : ''}
       </div>
-      <div>
+      <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;">
         <button class="micro-btn" style="color:var(--accent-red); border-color:var(--accent-red);" data-action="deleteSchedulerJob" data-arg="${_uiEscHtml(String(job.id))}">✕ DELETE</button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 };
 
 window.addSchedulerJob = async function() {
@@ -645,13 +730,38 @@ window.addSchedulerJob = async function() {
     }
     jobData.triggerTime = triggerTime;
   } else {
-    const inv = parseInt(document.getElementById('sched-interval').value, 10);
-    if (!Number.isFinite(inv) || inv < 10) {
-      schedulerNotify('Interval must be at least 10 seconds.');
-      document.getElementById('sched-interval').focus();
-      return;
+    const mode = document.getElementById('sched-recurring-mode')?.value || 'interval';
+    const timeZone = document.getElementById('sched-timezone')?.value?.trim() || undefined;
+    if (mode === 'interval') {
+      const inv = parseInt(document.getElementById('sched-interval').value, 10);
+      if (!Number.isFinite(inv) || inv < 10) {
+        schedulerNotify('Interval must be at least 10 seconds.');
+        document.getElementById('sched-interval').focus();
+        return;
+      }
+      jobData.intervalMs = inv * 1000;
+      if (timeZone) jobData.timeZone = timeZone;
+    } else {
+      const time = document.getElementById('sched-time')?.value;
+      if (!time) {
+        schedulerNotify('Choose a daily/weekly time.');
+        return;
+      }
+      const schedule = { frequency: mode, time, timeZone: timeZone || 'UTC' };
+      if (mode === 'weekly') {
+        const days = String(document.getElementById('sched-days')?.value || '')
+          .split(',')
+          .map(value => Number(value.trim()))
+          .filter(value => Number.isInteger(value) && value >= 0 && value <= 6);
+        if (!days.length) {
+          schedulerNotify('Enter at least one weekday number (0=Sunday).');
+          return;
+        }
+        schedule.days = days;
+      }
+      jobData.schedule = schedule;
+      jobData.timeZone = schedule.timeZone;
     }
-    jobData.intervalMs = inv * 1000;
   }
 
   const res = await window.jarvis.schedulerAdd(jobData);
@@ -672,26 +782,10 @@ window.deleteSchedulerJob = async function(id) {
   if (res.ok) {
     renderSchedulerJobs();
   } else {
-    alert('Failed to delete task: ' + res.error);
+    schedulerNotify('Failed to delete task: ' + res.error);
   }
 };
 
-window.jarvis.onSchedulerTrigger((job) => {
-  console.log('[SCHEDULER] Job triggered:', job);
-  // Execution happens in the main process through the durable agent runtime;
-  // this listener only reflects the trigger in the UI.
-  const durable = Boolean(
-    window.AgentClient
-    && typeof window.AgentClient.enabled === 'function'
-    && window.AgentClient.enabled()
-  );
-  const label = (job && (job.name || job.id)) || 'scheduled job';
-  if (typeof window.showToast === 'function') {
-    window.showToast(
-      durable
-        ? `Scheduled task started: ${label}`
-        : `Scheduled job fired (durable agent disabled): ${label}`,
-      durable ? 'info' : 'error'
-    );
-  }
-});
+// Scheduled execution is headless. There is intentionally no renderer trigger
+// listener: the main-process scheduler starts a durable task directly, even if
+// this window is hidden or has been destroyed.

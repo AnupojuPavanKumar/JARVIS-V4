@@ -43,7 +43,7 @@ function makeSignedRegistry() {
   return { dir, publicPem, manifestRaw };
 }
 
-test('loads a verified catalog, exposes native tools, and executes a skill', async () => {
+test('loads a verified catalog and executes a signed skill', async () => {
   const { dir, publicPem } = makeSignedRegistry();
   try {
     const registry = new ToolRegistry({ skillsDir: dir, publicKeyPem: publicPem });
@@ -62,6 +62,60 @@ test('loads a verified catalog, exposes native tools, and executes a skill', asy
     const result = await registry.execute({ tool: 'echo', args: { text: 'hello' } });
     assert.equal(result.ok, true);
     assert.equal(result.result, 'hello');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('loads a trusted native tool beside signed skills and validates its args', async () => {
+  const { dir, publicPem } = makeSignedRegistry();
+  const calls = [];
+  const nativeTool = {
+    id: 'system_metrics',
+    name: 'System Metrics',
+    description: 'Real measurements',
+    risk: 'read',
+    params: {
+      target: { type: 'string', required: true, description: 'Target' },
+      duration_sec: { type: 'number', required: false, description: 'Seconds' },
+    },
+    async execute(args, context) {
+      calls.push({ args, hasSignal: Boolean(context.signal) });
+      return { ok: true, provider: 'gpu', target: args.target };
+    },
+  };
+
+  try {
+    const registry = new ToolRegistry({
+      skillsDir: dir,
+      publicKeyPem: publicPem,
+      nativeTools: [nativeTool],
+    });
+    const loaded = await registry.load();
+
+    assert.equal(loaded.ok, true);
+    assert.equal(registry.listSkills().length, 1);
+    assert.equal(registry.listTools().length, 2);
+    assert.equal(registry.getSkill('system_metrics').source, 'native');
+
+    const definitions = registry.listDefinitions();
+    assert.equal(definitions.length, 2);
+    assert.equal(definitions[0].function.name, 'system_metrics');
+
+    const signal = new AbortController().signal;
+    const result = await registry.execute(
+      { tool: 'system_metrics', args: { target: 'gpu 1', duration_sec: 30 } },
+      { signal }
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.provider, 'gpu');
+    assert.equal(result.target, 'gpu 1');
+    assert.deepEqual(calls, [{ args: { target: 'gpu 1', duration_sec: 30 }, hasSignal: true }]);
+
+    const missing = await registry.execute({ tool: 'system_metrics', args: {} });
+    assert.equal(missing.ok, false);
+    assert.match(missing.error, /Missing required param/);
+    assert.equal(calls.length, 1);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -3,16 +3,23 @@
 const path = require('path');
 const http = require('http');
 
-const { TaskStore } = require('../../core/runtime/task-store');
+const { TaskStore, DEFAULT_MAX_DURATION_MS, DEFAULT_MAX_TOKENS, MAX_DURATION_LIMIT_MS, MAX_TOKENS_LIMIT } = require('../../core/runtime/task-store');
 const { AgentRuntime } = require('../../core/runtime/agent-runtime');
 const { PromptBuilder } = require('../../core/context/prompt-builder');
 const { ModelGateway } = require('../../core/models/model-gateway');
 const { OllamaAdapter } = require('../../core/models/ollama-adapter');
+const { ModelRouter } = require('../../core/models/model-router');
 const { ToolRegistry } = require('../../core/tools/tool-registry');
+const { createSystemMetricsTool } = require('../../core/tools/system-metrics-tool');
+const { createBrowserTools } = require('../../core/browser/browser-tools');
+const { createIntegrationTools } = require('../../core/integrations/integration-tools');
+const { createDocumentTools } = require('../../core/documents/document-tools');
+const { planMonitoringTask } = require('../../core/metrics/monitor-intent');
 const { PolicyEngine } = require('../../core/policy/policy-engine');
 const { TASK_STATUS, assertTaskId, isTerminalStatus } = require('../../core/runtime/task-state');
+const { unpackedPath } = require('../asar-paths');
 
-const DEFAULT_MODEL = 'llama3.2';
+const DEFAULT_MODEL = 'llama3.1:8b';
 const DEFAULT_MAX_STEPS = 15;
 const MAX_MODEL_LENGTH = 120;
 const MAX_GOAL_LENGTH = 20000;
@@ -54,6 +61,20 @@ function sanitizeModelOptions(options) {
 function sanitizeMaxSteps(value) {
   if (!Number.isInteger(value)) return DEFAULT_MAX_STEPS;
   return Math.min(50, Math.max(1, value));
+}
+
+function sanitizeMaxDurationMs(value) {
+  if (!Number.isInteger(value)) return DEFAULT_MAX_DURATION_MS;
+  return Math.min(MAX_DURATION_LIMIT_MS, Math.max(1, value));
+}
+
+function sanitizeMaxTokens(value) {
+  if (!Number.isInteger(value)) return DEFAULT_MAX_TOKENS;
+  return Math.min(MAX_TOKENS_LIMIT, Math.max(1, value));
+}
+
+function sanitizeToolMode(value) {
+  return value === 'native' || value === 'json' ? value : null;
 }
 
 function sanitizeString(value, maxLength) {
@@ -103,6 +124,8 @@ function defaultCreateRuntime({
   policy,
   promptBuilder,
   model,
+  plannerModel = null,
+  verifierModel = null,
   modelOptions,
   onEvent,
 }) {
@@ -112,9 +135,24 @@ function defaultCreateRuntime({
     defaultOptions: modelOptions,
     timeoutMs: 120000,
   });
+
+  // Role-specific gateways are optional. When they are not configured, the
+  // planner and verifier share the task model, which keeps a single Ollama
+  // model warm on low-VRAM machines.
+  function optionalGateway(name) {
+    if (!name || name === model) return gateway;
+    return new ModelGateway({
+      adapter: new OllamaAdapter({ model: name }),
+      defaultOptions: modelOptions,
+      timeoutMs: 120000,
+    });
+  }
+
   return new AgentRuntime({
     store,
     model: gateway,
+    plannerModel: optionalGateway(plannerModel),
+    verifierModel: optionalGateway(verifierModel),
     promptBuilder,
     tools: registry,
     policy,
@@ -130,12 +168,26 @@ module.exports = function registerAgentController({
   mainWindowProvider = () => null,
   createRuntime = defaultCreateRuntime,
   taskStoreFactory = baseDir => new TaskStore({ baseDir }),
-  toolRegistryFactory = skillsDir => new ToolRegistry({ skillsDir }),
+  toolRegistryFactory = (skillsDir, options = {}) => new ToolRegistry({
+    skillsDir,
+    nativeTools: options.nativeTools,
+  }),
   policyFactory = store => new PolicyEngine({ taskStore: store }),
   promptBuilder: injectedPromptBuilder = null,
   defaultModel = DEFAULT_MODEL,
+  plannerModel = process.env.JARVIS_PLANNER_MODEL || null,
+  verifierModel = process.env.JARVIS_VERIFIER_MODEL || null,
+  smallModel = process.env.JARVIS_SMALL_MODEL || null,
+  strongModel = process.env.JARVIS_STRONG_MODEL || null,
+  cloudModel = process.env.JARVIS_CLOUD_MODEL || null,
   listModels = defaultListModels,
   onAgentEvent = null,
+  nativeTools = null,
+  browserDriver = null,
+  integrationService = null,
+  documentIndex = null,
+  memoryStore = null,
+  memoryStoreProvider = null,
 } = {}) {
   if (!ipcMain || typeof ipcMain.handle !== 'function') {
     throw new Error('registerAgentController requires ipcMain');
@@ -144,10 +196,50 @@ module.exports = function registerAgentController({
     throw new Error('registerAgentController requires app');
   }
 
-  const skillsDir = path.join(__dirname, '../../skills');
+  const skillsDir = unpackedPath(path.join(__dirname, '../../skills'));
   const promptBuilder = injectedPromptBuilder || new PromptBuilder();
-  const registry = toolRegistryFactory(skillsDir);
+  const resolvedNativeTools = Array.isArray(nativeTools)
+    ? nativeTools.slice()
+    : [createSystemMetricsTool()];
+  // Browser tools are trusted application code, but page content is not. The
+  // read/interaction tools are marked untrusted so the runtime taints the task
+  // and requires approval before later externally visible steps.
+  if (!Array.isArray(nativeTools) && browserDriver) {
+    resolvedNativeTools.push(...createBrowserTools({ driver: browserDriver, audit }));
+  }
+  if (!Array.isArray(nativeTools) && integrationService) {
+    resolvedNativeTools.push(...createIntegrationTools({ service: integrationService }));
+  }
+  if (!Array.isArray(nativeTools) && documentIndex) {
+    resolvedNativeTools.push(...createDocumentTools({ index: documentIndex, audit }));
+  }
+  const registry = toolRegistryFactory(skillsDir, { nativeTools: resolvedNativeTools });
   const runtimes = new Map();
+
+  const routedModels = [];
+  function addRouteModel(name, tier) {
+    const value = sanitizeString(name, MAX_MODEL_LENGTH);
+    if (!value || !MODEL_RE.test(value)) return;
+    if (!routedModels.some(model => model.name === value && model.tier === tier)) {
+      routedModels.push({ name: value, tier, score: tier === 'default' ? 1 : 0 });
+    }
+  }
+  addRouteModel(smallModel, 'small');
+  addRouteModel(defaultModel, 'default');
+  addRouteModel(strongModel, 'strong');
+  addRouteModel(cloudModel, 'cloud');
+  const modelRouter = new ModelRouter({ models: routedModels, defaultModel });
+  const routedPlannerModel = MODEL_RE.test(sanitizeString(plannerModel, MAX_MODEL_LENGTH))
+    ? sanitizeString(plannerModel, MAX_MODEL_LENGTH)
+    : null;
+  const routedVerifierModel = MODEL_RE.test(sanitizeString(verifierModel, MAX_MODEL_LENGTH))
+    ? sanitizeString(verifierModel, MAX_MODEL_LENGTH)
+    : null;
+
+  function resolveMemoryStore() {
+    if (typeof memoryStoreProvider === 'function') return memoryStoreProvider();
+    return memoryStore;
+  }
 
   let store = null;
   let policy = null;
@@ -212,6 +304,11 @@ module.exports = function registerAgentController({
         store = taskStoreFactory(path.join(userData, 'tasks'));
         await store.init();
 
+        const memory = resolveMemoryStore();
+        if (memory && typeof memory.init === 'function') {
+          await memory.init();
+        }
+
         const recovered = await store.recoverInterruptedTasks();
         if (recovered.length > 0) {
           audit('AGENT_RECOVER', recovered.map(task => task.id).join(','), 'INTERRUPTED');
@@ -247,25 +344,92 @@ module.exports = function registerAgentController({
         : runtimeMeta.modelOptions
     );
 
+    // The seed is created by the controller, never accepted from the renderer.
+    // Persisting it in task metadata lets a resumed task finish a deterministic
+    // measurement without asking the model to choose the tool again.
+    const runtimeSeed = runtimeMeta.initialToolCall;
+    const initialToolCall = runtimeSeed
+      && runtimeSeed.tool === 'system_metrics'
+      && runtimeSeed.args
+      && typeof runtimeSeed.args.target === 'string'
+      && typeof runtimeSeed.args.duration_sec === 'number'
+      ? {
+          tool: 'system_metrics',
+          args: {
+            target: runtimeSeed.args.target,
+            duration_sec: runtimeSeed.args.duration_sec,
+          },
+          native: false,
+        }
+      : null;
+
+    const deepWorkEnabled = request?.deepWorkEnabled !== false;
+    const usePlanner = request?.usePlanner !== undefined
+      ? request.usePlanner !== false
+      : (runtimeMeta.usePlanner !== undefined
+        ? runtimeMeta.usePlanner !== false
+        : (deepWorkEnabled && !initialToolCall));
+    const toolMode = sanitizeToolMode(request?.toolMode) || sanitizeToolMode(runtimeMeta.toolMode);
+    const verify = request?.verify === true || runtimeMeta.verify === true;
+
     return {
       mode: sanitizeString(request?.mode, 40) || runtimeMeta.mode || 'general',
+      purpose: sanitizeString(request?.purpose, 40) || runtimeMeta.purpose || 'agent',
+      highStakes: request?.highStakes === true || runtimeMeta.highStakes === true,
+      ambiguous: request?.ambiguous === true || runtimeMeta.ambiguous === true,
       systemSpecs: request?.systemSpecs && typeof request.systemSpecs === 'object'
         ? request.systemSpecs
         : undefined,
-      memory: Array.isArray(request?.memory) ? request.memory.slice(0, 100) : [],
+      memory: [],
       projectContext: request?.projectContext && typeof request.projectContext === 'object'
         ? request.projectContext
         : undefined,
       webSearchContext: sanitizeString(request?.webSearchContext, 4000) || undefined,
-      deepWorkEnabled: request?.deepWorkEnabled !== false,
+      deepWorkEnabled,
+      usePlanner,
+      plannerRequired: request?.plannerRequired === true || runtimeMeta.plannerRequired === true,
+      verify,
+      ...(toolMode ? { toolMode } : {}),
       modelOptions,
+      initialToolCall,
+      completeWithToolResult: runtimeMeta.completeWithToolResult === true,
     };
+  }
+
+  // Memory retrieval is performed by the main process, not by the renderer.
+  // Personal/secret records are excluded from prompt context by default; the
+  // user can still inspect them in the memory panel.
+  async function contextForTask(request, task) {
+    const context = contextFromRequest(request, task);
+    const memory = resolveMemoryStore();
+    if (!memory || typeof memory.retrieve !== 'function' || !task || !task.goal) {
+      return context;
+    }
+    try {
+      const retrieval = await memory.retrieve(task.goal, {
+        maxRecords: 6,
+        maxChars: 1600,
+        allowPersonal: false,
+      });
+      context.memory = retrieval.records.map(record => record.text);
+      context.memoryContext = retrieval.context;
+      context.memoryIds = retrieval.records.map(record => record.id);
+    } catch (error) {
+      audit('AGENT_MEMORY_RETRIEVE', error.message, 'ERROR');
+      context.memory = [];
+    }
+    return context;
   }
 
   function makeRuntimeForTask(task, request) {
     const runtimeMeta = task?.metadata?.runtime || {};
-    const model = sanitizeString(request?.model, MAX_MODEL_LENGTH)
+    const purpose = sanitizeString(request?.purpose, 40) || runtimeMeta.purpose || 'agent';
+    const highStakes = request?.highStakes === true || runtimeMeta.highStakes === true;
+    const ambiguous = request?.ambiguous === true || runtimeMeta.ambiguous === true;
+    const explicitModel = sanitizeString(request?.model, MAX_MODEL_LENGTH);
+    const model = explicitModel
       || sanitizeString(runtimeMeta.model, MAX_MODEL_LENGTH)
+      || modelRouter.select({ kind: purpose, highStakes, ambiguous })
       || defaultModel;
     if (!MODEL_RE.test(model)) throw new Error('Invalid model name');
 
@@ -274,6 +438,12 @@ module.exports = function registerAgentController({
         ? request.modelOptions
         : runtimeMeta.modelOptions
     );
+    const plannerModelName = routedPlannerModel
+      || modelRouter.select({ kind: 'planning', highStakes, ambiguous })
+      || model;
+    const verifierModelName = routedVerifierModel
+      || modelRouter.select({ kind: 'verification', highStakes: true, ambiguous })
+      || model;
 
     return createRuntime({
       store,
@@ -281,6 +451,8 @@ module.exports = function registerAgentController({
       policy,
       promptBuilder,
       model,
+      plannerModel: plannerModelName,
+      verifierModel: verifierModelName,
       modelOptions,
       onEvent: emitEvent,
     });
@@ -299,7 +471,20 @@ module.exports = function registerAgentController({
   function trackRuntime(taskId, runtime, promise) {
     runtimes.set(taskId, runtime);
     promise
-      .then(task => emitTaskUpdate(task))
+      .then(async task => {
+        // Memory extraction happens only after the task settles, never inside
+        // the model/tool loop. Tainted tasks may create an episode, but the
+        // store refuses to create a procedure from them.
+        const memory = resolveMemoryStore();
+        if (memory && task && ['completed', 'failed', 'cancelled'].includes(task.status)) {
+          try {
+            await memory.recordTaskOutcome(task);
+          } catch (error) {
+            audit('AGENT_MEMORY_WRITE', `${taskId}: ${error.message}`, 'ERROR');
+          }
+        }
+        emitTaskUpdate(task);
+      })
       .catch(error => {
         audit('AGENT_TASK_ERROR', `${taskId}: ${error.message}`, 'ERROR');
       })
@@ -338,30 +523,67 @@ module.exports = function registerAgentController({
       return { ok: false, error: `Task goal exceeds ${MAX_GOAL_LENGTH} characters` };
     }
 
-    const model = sanitizeString(request.model, MAX_MODEL_LENGTH) || defaultModel;
+    const purpose = sanitizeString(request.purpose, 40) || 'agent';
+    const highStakes = request.highStakes === true;
+    const ambiguous = request.ambiguous === true;
+    const explicitModel = sanitizeString(request.model, MAX_MODEL_LENGTH);
+    const model = explicitModel
+      || modelRouter.select({ kind: purpose, highStakes, ambiguous })
+      || defaultModel;
     if (!MODEL_RE.test(model)) return { ok: false, error: 'Invalid model name' };
     const modelOptions = sanitizeModelOptions(request.modelOptions);
     const maxSteps = sanitizeMaxSteps(request.maxSteps);
+    const maxDurationMs = sanitizeMaxDurationMs(request.maxDurationMs);
+    const maxTokens = sanitizeMaxTokens(request.maxTokens);
     const mode = sanitizeString(request.mode, 40) || 'general';
+    const toolMode = sanitizeToolMode(request.toolMode);
+    const usePlanner = typeof request.usePlanner === 'boolean' ? request.usePlanner : undefined;
+    const verify = request.verify === true;
+    const plannerRequired = request.plannerRequired === true;
     const scheduleId = sanitizeString(request.scheduleId, 80);
     const scheduleName = sanitizeString(request.scheduleName, 120);
+    const source = sanitizeString(request.source, 80) || 'agent-task';
+    const permissionProfile = sanitizeString(
+      typeof request.permissions === 'string' ? request.permissions : request.permissions?.profile,
+      80
+    ) || 'default';
+    const permissions = { profile: permissionProfile };
+    const monitoringPlan = planMonitoringTask(goal);
 
     const task = await store.createTask({
       goal,
-      source: sanitizeString(request.source, 80) || 'agent-task',
+      source,
+      permissions,
       maxSteps,
+      maxDurationMs,
+      maxTokens,
       metadata: {
-        runtime: { model, modelOptions, mode },
+        runtime: {
+          model,
+          modelOptions,
+          mode,
+          purpose,
+          highStakes,
+          ambiguous,
+          ...(toolMode ? { toolMode } : {}),
+          ...(usePlanner !== undefined ? { usePlanner } : {}),
+          verify,
+          plannerRequired,
+          ...(monitoringPlan ? {
+            initialToolCall: monitoringPlan.toolCall,
+            completeWithToolResult: monitoringPlan.completeWithToolResult,
+          } : {}),
+        },
         ...(scheduleId ? { schedule: { id: scheduleId, name: scheduleName || null } } : {}),
       },
     });
 
     const runtime = makeRuntimeForTask(task, { ...request, model, modelOptions });
-    const context = contextFromRequest({ ...request, modelOptions }, task);
+    const context = await contextForTask({ ...request, model, modelOptions }, task);
     const promise = runtime.runTask(task.id, context);
     trackRuntime(task.id, runtime, promise);
 
-    audit('AGENT_TASK_START', `${task.id} goal=${goal.slice(0, 80)}`, 'ALLOWED');
+    audit('AGENT_TASK_START', `${task.id} goal=${goal.slice(0, 80)} model=${model}`, 'ALLOWED');
     return { ok: true, task: await store.getTask(task.id) };
   }
 
@@ -415,7 +637,8 @@ module.exports = function registerAgentController({
 
       const result = await startTask({
         goal: rawGoal,
-        source: 'scheduler',
+        source: 'schedule',
+        permissions: { profile: 'background-restricted' },
         scheduleId,
         scheduleName: sanitizeString(job?.name, 120),
         model,
@@ -529,7 +752,7 @@ module.exports = function registerAgentController({
       });
 
       if (options.approved) {
-        const context = contextFromRequest(options, approvedTask);
+        const context = await contextForTask(options, approvedTask);
         const promise = runtime.runTask(taskId, context, {
           fromApproval: true,
           alreadyRunning: true,
@@ -568,7 +791,7 @@ module.exports = function registerAgentController({
       }
 
       const runtime = makeRuntimeForTask(result.task, options);
-      const context = contextFromRequest(options, result.task);
+      const context = await contextForTask(options, result.task);
       const promise = runtime.runTask(taskId, context);
       trackRuntime(taskId, runtime, promise);
       audit('AGENT_TASK_RESUME', taskId, 'ALLOWED');
@@ -583,6 +806,7 @@ module.exports = function registerAgentController({
     startTask,
     startTaskFromJob,
     getStore: () => store,
+    getMemoryStore: () => resolveMemoryStore(),
     getRegistry: () => registry,
     getRuntimes: () => runtimes,
     getSkillsError: () => skillsError,

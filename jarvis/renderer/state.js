@@ -120,7 +120,7 @@ Format: Action plans, templates, and concrete next steps. Prioritize ruthlessly.
 
 export const state = {
   mode: "general",
-  model: "llama3.2",
+  model: "llama3.1:8b",
   endpoint: "http://127.0.0.1:11434",
   temperature: .7,
   contextWindow: 20,

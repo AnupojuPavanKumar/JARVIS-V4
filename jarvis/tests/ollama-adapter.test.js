@@ -41,7 +41,7 @@ test('posts chat requests with merged options and native tools', async () => {
   const body = JSON.parse(calls[0].init.body);
   assert.equal(body.model, 'llama3.2');
   assert.equal(body.stream, false);
-  assert.equal(body.keep_alive, '5m');
+  assert.equal(body.keep_alive, '10m');
   assert.deepEqual(body.options, { temperature: 0.3, num_ctx: 4096, num_predict: 20 });
   assert.equal(body.tools.length, 1);
 });
@@ -84,6 +84,35 @@ test('maps provider-neutral tool messages to the Ollama wire shape', async () =>
     tool_call_id: 'call_1',
   });
   assert.equal(body.messages[0].tool_calls, undefined);
+});
+
+test('probes /api/show for context length, tools, and vision support', async () => {
+  const calls = [];
+  const adapter = new OllamaAdapter({
+    model: 'test-model',
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        async json() {
+          return {
+            capabilities: ['completion', 'tools', 'vision'],
+            model_info: { 'llama.context_length': 131072 },
+            parameters: 'num_ctx 8192\nnum_predict 512',
+          };
+        },
+      };
+    },
+    defaultOptions: { num_ctx: 4096, num_predict: 256 },
+  });
+
+  const capabilities = await adapter.getCapabilities();
+  assert.equal(calls[0].url, 'http://127.0.0.1:11434/api/show');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { model: 'test-model' });
+  assert.equal(capabilities.tools, true);
+  assert.equal(capabilities.vision, true);
+  assert.equal(capabilities.contextLength, 8192);
+  assert.equal(capabilities.maxOutputTokens, 512);
 });
 
 test('surfaces HTTP errors with response detail', async () => {

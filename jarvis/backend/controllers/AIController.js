@@ -3,8 +3,10 @@ const fs = require('fs');
 const http = require('http');
 const { spawn, exec } = require('child_process');
 const os = require('os');
+const { unpackedPath } = require('../asar-paths');
+const { normalizeAudioPayload } = require('../voice/audio-payload');
 
-module.exports = function registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate, _allowedRendererBase }) {
+module.exports = function registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate }) {
   
   // ─── Web Search / DuckDuckGo ────────────────────────────────────────────────────
   // Issue 5 fix: replaced exec()+shell string with spawnShellCommand().
@@ -78,8 +80,11 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
   const activeOllamaStreams = new Map();
 
   // OLLAMA AUTO-START LOGIC
-  const ollamaStartScript = path.join(__dirname, '../../start-ollama-gpu.ps1');
-  if (fs.existsSync(ollamaStartScript)) {
+  // Boot smoke tests exercise the real app composition with an isolated
+  // userData directory; they must not start GPU/transcription services.
+  const testMode = process.env.JARVIS_TEST_MODE === '1';
+  const ollamaStartScript = unpackedPath(path.join(__dirname, '../../start-ollama-gpu.ps1'));
+  if (!testMode && fs.existsSync(ollamaStartScript)) {
     console.log('[OLLAMA] Auto-starting via powershell...');
     const ollamaProcess = spawn('powershell.exe', [
       '-ExecutionPolicy', 'Bypass',
@@ -199,9 +204,9 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
   
   function initPiperProcess() {
     if (piperProcess) return piperProcess;
-    const piperExe = path.join(__dirname, '../../bin', 'piper', 'piper', 'piper.exe');
-    const jarvisModelPath = path.join(__dirname, '../../bin', 'piper', 'piper', 'models', 'jarvis.onnx');
-    const defaultModelPath = path.join(__dirname, '../../bin', 'piper', 'piper', 'models', 'en_GB-alan-medium.onnx');
+    const piperExe = unpackedPath(path.join(__dirname, '../../bin', 'piper', 'piper', 'piper.exe'));
+    const jarvisModelPath = unpackedPath(path.join(__dirname, '../../bin', 'piper', 'piper', 'models', 'jarvis.onnx'));
+    const defaultModelPath = unpackedPath(path.join(__dirname, '../../bin', 'piper', 'piper', 'models', 'en_GB-alan-medium.onnx'));
     const model = fs.existsSync(jarvisModelPath) ? jarvisModelPath : defaultModelPath;
     if (!fs.existsSync(piperExe) || !fs.existsSync(model)) return null;
   
@@ -376,7 +381,7 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
   
     whisperProcess = require('child_process').spawn(
       'python',
-      [path.join(__dirname, '../../skills', 'transcribe_server.py')],
+      [unpackedPath(path.join(__dirname, '../../skills', 'transcribe_server.py'))],
       { stdio: ['pipe', 'pipe', 'pipe'] }
     );
   
@@ -422,14 +427,21 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
     });
   }
   
-  initWhisper();
+  if (!testMode) initWhisper();
   
-  ipcMain.handle('transcribe-audio', async (_event, buffer) => {
+  ipcMain.handle('transcribe-audio', async (_event, payload) => {
     if (!whisperProcess) initWhisper();
+
+    let audioBuffer;
+    try {
+      audioBuffer = normalizeAudioPayload(payload);
+    } catch (e) {
+      return { success: false, error: 'Invalid audio payload: ' + e.message };
+    }
   
     const audioDir = path.join(app.getPath('userData'), 'audio-cache');
     try { fs.mkdirSync(audioDir, { recursive: true }); } catch (_) { }
-    const tempPath = path.join(audioDir, 'audio_' + Date.now() + '_' + process.pid + '.webm');
+    const tempPath = path.join(audioDir, 'audio_' + Date.now() + '_' + process.pid + '.wav');
     const resolvedPath = path.resolve(tempPath);
   
     if (!resolvedPath.startsWith(path.resolve(audioDir))) {
@@ -437,7 +449,7 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
     }
   
     try {
-      fs.writeFileSync(resolvedPath, buffer);
+      fs.writeFileSync(resolvedPath, audioBuffer);
     } catch (e) {
       return { success: false, error: 'Failed to write audio temp file: ' + e.message };
     }

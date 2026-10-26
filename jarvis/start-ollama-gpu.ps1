@@ -21,6 +21,14 @@ $env:CUDA_VISIBLE_DEVICES = "0"          # Use GPU 0 (RTX 4050)
 $env:OLLAMA_FLASH_ATTENTION = "1"        # Enable Flash Attention (faster on CUDA)
 $env:OLLAMA_KV_CACHE_TYPE = "q8_0"       # Quantize KV cache to save VRAM
 
+# Load the chat model during startup instead of waiting for the first chat
+# request. The probe used to set keep_alive = 0, which immediately unloaded the
+# model again and made every first message pay the cold-load cost. Keep the
+# model resident for the configured window; set JARVIS_MODEL_KEEP_ALIVE=0 to
+# restore the old unload-after-probe behavior.
+$preloadModel = if ($env:JARVIS_PRELOAD_MODEL) { $env:JARVIS_PRELOAD_MODEL } else { "llama3.1:8b" }
+$keepAlive = if ($env:JARVIS_MODEL_KEEP_ALIVE) { $env:JARVIS_MODEL_KEEP_ALIVE } else { "10m" }
+
 Write-Host "Environment configured for CUDA on RTX 4050." -ForegroundColor Green
 
 # Start Ollama Serve silently in the background
@@ -34,11 +42,17 @@ $proc = Get-Process -Name "ollama" -ErrorAction SilentlyContinue
 if ($proc) {
     Write-Host "Ollama started (PID: $($proc.Id))" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Testing GPU inference..." -ForegroundColor Yellow
+    Write-Host "Preloading $preloadModel and testing GPU inference..." -ForegroundColor Yellow
     try {
-        $probe = @{ model = "llama3.1:8b"; prompt = "reply only: CUDA OK"; stream = $false; keep_alive = 0; options = @{ num_ctx = 3072; num_predict = 8 } } | ConvertTo-Json -Depth 4
+        $probe = @{
+            model = $preloadModel
+            prompt = "reply only: CUDA OK"
+            stream = $false
+            keep_alive = $keepAlive
+            options = @{ num_ctx = 3072; num_predict = 8; num_gpu = 99; num_thread = 8 }
+        } | ConvertTo-Json -Depth 4
         Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/generate" -Method Post -Body $probe -ContentType "application/json" | Out-Null
-        Write-Host "CUDA inference OK." -ForegroundColor Green
+        Write-Host "CUDA inference OK; model is warm (keep_alive=$keepAlive)." -ForegroundColor Green
     } catch {
         Write-Host "CUDA probe failed: $($_.Exception.Message)" -ForegroundColor Red
     }

@@ -3,6 +3,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { validateArgs, AgentTaskStore, authorize } = require('../../agent-policy');
 const { filterSkillsByScriptHash } = require('../../core/skills/manifest');
+const { unpackedPath } = require('../asar-paths');
 
 module.exports = function registerKnowledgeController({ ipcMain, app, secAudit, secCheckRate }) {
   
@@ -53,7 +54,7 @@ module.exports = function registerKnowledgeController({ ipcMain, app, secAudit, 
   // SKILLS SYSTEM IPC
   // =======================================================================
   
-  const skillsDir = path.join(__dirname, '../../skills');
+  const skillsDir = unpackedPath(path.join(__dirname, '../../skills'));
   
   const SKILLS_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEADeCN7rDcMvMG0eMeWcEs6HGhpa24JSSDiycp4ne0YiE=

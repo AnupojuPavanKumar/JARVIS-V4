@@ -1,164 +1,7 @@
 "use strict";
 
-// ═══════════════════════════════════════════════════════════════════
-// JARVIS Semantic Memory — TF-IDF Cosine Similarity Engine
-// Pure JS, zero external deps, full localStorage + userData sync.
-// Public API: jarvisMemory.getRelevantContext(query) → string
-//             jarvisMemory.extractAndStore(text)      → Promise<void>
-//             jarvisMemory.memories                   → [{text, timestamp}]
-//             jarvisMemory.save()                     → void
-// ═══════════════════════════════════════════════════════════════════
-const jarvisMemory = (function () {
-  const LS_KEY = 'jarvis_memory';
-  const MAX_FACTS = 200;   // hard cap — oldest evicted first
-  const TOP_K = 4;     // memories returned per query
-  const MIN_SCORE = 0.50;  // cosine similarity threshold
-
-  // Pure JS Vector Cosine Similarity
-  function cosineSimilarity(vecA, vecB) {
-    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-    let dot = 0, normA = 0, normB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-      dot += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
-    }
-    if (normA === 0 || normB === 0) return 0;
-    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
-
-  // ── State ────────────────────────────────────────────────────────
-  const store = { memories: [] };
-
-  // ── Load from localStorage on boot ──────────────────────────────
-  try { store.memories = JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { }
-
-  // ── Public: save to localStorage ─────────────────────────────────
-  function save() {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(store.memories)); } catch { }
-  }
-
-  // ── Public: bulk-load from userData/memory.json (IPC bridge) ────
-  function loadFromIPC(facts) {
-    if (!Array.isArray(facts)) return;
-    // Merge: prefer IPC facts (persisted), skip duplicates by text
-    const existing = new Set(store.memories.map(m => m.text.trim().toLowerCase()));
-    for (const f of facts) {
-      const key = (f.text || '').trim().toLowerCase();
-      if (key && !existing.has(key)) {
-        store.memories.push({ text: f.text.trim(), timestamp: f.timestamp || Date.now(), embedding: f.embedding || null });
-        existing.add(key);
-      }
-    }
-    // Enforce cap
-    if (store.memories.length > MAX_FACTS) {
-      store.memories = store.memories.slice(-MAX_FACTS);
-    }
-    save();
-  }
-
-  // ── Public: getRelevantContext — Vector Semantic Retrieval ─────────
-  async function getRelevantContext(query) {
-    if (!query || !store.memories.length) return '';
-    
-    // 1. Get embedding for the user's query via IPC
-    let qEmbedding = null;
-    try {
-      if (window.jarvis && window.jarvis.embedText) {
-        qEmbedding = await window.jarvis.embedText(query);
-      }
-    } catch(e) { console.warn("Embedding failed", e); }
-    
-    if (!qEmbedding) return '';
-
-    // 2. Score all memories using cosine similarity
-    let backfilled = false;
-    for (const m of store.memories) {
-      if (!m.embedding) {
-        try { m.embedding = await window.jarvis.embedText(m.text); backfilled = !!m.embedding || backfilled; } catch { }
-      }
-    }
-    if (backfilled) save();
-    const scored = store.memories.map(m => ({ text: m.text, score: cosineSimilarity(qEmbedding, m.embedding) }));
-
-    const top = scored
-      .filter(s => s.score >= MIN_SCORE)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, TOP_K);
-
-    if (!top.length) return '';
-    return `[RELEVANT MEMORY]\n${top.map(s => `- ${s.text}`).join('\n')}\n[END MEMORY]`;
-  }
-
-  // ── Public: extractAndStore — enriched trigger phrases ───────────
-  const MEMORY_TRIGGERS = [
-    'my name is', "i'm called", 'call me',
-    'i like', 'i love', 'i hate', 'i prefer', 'i dislike',
-    'my favorite', 'my favourite', 'my goal', 'my job',
-    'i work at', 'i work for', 'i work on', 'i am a', "i'm a",
-    'i am an', "i'm an", 'i use', 'i always', 'i usually',
-    'remember that', 'remember this', 'note that',
-    'my birthday', 'my age', 'i live in', 'i am from',
-  ];
-
-  async function extractAndStore(text) {
-    const lower = text.toLowerCase();
-    const triggered = MEMORY_TRIGGERS.some(t => lower.includes(t));
-    if (!triggered) return;
-
-    const cleaned = text.replace(/remember that|remember this|note that/ig, '').trim();
-    if (!cleaned || cleaned.length < 5) return;
-
-    // Generate embedding for the new memory
-    let embedding = null;
-    try {
-      if (window.jarvis && window.jarvis.embedText) {
-        embedding = await window.jarvis.embedText(cleaned);
-      }
-    } catch(e) {}
-
-    if (!embedding) return; // don't store if embedding fails
-
-    // Dedup using cosine similarity > 0.90
-    const isDupe = store.memories.some(m => m.embedding && cosineSimilarity(embedding, m.embedding) > 0.90);
-    if (isDupe) return;
-
-    store.memories.push({ text: cleaned, timestamp: Date.now(), embedding });
-
-    // Enforce cap
-    if (store.memories.length > MAX_FACTS) store.memories = store.memories.slice(-MAX_FACTS);
-
-    save();
-
-    // Persist to userData/memory.json via IPC (fire-and-forget)
-    try {
-      if (window.jarvis && window.jarvis.memorySave) {
-        await window.jarvis.memorySave(store.memories);
-      }
-    } catch { }
-  }
-
-  // ── Bootstrap: pull persisted facts from userData on startup ─────
-  (async function bootstrap() {
-    try {
-      if (window.jarvis && window.jarvis.memoryLoad) {
-        const res = await window.jarvis.memoryLoad();
-        if (res && res.ok && Array.isArray(res.facts)) loadFromIPC(res.facts);
-      }
-    } catch { }
-  })();
-
-  return {
-    get memories() { return store.memories; },
-    save,
-    loadFromIPC,
-    getRelevantContext,
-    extractAndStore,
-  };
-})();
-
-// Expose for modules and data-action handlers that resolve through window.
-window.jarvisMemory = jarvisMemory;
+// Memory records are owned by the main-process MemoryStore. The renderer uses
+// modules/memoryClient.js for retrieval, writes, and the memory panel.
 
 (function () {
   const e = []; let t = null, n = null; async function s() { if (t) return t; try { if (window.jarvis && window.jarvis.getUserDataPath) { const r = await window.jarvis.getUserDataPath(); t = r ? r + "\\renderer_errors.log" : null } } catch { t = null } return t } function o() {
@@ -285,7 +128,7 @@ Approach:
 - Design for sustainable systems, not heroic sprints
 
 Format: Action plans, templates, and concrete next steps. Prioritize ruthlessly.`}
-}, state = { mode: "general", model: "llama3.2", endpoint: "http://127.0.0.1:11434", temperature: .7, contextWindow: 20, ttsEnabled: !0, speechRate: 1, speechPitch: 1, isStreaming: !1, isRecording: !1, ollamaOnline: !1, conversations: {}, currentSession: null, terminalHistory: [], termHistoryIdx: -1, autoScroll: !0, synth: window.speechSynthesis || null, recognition: null, waveformAnim: null, waveformActive: !1, dashCleanup: [], userDataPath: "", theme: "ironman", isFocused: !0 }; window.addEventListener("blur", () => { state.isFocused = !1, document.body.classList.add("paused-animations") }), window.addEventListener("focus", () => { state.isFocused = !0, document.body.classList.remove("paused-animations") }); let hudInterval = null, $messages, $dashboard, $input, $sendBtn, $voiceBtn, $ttsBtn, $hudTime, $hudDate, $activeModeIcon, $activeModeName, $ollamaBadge, $ollamaLabel, $ollamaDot, $activeModelLabel, $waveformCanvas, $waveformLabel, $pOllama, $pModel, $pPlatform, $pCpu, $pMem, $pSessions, $termOutput, $termInput; document.addEventListener("DOMContentLoaded", async () => { cacheDom(), window.loadSettings(), buildSidebar(), setupEventListeners(), startHUDClock(), initWaveform(), setMode(state.mode), setupVoice(); const [e] = await Promise.all([window.jarvis.getSystemInfo(), checkOllama(), updateSessionCount()]); state.systemSpecs = e, updateSystemPanel(e); try { const t = await window.jarvis.getUserDataPath(); state.userDataPath = t || "" } catch { state.userDataPath = "" } window.jarvis.onOllamaOnline && window.jarvis.onOllamaOnline(() => { checkOllama(), showToast("Ollama online  ready, sir.", "success") }) }); function cacheDom() { $messages = document.getElementById("chat-messages"), $dashboard = document.getElementById("dashboard-area"), $input = document.getElementById("user-input"), $sendBtn = document.getElementById("send-btn"), $voiceBtn = document.getElementById("voice-btn"), $ttsBtn = document.getElementById("tts-btn"), $hudTime = document.getElementById("hud-time"), $hudDate = document.getElementById("hud-date-str"), $activeModeIcon = document.getElementById("active-mode-icon"), $activeModeName = document.getElementById("active-mode-name"), $ollamaBadge = document.getElementById("ollama-status-badge"), $ollamaLabel = document.getElementById("ollama-label"), $ollamaDot = document.getElementById("ollama-dot"), $activeModelLabel = document.getElementById("active-model-label"), $waveformCanvas = document.getElementById("waveform-canvas"), $waveformLabel = document.getElementById("waveform-label"), $pOllama = document.getElementById("p-ollama"), $pModel = document.getElementById("p-model"), $pPlatform = document.getElementById("p-platform"), $pCpu = document.getElementById("p-cpu"), $pMem = document.getElementById("p-mem"), $pSessions = document.getElementById("p-sessions"), $termOutput = document.getElementById("terminal-output"), $termInput = document.getElementById("terminal-input") } function buildSidebar() {
+}, state = { mode: "general", model: "llama3.1:8b", endpoint: "http://127.0.0.1:11434", temperature: .7, contextWindow: 20, ttsEnabled: !0, speechRate: 1, speechPitch: 1, isStreaming: !1, isRecording: !1, ollamaOnline: !1, conversations: {}, currentSession: null, terminalHistory: [], termHistoryIdx: -1, autoScroll: !0, synth: window.speechSynthesis || null, recognition: null, waveformAnim: null, waveformActive: !1, dashCleanup: [], userDataPath: "", theme: "ironman", isFocused: !0 }; window.addEventListener("blur", () => { state.isFocused = !1, document.body.classList.add("paused-animations") }), window.addEventListener("focus", () => { state.isFocused = !0, document.body.classList.remove("paused-animations") }); let hudInterval = null, $messages, $dashboard, $input, $sendBtn, $voiceBtn, $ttsBtn, $hudTime, $hudDate, $activeModeIcon, $activeModeName, $ollamaBadge, $ollamaLabel, $ollamaDot, $activeModelLabel, $waveformCanvas, $waveformLabel, $pOllama, $pModel, $pPlatform, $pCpu, $pMem, $pSessions, $termOutput, $termInput; document.addEventListener("DOMContentLoaded", async () => { cacheDom(), window.loadSettings(), buildSidebar(), setupEventListeners(), startHUDClock(), initWaveform(), setMode(state.mode), setupVoice(); const [e] = await Promise.all([window.jarvis.getSystemInfo(), checkOllama(), updateSessionCount()]); state.systemSpecs = e, updateSystemPanel(e); try { const t = await window.jarvis.getUserDataPath(); state.userDataPath = t || "" } catch { state.userDataPath = "" } window.jarvis.onOllamaOnline && window.jarvis.onOllamaOnline(() => { checkOllama(), showToast("Ollama online  ready, sir.", "success") }) }); function cacheDom() { $messages = document.getElementById("chat-messages"), $dashboard = document.getElementById("dashboard-area"), $input = document.getElementById("user-input"), $sendBtn = document.getElementById("send-btn"), $voiceBtn = document.getElementById("voice-btn"), $ttsBtn = document.getElementById("tts-btn"), $hudTime = document.getElementById("hud-time"), $hudDate = document.getElementById("hud-date-str"), $activeModeIcon = document.getElementById("active-mode-icon"), $activeModeName = document.getElementById("active-mode-name"), $ollamaBadge = document.getElementById("ollama-status-badge"), $ollamaLabel = document.getElementById("ollama-label"), $ollamaDot = document.getElementById("ollama-dot"), $activeModelLabel = document.getElementById("active-model-label"), $waveformCanvas = document.getElementById("waveform-canvas"), $waveformLabel = document.getElementById("waveform-label"), $pOllama = document.getElementById("p-ollama"), $pModel = document.getElementById("p-model"), $pPlatform = document.getElementById("p-platform"), $pCpu = document.getElementById("p-cpu"), $pMem = document.getElementById("p-mem"), $pSessions = document.getElementById("p-sessions"), $termOutput = document.getElementById("terminal-output"), $termInput = document.getElementById("terminal-input") } function buildSidebar() {
   const e = document.getElementById("sidebar-modes"); Object.values(MODES).forEach(t => {
     const n = document.createElement("button"); n.className = "mode-btn", n.id = `mode-btn-${t.id}`, n.title = t.desc, n.setAttribute("aria-label", `Switch to ${t.name} mode`), n.innerHTML = `
       <span class="mode-btn-icon">${t.icon}</span>
@@ -306,7 +149,7 @@ window.toggleDeepWork = function() {
     }
   }
 };
-async function saveSession() { const e = state.conversations[state.mode]; if (!(!e || e.messages.length === 0)) { if (!e.title) { const t = e.messages.find(n => n.role === "user"); e.title = t ? t.content.slice(0, 60) : "Untitled" } await window.jarvis.saveHistory(e.id, e), await updateSessionCount() } } async function updateSessionCount() { const e = await window.jarvis.listHistory(); e.ok && $pSessions && ($pSessions.textContent = e.data.length) } async function checkOllama() {
+async function saveSession() { const e = state.conversations[state.mode]; if (!(!e || e.messages.length === 0)) { if (!e.title) { const t = e.messages.find(n => n.role === "user"); e.title = t ? t.content.slice(0, 60) : "Untitled" } await window.jarvis.saveHistory(e.id, e), await updateSessionCount(), window.MemoryPanel?.recordConversation && await window.MemoryPanel.recordConversation(e.messages, e.id) } } async function updateSessionCount() { const e = await window.jarvis.listHistory(); e.ok && $pSessions && ($pSessions.textContent = e.data.length) } async function checkOllama() {
   setOllamaStatus("checking");
   try {
     const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' });
@@ -335,13 +178,37 @@ window.cancelStream = cancelStream;
 async function streamOllama(e, { onChunk: t, onDone: n, onError: s }) {
   currentReqId = Date.now().toString() + Math.random().toString(36).substring(7);
   const reqId = currentReqId;
+  let settled = false;
+  let cleanupChunk;
+  let cleanupEnd;
+  let cleanupErr;
+  let resolveCompletion;
+  const completion = new Promise(resolve => { resolveCompletion = resolve; });
+
+  function finish(error) {
+    if (settled) return;
+    settled = true;
+    clearTimeout(tout);
+    if (typeof cleanupChunk === 'function') cleanupChunk();
+    if (typeof cleanupEnd === 'function') cleanupEnd();
+    if (typeof cleanupErr === 'function') cleanupErr();
+    if (currentReqId === reqId) currentReqId = null;
+    try {
+      if (error) s(error);
+      else n(full);
+    } finally {
+      resolveCompletion(error || null);
+    }
+  }
+
   const tout = setTimeout(() => {
     if (window.jarvis.ollamaStreamAbort) window.jarvis.ollamaStreamAbort(reqId);
+    finish(new Error('Ollama stream timed out'));
   }, 9e4);
   
   let full = "";
   
-  const cleanupChunk = window.jarvis.onOllamaStreamChunk && window.jarvis.onOllamaStreamChunk((r) => {
+  cleanupChunk = window.jarvis.onOllamaStreamChunk && window.jarvis.onOllamaStreamChunk((r) => {
     if (r.reqId !== reqId) return;
     const lines = r.chunk.split('\n');
     for (const line of lines) {
@@ -352,37 +219,23 @@ async function streamOllama(e, { onChunk: t, onDone: n, onError: s }) {
           full += f.message.content;
           t(f.message.content, full);
         }
-        if (f.done) {
-          clearTimeout(tout);
-          if (typeof cleanupChunk === 'function') cleanupChunk();
-          if (typeof cleanupEnd === 'function') cleanupEnd();
-          if (typeof cleanupErr === 'function') cleanupErr();
-          n(full);
-        }
+        if (f.done) finish();
       } catch (err) {}
     }
   });
 
-  const cleanupEnd = window.jarvis.onOllamaStreamEnd && window.jarvis.onOllamaStreamEnd((r) => {
+  cleanupEnd = window.jarvis.onOllamaStreamEnd && window.jarvis.onOllamaStreamEnd((r) => {
     if (r.reqId !== reqId) return;
-    clearTimeout(tout);
-    if (typeof cleanupChunk === 'function') cleanupChunk();
-    if (typeof cleanupEnd === 'function') cleanupEnd();
-    if (typeof cleanupErr === 'function') cleanupErr();
-    n(full);
+    finish();
   });
 
-  const cleanupErr = window.jarvis.onOllamaStreamError && window.jarvis.onOllamaStreamError((r) => {
+  cleanupErr = window.jarvis.onOllamaStreamError && window.jarvis.onOllamaStreamError((r) => {
     if (r.reqId !== reqId) return;
-    clearTimeout(tout);
-    if (typeof cleanupChunk === 'function') cleanupChunk();
-    if (typeof cleanupEnd === 'function') cleanupEnd();
-    if (typeof cleanupErr === 'function') cleanupErr();
-    s(new Error(r.error));
+    finish(new Error(r.error));
   });
 
   const queryContent = e[e.length - 1]?.content || "";
-  const memCtx = await jarvisMemory.getRelevantContext(queryContent);
+  const memCtx = await window.jarvisMemory.getRelevantContext(queryContent);
 
   if (e.length > 0 && e[0].role === "system") {
     let extra = '';
@@ -407,10 +260,12 @@ async function streamOllama(e, { onChunk: t, onDone: n, onError: s }) {
       model: state.model,
       messages: e,
       stream: !0,
-      keep_alive: "30m",
+      keep_alive: (window.jarvis && window.jarvis.modelKeepAlive) || "10m",
       options: { temperature: .3, top_p: .85, num_predict: 256, num_ctx: 3072, num_gpu: 99, num_thread: 8 }
     }
   });
+  // Resolve only when the stream finishes so callers keep the busy state and save the final reply.
+  return completion;
 } const _BUDGET_SYSTEM = 24e3, _BUDGET_WEB = 3e3, _BUDGET_PROJ_TOT = 8e3, _CONV_MAX = 100, _CONV_PRUNE = 20; function pruneConversationIfNeeded(e) { if (!e?.messages || e.messages.length <= _CONV_MAX) return; const t = e.messages.splice(0, _CONV_PRUNE); console.log(`[JARVIS] Pruned ${t.length} old messages (history was ${t.length + e.messages.length}).`) } function buildMessages() {
   const e = state.conversations[state.mode]; pruneConversationIfNeeded(e); let t = MODES[state.mode].prompt; 
   const _now = new Date();
@@ -420,10 +275,7 @@ CPU: ${state.systemSpecs.cpuModel || "Unknown CPU"} (${state.systemSpecs.cpuCoun
 GPU: NVIDIA GeForce RTX 4050 Laptop GPU (6GB VRAM, dedicated, CUDA acceleration active)
 RAM: ${(state.systemSpecs.totalMem / (1024 * 1024 * 1024)).toFixed(1)} GB Total
 Platform: ${state.systemSpecs.platform || "Unknown OS"} (${state.systemSpecs.arch || "Unknown"})
-[END HARDWARE SPECIFICATIONS]`), state.memory && state.memory.length && (t += `[USER MEMORY \u2014 always remember these facts about the user]
-${state.memory.map(s => `\u2022 ${s}`).join(`
-`)}
-[END MEMORY]`), state.projectContext?.files?.length) {
+[END HARDWARE SPECIFICATIONS]`), state.projectContext?.files?.length) {
     const { name: s, rootPath: o, files: i } = state.projectContext, a = i.map(l => `  ${l.relativePath}`).join(`
 `); let c = _BUDGET_PROJ_TOT; const r = i.filter(l => l.content && c > 0).map(l => {
       const p = l.content.slice(0, Math.min(6e3, c)); return c -= p.length, `### ${l.relativePath}
@@ -435,13 +287,12 @@ ${a}${r}
 [END PROJECT CONTEXT]`} state.webSearchContext && (t += state.webSearchContext.slice(0, _BUDGET_WEB), state.webSearchContext = null);
   if (!state.deepWorkEnabled) {
     t += `[DIRECTIVE]
-QUICK CHAT MODE: Keep your response extremely concise, conversational, and direct. Do NOT output step-by-step reasoning, thinking tags, or long explanations. Respond with maximum brevity. Keep answers to 1-2 short sentences. Optimize for quick voice output.`;
+QUICK CHAT MODE: Keep your response extremely concise, conversational, and direct. Do NOT output step-by-step reasoning, thinking tags, or long explanations. Respond with maximum brevity. Keep answers to 1-2 short sentences. Optimize for quick voice output. No tools are available in FAST mode. Do NOT emit tool calls, raw JSON tool requests, or [TOOL_RESULT] blocks. Never invent live or time-series measurements, CPU/RAM usage tables, process lists, or observation timestamps. If the request needs live system data or another tool, tell the user to enable DEEP WORK.`;
   } else {
     t += `[DIRECTIVE]
 Think step-by-step before answering. Prioritize logic, absolute accuracy, and concise code formatting. Do not hallucinate. Respond with maximum brevity. Keep answers to 1-2 short sentences unless the user explicitly asks for details. DO NOT use markdown lists or bullet points unless explicitly requested. Optimize for quick voice output.`;
   }
-  window.ToolExecutor && window.Skills && window.Skills._loaded && window.Skills._manifest.length && (t += `
-`+ window.ToolExecutor.buildToolManifestPrompt(window.Skills._manifest)), t.length > _BUDGET_SYSTEM && (t = t.slice(0, _BUDGET_SYSTEM) + `
+  t.length > _BUDGET_SYSTEM && (t = t.slice(0, _BUDGET_SYSTEM) + `
 [... context truncated ...]`); const n = [{ role: "system", content: t }]; if (e?.messages?.length) { const s = state.contextWindow > 0 ? Math.max(0, e.messages.length - state.contextWindow) : 0; e.messages.slice(s).forEach(o => n.push({ role: o.role, content: o.content })) } return n
 } function stripToolCalls(text) {
   if (!text) return "";
@@ -472,12 +323,37 @@ Think step-by-step before answering. Prioritize logic, absolute accuracy, and co
     }
   }
   return clean.trim();
-} async function sendMessage(e) {
+}
+// Capability detection only: FAST mode never parses or executes tool calls.
+function hasToolCallIntent(text) {
+  if (!text) return false;
+  return /<tool_call>|```json\s*\{[\s\S]*?"tool"\s*:|\{\s*"tool"\s*:/i.test(text);
+}
+// This is only a capability gate: live telemetry needs the durable DEEP WORK
+// agent, which owns the generic system_metrics tool. It is not a metric parser
+// and does not choose or format a metric.
+function isLiveTelemetryRequest(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  const duration = /\b(?:for|over|during|next)\s+\d+(?:\.\d+)?\s*(?:ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?)\b/i.test(value);
+  const action = /\b(monitor|observe|watch|track|measure|sample|record)\b/i.test(value);
+  const telemetry = /\b(usage|load|utilization|utilisation|temperature|vram|dedicated\s+memory|gpu|cpu|ram|memory|disk|network)\b/i.test(value);
+  const liveQualifier = /\b(current|currently|right now|live|real[- ]?time|now)\b/i.test(value);
+  return (duration && (action || telemetry)) || (action && telemetry) || (liveQualifier && telemetry && /\b(usage|load|utilization|utilisation|temperature)\b/i.test(value));
+}
+async function sendMessage(e) {
   const isString = typeof e === "string";
   const text = (isString ? e : $input.value).trim();
   if (!text || state.isStreaming) return;
-  
-  if (!state.ollamaOnline && !await checkOllama()) {
+  const deepWorkToolsAvailable = Boolean(
+    state.deepWorkEnabled
+    && window.AgentClient
+    && typeof window.AgentClient.enabled === "function"
+    && window.AgentClient.enabled()
+  );
+  const monitorHandoff = isLiveTelemetryRequest(text) && !deepWorkToolsAvailable;
+
+  if (!monitorHandoff && !state.ollamaOnline && !await checkOllama()) {
     showToast("Ollama is offline. Start Ollama and try again.", "error");
     return;
   }
@@ -499,6 +375,22 @@ Think step-by-step before answering. Prioritize logic, absolute accuracy, and co
   if (state.ttsEnabled && state.synth) state.synth.cancel();
 
   try {
+    if (monitorHandoff) {
+      const c = createStreamingMessage();
+      const message = "Real system monitoring requires the **DEEP WORK** durable agent. Enable DEEP WORK and ask again; I won't fabricate live measurements in FAST mode.";
+      finalizeStreamingEl(c, message);
+      state.conversations[state.mode].messages.push({
+        role: "assistant",
+        content: message,
+        timestamp: new Date().toISOString(),
+      });
+      showToast("Live monitoring requires DEEP WORK", "info");
+      if (state.ttsEnabled) {
+        const spoken = extractPlainText(message);
+        if (spoken) speakText(spoken, true);
+      }
+      return;
+    }
     if (state.deepWorkEnabled && window.AgentClient && window.AgentClient.enabled()) {
       const webSearchContext = state.webSearchContext;
       state.webSearchContext = null;
@@ -506,24 +398,39 @@ Think step-by-step before answering. Prioritize logic, absolute accuracy, and co
         model: state.model,
         mode: state.mode,
         systemSpecs: state.systemSpecs,
-        memory: state.memory,
         projectContext: state.projectContext,
         webSearchContext,
         maxSteps: 15,
       });
-    } else if (state.deepWorkEnabled && window.TaskController) {
-      const task = await window.TaskController.createTask(text);
-      await window.TaskController.executeTask();
+    } else if (state.deepWorkEnabled) {
+      const c = createStreamingMessage();
+      const message = "DEEP WORK is enabled, but the durable agent is unavailable. Set JARVIS_DURABLE_AGENT=1 and restart JARVIS.";
+      finalizeStreamingEl(c, message);
+      state.conversations[state.mode].messages.push({ role: "assistant", content: message, timestamp: new Date().toISOString() });
+      showToast("Durable agent unavailable", "error");
+      if (state.ttsEnabled) {
+        const spoken = extractPlainText(message);
+        if (spoken) speakText(spoken, true);
+      }
+      return;
     } else {
       const c = createStreamingMessage();
       const payload = typeof buildMessages === "function" ? buildMessages() : state.conversations[state.mode].messages;
       await streamOllama(payload, {
         onChunk: (r, l) => updateStreamingEl(c, l),
         onDone: r => {
-          finalizeStreamingEl(c, r);
-          state.conversations[state.mode].messages.push({ role: "assistant", content: r, timestamp: new Date().toISOString() });
+          const toolIntent = hasToolCallIntent(r);
+          const fabricatedResult = /^\s*\[TOOL_RESULT/im.test(r);
+          const shown = (toolIntent || fabricatedResult)
+            ? 'Tool use requires **DEEP WORK** mode. Toggle DEEP WORK and ask again.'
+            : stripToolCalls(r);
+          if (toolIntent || fabricatedResult) {
+            showToast('Tool use requires DEEP WORK mode.', 'info');
+          }
+          finalizeStreamingEl(c, shown);
+          state.conversations[state.mode].messages.push({ role: "assistant", content: shown, timestamp: new Date().toISOString() });
           if (state.ttsEnabled) {
-            const l = extractPlainText(r);
+            const l = extractPlainText(shown);
             if (l) speakText(l, !0);
           }
         },
@@ -577,7 +484,7 @@ function dashSend(e) { (window.sendMessageWithSearch || sendMessage)(e) } window
       </div>
       <div class="msg-bubble"><div class="msg-content">${renderMarkdown(e)}</div></div>
     </div>
-  `, s.querySelectorAll("pre code").forEach(o => highlightBlock(o)), $messages.appendChild(s), scrollToBottom(false, true)
+  `, enhanceCodeBlocks(s), $messages.appendChild(s), scrollToBottom(false, true)
 } function createStreamingMessage() {
   const e = MODES[state.mode], t = document.createElement("div"); return t.className = "message jarvis-message streaming", t.innerHTML = `
     <div class="msg-avatar">${e.icon}</div>
@@ -594,12 +501,11 @@ function dashSend(e) { (window.sendMessageWithSearch || sendMessage)(e) } window
       </div>
     </div>
   `, $messages.appendChild(t), scrollToBottom(), t
-} let streamThrottleTimer = null, pendingStreamText = null, pendingStreamEl = null; function parseThinkingTags(e) { let t = e.replace(/&lt;think&gt;/g, '<think>').replace(/&lt;\/think&gt;/g, '</think>'); return t.includes("<think>") && !t.includes("</think>") ? (t = t.replace("<think>", '<details class="think-box" open><summary>Thinking Process</summary><div class="think-content">'), t += "</div></details>") : t = t.replace(/<think>([\s\S]*?)<\/think>/g, (n, s) => `<details class="think-box"><summary>Thinking Process</summary><div class="think-content">${s}</div></details>`), t } function updateStreamingEl(e, t) { pendingStreamEl = e, pendingStreamText = t, streamThrottleTimer || (streamThrottleTimer = requestAnimationFrame(() => { if (pendingStreamEl) { const n = pendingStreamEl.querySelector(".msg-content"); n && (n.innerHTML = `<span>${parseThinkingTags(escHtml(pendingStreamText))}</span><span class="stream-cursor"></span>`, scrollToBottom()) } streamThrottleTimer = null })) } function finalizeStreamingEl(e, t) { streamThrottleTimer && (cancelAnimationFrame(streamThrottleTimer), streamThrottleTimer = null), e.classList.remove("streaming"); const n = e.querySelector(".msg-content"); if (n) { if (n.innerHTML = renderMarkdown(parseThinkingTags(t)), n.querySelectorAll("pre code").forEach(s => highlightBlock(s)), state.lastWebResults?.length) { const s = e.querySelector(".msg-body"); if (s) { const o = renderSourceChips?.(state.lastWebResults); if (o) { const i = document.createElement("div"); i.innerHTML = o, i.firstElementChild && s.appendChild(i.firstElementChild) } } state.lastWebResults = null } scrollToBottom(!0) } } if (typeof marked < "u") {
+} let streamThrottleTimer = null, pendingStreamText = null, pendingStreamEl = null; function parseThinkingTags(e) { let t = e.replace(/&lt;think&gt;/g, '<think>').replace(/&lt;\/think&gt;/g, '</think>'); return t.includes("<think>") && !t.includes("</think>") ? (t = t.replace("<think>", '<details class="think-box" open><summary>Thinking Process</summary><div class="think-content">'), t += "</div></details>") : t = t.replace(/<think>([\s\S]*?)<\/think>/g, (n, s) => `<details class="think-box"><summary>Thinking Process</summary><div class="think-content">${s}</div></details>`), t } function updateStreamingEl(e, t) { pendingStreamEl = e, pendingStreamText = t, streamThrottleTimer || (streamThrottleTimer = requestAnimationFrame(() => { if (pendingStreamEl) { const n = pendingStreamEl.querySelector(".msg-content"); n && (n.innerHTML = `<span>${parseThinkingTags(escHtml(pendingStreamText))}</span><span class="stream-cursor"></span>`, scrollToBottom()) } streamThrottleTimer = null })) } function finalizeStreamingEl(e, t) { streamThrottleTimer && (cancelAnimationFrame(streamThrottleTimer), streamThrottleTimer = null), e.classList.remove("streaming"); const n = e.querySelector(".msg-content"); if (n) { if (n.innerHTML = renderMarkdown(parseThinkingTags(t)), enhanceCodeBlocks(n), state.lastWebResults?.length) { const s = e.querySelector(".msg-body"); if (s) { const o = renderSourceChips?.(state.lastWebResults); if (o) { const i = document.createElement("div"); i.innerHTML = o, i.firstElementChild && s.appendChild(i.firstElementChild) } } state.lastWebResults = null } scrollToBottom(!0) } } if (typeof marked < "u") {
   const e = new marked.Renderer; e.code = (t, n) => {
     const s = n || "plaintext"; let o = ""; try { typeof hljs < "u" && hljs.getLanguage(s) ? o = hljs.highlight(t, { language: s }).value : typeof hljs < "u" ? o = hljs.highlightAuto(t).value : o = escHtml(t) } catch { o = escHtml(t) } return `<div class="code-block">
       <div class="code-header">
         <span class="code-lang">${escHtml(s.toUpperCase())}</span>
-        <button class="code-copy-btn" onclick="copyCode(this, ${JSON.stringify(t)})">COPY</button>
       </div>
       <pre><code class="hljs language-${escHtml(s)}">${o}</code></pre>
     </div>`}, marked.use({ renderer: e, breaks: !0, gfm: !0 }) }
@@ -611,12 +517,31 @@ function dashSend(e) { (window.sendMessageWithSearch || sendMessage)(e) } window
     } catch {
       html = `<p>${escHtml(e)}</p>`;
     }
-    // XSS protection via DOMPurify
-    return typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(html) : html;
-  } function highlightBlock(e) { if (typeof hljs < "u" && !e.classList.contains("hljs")) try { hljs.highlightElement(e) } catch { } } function copyCode(e, t) { navigator.clipboard.writeText(t).then(() => { e.textContent = "COPIED!", e.classList.add("copied"), setTimeout(() => { e.textContent = "COPY", e.classList.remove("copied") }, 2e3) }).catch(() => showToast("Failed to copy.", "error")) } window.copyCode = copyCode; function setupVoice() { const e = window.SpeechRecognition || window.webkitSpeechRecognition; if (!e) { $voiceBtn && ($voiceBtn.title = "Voice not supported", $voiceBtn.style.opacity = "0.4"); return } state.recognition = new e, state.recognition.continuous = !1, state.recognition.interimResults = !0, state.recognition.lang = "en-US", state.recognition.onresult = t => { let n = "", s = ""; for (const o of t.results) o.isFinal ? s += o[0].transcript : n += o[0].transcript; $input.value = s || n, autoResizeInput() }, state.recognition.onend = () => { state.isRecording = !1, $voiceBtn.classList.remove("recording"), $input.value.trim() && sendMessage() }, state.recognition.onerror = t => { state.isRecording = !1, $voiceBtn.classList.remove("recording"), t.error !== "no-speech" && showToast(`Voice error: ${t.error}`, "error") } } function toggleVoice() { if (!state.recognition) { showToast("Voice input not available.", "error"); return } state.isRecording ? (state.recognition.stop(), state.isRecording = !1, $voiceBtn.classList.remove("recording")) : (state.recognition.start(), state.isRecording = !0, $voiceBtn.classList.add("recording"), showToast("Listening\u2026", "info")) } let _audioQueue = []; let _isPlaying = false; let _currentAudio = null; 
+    // Untrusted model/web text passes the explicit tag/attribute/URI policy and
+    // loses every data-action / event / form attribute before entering the DOM.
+    if (typeof JarvisSafeHtml !== "undefined" && typeof JarvisSafeHtml.sanitize === "function") {
+      return JarvisSafeHtml.sanitize(html);
+    }
+    return `<p>${escHtml(html)}</p>`;
+  } function highlightBlock(e) { if (typeof hljs < "u" && !e.classList.contains("hljs")) try { hljs.highlightElement(e) } catch { } } function enhanceCodeBlocks(rootElement) { if (!rootElement) return; rootElement.querySelectorAll(".code-block").forEach(block => { const header = block.querySelector(".code-header"), code = block.querySelector("pre code"); if (!header || !code) return; const existing = header.querySelector("[data-action='copyCodeBlock']"); if (!existing) { const button = document.createElement("button"); button.type = "button"; button.className = "code-copy-btn"; button.textContent = "COPY"; button.setAttribute("data-action", "copyCodeBlock"); button.setAttribute("data-trusted-control", "1"); header.appendChild(button) } highlightBlock(code) }) } function copyCodeBlock(event) { const button = event && event.currentTarget; const block = button && button.closest(".code-block"); const code = block && block.querySelector("pre code"); if (!button || !code) return; navigator.clipboard.writeText(code.textContent || "").then(() => { button.textContent = "COPIED!"; button.classList.add("copied"); setTimeout(() => { button.textContent = "COPY"; button.classList.remove("copied") }, 2e3) }).catch(() => showToast("Failed to copy.", "error")) } function setupVoice() { const e = window.SpeechRecognition || window.webkitSpeechRecognition; if (!e) { $voiceBtn && ($voiceBtn.title = "Voice not supported", $voiceBtn.style.opacity = "0.4"); return } state.recognition = new e, state.recognition.continuous = !1, state.recognition.interimResults = !0, state.recognition.lang = "en-US", state.recognition.onresult = t => { let n = "", s = ""; for (const o of t.results) o.isFinal ? s += o[0].transcript : n += o[0].transcript; $input.value = s || n, autoResizeInput() }, state.recognition.onend = () => { state.isRecording = !1, $voiceBtn.classList.remove("recording"), $input.value.trim() && sendMessage() }, state.recognition.onerror = t => { state.isRecording = !1, $voiceBtn.classList.remove("recording"), t.error !== "no-speech" && showToast(`Voice error: ${t.error}`, "error") } } function toggleVoice() { if (!state.recognition) { showToast("Voice input not available.", "error"); return } state.isRecording ? (state.recognition.stop(), state.isRecording = !1, $voiceBtn.classList.remove("recording")) : (state.recognition.start(), state.isRecording = !0, $voiceBtn.classList.add("recording"), showToast("Listening\u2026", "info")) } let _audioQueue = []; let _isPlaying = false; let _currentAudio = null;
+// Phase 5A barge-in boundary. The local voice module listens for these events
+// and calls this function when the user starts speaking over JARVIS.
+window.stopSpeaking = function stopSpeaking() {
+  _audioQueue = [];
+  if (_currentAudio) {
+    try { _currentAudio.pause(); } catch (_) { }
+    _currentAudio = null;
+  }
+  _isPlaying = false;
+  if (state.synth) {
+    try { state.synth.cancel(); } catch (_) { }
+  }
+  try { setWaveformActive(false); } catch (_) { }
+  window.dispatchEvent(new CustomEvent('jarvis:speech-stop'));
+};
 window.audioCtx = null; window.audioAnalyser = null; window.audioDataArray = null;
 async function playNextAudio() { 
-  if (_audioQueue.length === 0) { _isPlaying = false; setWaveformActive(false); return; } 
+  if (_audioQueue.length === 0) { _isPlaying = false; setWaveformActive(false); window.dispatchEvent(new CustomEvent('jarvis:speech-stop')); return; } 
   _isPlaying = true; 
   setWaveformActive(true);
   if (!window.audioCtx) {
@@ -637,9 +562,9 @@ async function playNextAudio() {
     window.audioAnalyser.connect(window.audioCtx.destination);
   } catch(e) {}
 
-  _currentAudio.onended = () => { _currentAudio = null; playNextAudio(); }; 
-  try { await _currentAudio.play(); } catch (e) { console.error("Audio play failed:", e); _currentAudio = null; playNextAudio(); } 
-} async function speakText(e, t = !0) { if (!state.ttsEnabled || !e.trim()) return; if (t) { _audioQueue = []; if (_currentAudio) { _currentAudio.pause(); _currentAudio = null; } _isPlaying = false; } try { const res = await window.jarvis.piperTTS(e); if (res && res.ok && res.data) { _audioQueue.push(res.data); if (!_isPlaying) playNextAudio(); } else { console.error("Piper TTS error:", res?.error); } } catch (err) { console.error("Piper IPC error:", err); } } function extractPlainText(e) { return e.replace(/```[\s\S]*?```/g, "code block").replace(/`[^`]+`/g, "").replace(/#{1,6}\s/g, "").replace(/[*_~]{1,3}/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/^\s*[-*+]\s/gm, "").replace(/^\s*\d+\.\s/gm, "").replace(/\|[^|\n]+/g, "").replace(/\n{2,}/g, ". ").replace(/\n/g, " ").replace(/\s{2,}/g, " ").trim() } function toggleTTS() { state.ttsEnabled = !state.ttsEnabled, $ttsBtn && ($ttsBtn.classList.toggle("active", state.ttsEnabled), $ttsBtn.setAttribute("aria-pressed", state.ttsEnabled)), !state.ttsEnabled && state.synth && state.synth.cancel(), showToast(`Voice output ${state.ttsEnabled ? "enabled" : "disabled"}.`, "info") } function startHUDClock() { const e = () => { const t = new Date; $hudTime && ($hudTime.textContent = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`), $hudDate && ($hudDate.textContent = t.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase()) }; e(), setInterval(e, 1e3) } function initWaveform() {
+  _currentAudio.onended = () => { _currentAudio = null; window.dispatchEvent(new CustomEvent('jarvis:speech-stop')); playNextAudio(); }; 
+  try { await _currentAudio.play(); window.dispatchEvent(new CustomEvent('jarvis:speech-start')); } catch (e) { console.error("Audio play failed:", e); _currentAudio = null; playNextAudio(); } 
+} async function speakText(e, t = !0) { if (!state.ttsEnabled || !e.trim()) return; if (t) { window.stopSpeaking(); } try { const res = await window.jarvis.piperTTS(e); if (res && res.ok && res.data) { _audioQueue.push(res.data); if (!_isPlaying) playNextAudio(); } else { console.error("Piper TTS error:", res?.error); } } catch (err) { console.error("Piper IPC error:", err); } } function extractPlainText(e) { return e.replace(/```[\s\S]*?```/g, "code block").replace(/`[^`]+`/g, "").replace(/#{1,6}\s/g, "").replace(/[*_~]{1,3}/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/^\s*[-*+]\s/gm, "").replace(/^\s*\d+\.\s/gm, "").replace(/\|[^|\n]+/g, "").replace(/\n{2,}/g, ". ").replace(/\n/g, " ").replace(/\s{2,}/g, " ").trim() } function toggleTTS() { state.ttsEnabled = !state.ttsEnabled, $ttsBtn && ($ttsBtn.classList.toggle("active", state.ttsEnabled), $ttsBtn.setAttribute("aria-pressed", state.ttsEnabled)), !state.ttsEnabled && window.stopSpeaking(), showToast(`Voice output ${state.ttsEnabled ? "enabled" : "disabled"}.`, "info") } function startHUDClock() { const e = () => { const t = new Date; $hudTime && ($hudTime.textContent = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`), $hudDate && ($hudDate.textContent = t.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase()) }; e(), setInterval(e, 1e3) } function initWaveform() {
     if (!$waveformCanvas) return;
     const e = $waveformCanvas.getContext("2d"), t = $waveformCanvas.width, n = $waveformCanvas.height;
     let lastTime = 0, drewStandby = false;
@@ -698,7 +623,7 @@ async function playNextAudio() {
     const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' });
     if (!res || !res.ok) throw new Error("Ollama offline");
     const data = JSON.parse(res.body);
-    const models = data.models || [];
+    const models = (data.models || []).filter(model => !isEmbeddingModel(model.name));
     renderModelsList(models);
 
     if (models.length === 1) {
@@ -709,8 +634,14 @@ async function playNextAudio() {
       }
     } else if (models.length > 1) {
       if (!state.model || !models.find(m => m.name === state.model)) {
-        showToast("Multiple models found. Please select one.", "info");
-        setTimeout(() => openModal('models-modal'), 1000);
+        const detected = pickChatModel(models);
+        if (detected) {
+          selectModel(detected);
+          showToast(`Auto-selected chat model: ${detected}`, "success");
+        } else {
+          showToast("Multiple models found. Please select one.", "info");
+          setTimeout(() => openModal('models-modal'), 1000);
+        }
       }
     } else {
       let rec = 'llama3.1:8b';
@@ -732,7 +663,7 @@ async function playNextAudio() {
         <div><div class="model-info-name">${escHtml(s.name)}</div><div class="model-info-meta">${escHtml(o)} \xB7 ${escHtml(s.details?.parameter_size || "")} \xB7 ${escHtml(s.details?.quantization_level || "")}</div></div>
         <button class="model-select-btn ${s.name === state.model ? "active-model" : ""}" data-action="selectModelAndClose" data-arg="${escHtml(s.name)}">${s.name === state.model ? "\u2713 ACTIVE" : "SELECT"}</button>`, n.appendChild(i)
     }) : n.innerHTML = '<div class="panel-placeholder">No models found.<br>Run: <code>ollama pull llama3.1:8b</code></div>')
-  } function selectModel(e) { quickSwitchModel(e), closeModal("models-modal") } window.selectModel = selectModel; async function openHistory() { const e = await window.jarvis.listHistory(), t = document.getElementById("history-list"); if (t.innerHTML = "", !e.ok || !e.data.length) { t.innerHTML = '<div class="panel-placeholder" style="padding:24px">No saved sessions yet, sir.</div>', openModal("history-modal"); return } e.data.forEach(s => { const o = MODES[s.mode] || MODES.general, i = new Date(s.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }), a = document.createElement("div"); a.className = "history-item", a.innerHTML = '<div class="hist-mode-icon" style="color:' + o.color + ";background:" + o.color + "22;border:1px solid " + o.color + '44">' + o.icon + '</div><div class="hist-info"><div class="hist-title">' + escHtml(s.title || "Untitled Session") + '</div><div class="hist-meta">' + o.name + " \xB7 " + s.messageCount + " messages \xB7 " + i + `</div></div><button class="hist-delete-btn" onclick="deleteSession('` + s.id + `', event)" title="Delete">\u2715</button>`, a.onclick = () => loadSession(s), t.appendChild(a) }); const n = document.getElementById("history-search"); n && (n.value = "", n.oninput = () => { const s = n.value.toLowerCase(); t.querySelectorAll(".history-item").forEach(o => { o.style.display = o.textContent.toLowerCase().includes(s) ? "" : "none" }) }), openModal("history-modal") } async function loadSession(e) { const t = await window.jarvis.loadHistory(e.id); if (!t.ok || !t.data) { showToast("Could not load session.", "error"); return } const n = t.data; state.conversations[n.mode] = n, closeModal("history-modal"), setMode(n.mode), renderConversation(n.mode), showToast("Session restored: " + (n.title || "Untitled"), "success") } async function deleteSession(e, t) { t.stopPropagation(), await window.jarvis.deleteHistory(e), showToast("Session deleted.", "info"), openHistory(), await updateSessionCount() } window.deleteSession = deleteSession; async function exportChat() {
+  } function selectModel(e) { quickSwitchModel(e), closeModal("models-modal") } window.selectModel = selectModel; async function openHistory() { const e = await window.jarvis.listHistory(), t = document.getElementById("history-list"); if (t.innerHTML = "", !e.ok || !e.data.length) { t.innerHTML = '<div class="panel-placeholder" style="padding:24px">No saved sessions yet, sir.</div>', openModal("history-modal"); return } e.data.forEach(s => { const o = MODES[s.mode] || MODES.general, i = new Date(s.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }), a = document.createElement("div"); a.className = "history-item", a.innerHTML = '<div class="hist-mode-icon" style="color:' + o.color + ";background:" + o.color + "22;border:1px solid " + o.color + '44">' + o.icon + '</div><div class="hist-info"><div class="hist-title">' + escHtml(s.title || "Untitled Session") + '</div><div class="hist-meta">' + o.name + " \xB7 " + s.messageCount + " messages \xB7 " + i + `</div></div><button class="hist-delete-btn" data-action="deleteSession" data-arg="${escHtml(String(s.id))}" title="Delete">\u2715</button>`, a.onclick = () => loadSession(s), t.appendChild(a) }); const n = document.getElementById("history-search"); n && (n.value = "", n.oninput = () => { const s = n.value.toLowerCase(); t.querySelectorAll(".history-item").forEach(o => { o.style.display = o.textContent.toLowerCase().includes(s) ? "" : "none" }) }), openModal("history-modal") } async function loadSession(e) { const t = await window.jarvis.loadHistory(e.id); if (!t.ok || !t.data) { showToast("Could not load session.", "error"); return } const n = t.data; state.conversations[n.mode] = n, closeModal("history-modal"), setMode(n.mode), renderConversation(n.mode), showToast("Session restored: " + (n.title || "Untitled"), "success") } async function deleteSession(e, t) { t.stopPropagation(), await window.jarvis.deleteHistory(e), showToast("Session deleted.", "info"), openHistory(), await updateSessionCount() } window.deleteSession = deleteSession; async function exportChat() {
     const e = state.conversations[state.mode]; if (!e || !e.messages.length) { showToast("Nothing to export.", "error"); return } let n = `# JARVIS Session Export
 
 **Mode:** `+ MODES[state.mode].name + `  
@@ -745,8 +676,22 @@ async function playNextAudio() {
 `+ o.content + `
 ---
 `}); const s = await window.jarvis.saveDialog("jarvis-" + state.mode + "-" + Date.now() + ".md", n); s.ok && showToast("Exported to " + s.filePath, "success")
-  } const THEMES = { ironman: { name: "IRON MAN", attr: "", label: "Iron Man HUD \u2014 Default" }, phantom: { name: "PHANTOM", attr: "phantom", label: "Phantom \u2014 Blood Red" }, matrix: { name: "MATRIX", attr: "matrix", label: "Matrix \u2014 Terminal Green" }, nova: { name: "NOVA", attr: "nova", label: "Nova \u2014 Deep Space Purple" }, ghost: { name: "GHOST", attr: "ghost", label: "Ghost \u2014 Light Military" } }; function applyTheme(e) { const t = THEMES[e] || THEMES.ironman; state.theme = e, t.attr ? document.documentElement.setAttribute("data-theme", t.attr) : document.documentElement.removeAttribute("data-theme"), document.querySelectorAll(".theme-swatch").forEach(n => { const s = n.id.replace("cfg-theme-", "").replace("ham-theme-", ""); n.classList.toggle("active", s === e) }); try { const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.theme = e, localStorage.setItem("jarvis-settings", JSON.stringify(n)) } catch { } showToast("Theme: " + t.label, "info") } window.applyTheme = applyTheme; function loadSettings() { try { const e = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); state.endpoint = e.endpoint || "http://127.0.0.1:11434"; state.temperature = e.temperature ?? .7; state.ttsEnabled = e.ttsEnabled ?? !0; state.speechRate = e.speechRate ?? 1; state.speechPitch = e.speechPitch ?? 1; state.contextWindow = e.contextWindow ?? 20; if (e.model) { state.model = e.model; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); } else { state.model = "llama3.1:8b"; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); setTimeout(async () => { try { /* CSP FIX: replaced direct fetch() with IPC-proxied ollamaFetch */ const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' }); if (res && res.ok) { const data = JSON.parse(res.body); if (data.models && data.models.length > 0) { const detected = data.models[0].name; state.model = detected; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.model = detected; localStorage.setItem("jarvis-settings", JSON.stringify(n)); showToast("Auto-detected LLM: " + detected, "success"); } } } catch (err) { } }, 1500); } if (e.theme && THEMES[e.theme]) { const t = THEMES[e.theme]; state.theme = e.theme; t.attr ? document.documentElement.setAttribute("data-theme", t.attr) : document.documentElement.removeAttribute("data-theme"); requestAnimationFrame(() => { document.querySelectorAll(".theme-swatch").forEach(n => { const s = n.id.replace("cfg-theme-", "").replace("ham-theme-", ""); n.classList.toggle("active", s === e.theme) }) }) } } catch { } } window.loadSettings = loadSettings; function saveSettings() { state.model = document.getElementById("cfg-model").value, state.endpoint = document.getElementById("cfg-endpoint").value.trim() || "http://127.0.0.1:11434", state.temperature = parseFloat(document.getElementById("cfg-temperature").value), state.ttsEnabled = document.getElementById("cfg-tts").checked, state.speechRate = parseFloat(document.getElementById("cfg-speech-rate").value), state.speechPitch = parseFloat(document.getElementById("cfg-speech-pitch").value), state.contextWindow = parseInt(document.getElementById("cfg-context").value), localStorage.setItem("jarvis-settings", JSON.stringify({ model: state.model, endpoint: state.endpoint, temperature: state.temperature, ttsEnabled: state.ttsEnabled, speechRate: state.speechRate, speechPitch: state.speechPitch, contextWindow: state.contextWindow, theme: state.theme || "ironman" })), $activeModelLabel && ($activeModelLabel.textContent = state.model), $pModel && ($pModel.textContent = state.model), $ttsBtn && $ttsBtn.classList.toggle("active", state.ttsEnabled), document.querySelectorAll(".model-preset-btn").forEach(e => { const t = e.getAttribute("onclick")?.match(/'([^']+)'/); e.classList.toggle("active", t && t[1] === state.model) }), closeModal("settings-modal"), showToast("Configuration saved, sir.", "success"), checkOllama() } window.saveSettings = saveSettings; function quickSwitchModel(e) { if (!e) return; state.model = e; try { const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.model = e, localStorage.setItem("jarvis-settings", JSON.stringify(n)) } catch { } $activeModelLabel && ($activeModelLabel.textContent = e), $pModel && ($pModel.textContent = e); const t = document.getElementById("cfg-model"); if (t) { let n = !1; for (const s of t.options) if (s.value === e) { t.value = e, n = !0; break } if (!n) { const s = document.createElement("option"); s.value = e, s.textContent = e + "  (custom)", t.appendChild(s), t.value = e } } document.querySelectorAll(".model-preset-btn").forEach(n => { const s = n.getAttribute("onclick")?.match(/'([^']+)'/); n.classList.toggle("active", s && s[1] === e) }), showToast(`\u25C8 Model \u2192 ${e}`, "success") } window.quickSwitchModel = quickSwitchModel; function resetSettings() { localStorage.removeItem("jarvis-settings"), window.loadSettings(), populateSettingsModal(), showToast("Defaults restored.", "info") } window.resetSettings = resetSettings; function populateSettingsModal() { const e = document.getElementById("cfg-model"); if (e) { let t = !1; for (const n of e.options) if (n.value === state.model) { t = !0; break } if (!t) { const n = document.createElement("option"); n.value = state.model, n.textContent = state.model + "  (custom)", e.appendChild(n) } e.value = state.model } document.getElementById("cfg-endpoint").value = state.endpoint, document.getElementById("cfg-temperature").value = state.temperature, document.getElementById("cfg-temp-val").textContent = state.temperature.toFixed(2), document.getElementById("cfg-tts").checked = state.ttsEnabled, document.getElementById("cfg-speech-rate").value = state.speechRate, document.getElementById("cfg-rate-val").textContent = `${state.speechRate.toFixed(1)}\xD7`, document.getElementById("cfg-speech-pitch").value = state.speechPitch, document.getElementById("cfg-pitch-val").textContent = state.speechPitch.toFixed(1), document.getElementById("cfg-context").value = state.contextWindow, document.getElementById("cfg-temperature").oninput = t => { document.getElementById("cfg-temp-val").textContent = parseFloat(t.target.value).toFixed(2) }, document.getElementById("cfg-speech-rate").oninput = t => { document.getElementById("cfg-rate-val").textContent = `${parseFloat(t.target.value).toFixed(1)}\xD7` }, document.getElementById("cfg-speech-pitch").oninput = t => { document.getElementById("cfg-pitch-val").textContent = parseFloat(t.target.value).toFixed(1) }, document.querySelectorAll(".model-preset-btn").forEach(t => { const n = t.getAttribute("onclick")?.match(/'([^']+)'/); t.classList.toggle("active", n && n[1] === state.model) }) } function openTerminalModal() { $termOutput.children.length || (termPrint("info", "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557"), termPrint("info", "\u2551       JARVIS TERMINAL v2.0           \u2551"), termPrint("info", "\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D"), termPrint("info", "Full system access. Type any command.")), openModal("terminal-modal"), setTimeout(() => $termInput.focus(), 100) } function termPrint(e, t) { const n = document.createElement("div"); n.className = `term-line ${e}`, n.textContent = t, $termOutput.appendChild(n), $termOutput.scrollTop = $termOutput.scrollHeight } async function runTerminalCommand(e) {
-    if (!e.trim()) return; let t = "safe"; try { t = (await window.jarvis.secClassifyCmd(e))?.verdict || "safe" } catch { } if (t === "blocked") { termPrint("cmd", `JARVIS $> ${e}`), termPrint("err", "\u26D4 BLOCKED \u2014 Command rejected by JARVIS Security Policy."), termPrint("err", "This command is classified as destructive or dangerous."), termPrint("info", "[exit BLOCKED]"), showToast("\u26D4 Command blocked by security policy.", "error"); return } if (t === "warn" && !await showTerminalConfirm(e)) { termPrint("info", "[\u26A0 Command cancelled by user]"); return } state.terminalHistory.unshift(e), state.termHistoryIdx = -1, termPrint("cmd", `JARVIS $> ${e}${t === "warn" ? " \u26A0 CAUTION" : ""}`); const s = await window.jarvis.runCommand(e); if (s.error && (s.error.includes("\u26D4") || s.error.includes("BLOCKED"))) { termPrint("err", s.error), termPrint("info", "[exit BLOCKED]"); return } s.stdout && s.stdout.split(`
+  } const THEMES = { ironman: { name: "IRON MAN", attr: "", label: "Iron Man HUD \u2014 Default" }, phantom: { name: "PHANTOM", attr: "phantom", label: "Phantom \u2014 Blood Red" }, matrix: { name: "MATRIX", attr: "matrix", label: "Matrix \u2014 Terminal Green" }, nova: { name: "NOVA", attr: "nova", label: "Nova \u2014 Deep Space Purple" }, ghost: { name: "GHOST", attr: "ghost", label: "Ghost \u2014 Light Military" } }; function applyTheme(e) { const t = THEMES[e] || THEMES.ironman; state.theme = e, t.attr ? document.documentElement.setAttribute("data-theme", t.attr) : document.documentElement.removeAttribute("data-theme"), document.querySelectorAll(".theme-swatch").forEach(n => { const s = n.id.replace("cfg-theme-", "").replace("ham-theme-", ""); n.classList.toggle("active", s === e) }); try { const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.theme = e, localStorage.setItem("jarvis-settings", JSON.stringify(n)) } catch { } showToast("Theme: " + t.label, "info") } window.applyTheme = applyTheme; // Ollama lists embedding models beside chat models; never auto-select one for /api/chat.
+function isEmbeddingModel(name) {
+  const value = String(name || '');
+  return /(?:^|[/:_-])(?:all-minilm|minilm|nomic-embed|mxbai-embed|snowflake-arctic-embed|bge|e5|gte|jina-embed|text-embedding)(?:[/:_-]|$)/i.test(value);
+}
+function pickChatModel(models) {
+  const names = (Array.isArray(models) ? models : [])
+    .map(model => typeof model === 'string' ? model : model && model.name)
+    .filter(Boolean);
+  return names.find(name => /^llama3\.1:8b(?:$|[-:])/i.test(name))
+    || names.find(name => !isEmbeddingModel(name))
+    || null;
+}
+window.JarvisModelSelection = { isEmbeddingModel, pickChatModel };
+function loadSettings() { try { const e = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); state.endpoint = e.endpoint || "http://127.0.0.1:11434"; state.temperature = e.temperature ?? .7; state.ttsEnabled = e.ttsEnabled ?? !0; state.speechRate = e.speechRate ?? 1; state.speechPitch = e.speechPitch ?? 1; state.contextWindow = e.contextWindow ?? 20; if (e.model && !isEmbeddingModel(e.model)) { state.model = e.model; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); } else { state.model = "llama3.1:8b"; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); setTimeout(async () => { try { /* CSP FIX: replaced direct fetch() with IPC-proxied ollamaFetch */ const res = await window.jarvis.ollamaFetch({ path: '/api/tags', method: 'GET' }); if (res && res.ok) { const data = JSON.parse(res.body); if (data.models && data.models.length > 0) { const detected = pickChatModel(data.models); if (detected) { state.model = detected; $activeModelLabel && ($activeModelLabel.textContent = state.model); $pModel && ($pModel.textContent = state.model); const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.model = detected; localStorage.setItem("jarvis-settings", JSON.stringify(n)); showToast("Auto-detected LLM: " + detected, "success"); } } } } catch (err) { } }, 1500); } if (e.theme && THEMES[e.theme]) { const t = THEMES[e.theme]; state.theme = e.theme; t.attr ? document.documentElement.setAttribute("data-theme", t.attr) : document.documentElement.removeAttribute("data-theme"); requestAnimationFrame(() => { document.querySelectorAll(".theme-swatch").forEach(n => { const s = n.id.replace("cfg-theme-", "").replace("ham-theme-", ""); n.classList.toggle("active", s === e.theme) }) }) } } catch { } } window.loadSettings = loadSettings; function saveSettings() { state.model = document.getElementById("cfg-model").value, state.endpoint = document.getElementById("cfg-endpoint").value.trim() || "http://127.0.0.1:11434", state.temperature = parseFloat(document.getElementById("cfg-temperature").value), state.ttsEnabled = document.getElementById("cfg-tts").checked, state.speechRate = parseFloat(document.getElementById("cfg-speech-rate").value), state.speechPitch = parseFloat(document.getElementById("cfg-speech-pitch").value), state.contextWindow = parseInt(document.getElementById("cfg-context").value), localStorage.setItem("jarvis-settings", JSON.stringify({ model: state.model, endpoint: state.endpoint, temperature: state.temperature, ttsEnabled: state.ttsEnabled, speechRate: state.speechRate, speechPitch: state.speechPitch, contextWindow: state.contextWindow, theme: state.theme || "ironman" })), $activeModelLabel && ($activeModelLabel.textContent = state.model), $pModel && ($pModel.textContent = state.model), $ttsBtn && $ttsBtn.classList.toggle("active", state.ttsEnabled), document.querySelectorAll(".model-preset-btn").forEach(e => { const t = e.getAttribute("onclick")?.match(/'([^']+)'/); e.classList.toggle("active", t && t[1] === state.model) }), closeModal("settings-modal"), showToast("Configuration saved, sir.", "success"), checkOllama() } window.saveSettings = saveSettings; function quickSwitchModel(e) { if (!e) return; if (isEmbeddingModel(e)) { showToast("Embedding models cannot be used for chat.", "error"); return; } state.model = e; try { const n = JSON.parse(localStorage.getItem("jarvis-settings") || "{}"); n.model = e, localStorage.setItem("jarvis-settings", JSON.stringify(n)) } catch { } $activeModelLabel && ($activeModelLabel.textContent = e), $pModel && ($pModel.textContent = e); const t = document.getElementById("cfg-model"); if (t) { let n = !1; for (const s of t.options) if (s.value === e) { t.value = e, n = !0; break } if (!n) { const s = document.createElement("option"); s.value = e, s.textContent = e + "  (custom)", t.appendChild(s), t.value = e } } document.querySelectorAll(".model-preset-btn").forEach(n => { const s = n.getAttribute("onclick")?.match(/'([^']+)'/); n.classList.toggle("active", s && s[1] === e) }), showToast(`\u25C8 Model \u2192 ${e}`, "success") } window.quickSwitchModel = quickSwitchModel; function resetSettings() { localStorage.removeItem("jarvis-settings"), window.loadSettings(), populateSettingsModal(), showToast("Defaults restored.", "info") } window.resetSettings = resetSettings; function populateSettingsModal() { const e = document.getElementById("cfg-model"); if (e) { let t = !1; for (const n of e.options) if (n.value === state.model) { t = !0; break } if (!t) { const n = document.createElement("option"); n.value = state.model, n.textContent = state.model + "  (custom)", e.appendChild(n) } e.value = state.model } document.getElementById("cfg-endpoint").value = state.endpoint, document.getElementById("cfg-temperature").value = state.temperature, document.getElementById("cfg-temp-val").textContent = state.temperature.toFixed(2), document.getElementById("cfg-tts").checked = state.ttsEnabled, document.getElementById("cfg-speech-rate").value = state.speechRate, document.getElementById("cfg-rate-val").textContent = `${state.speechRate.toFixed(1)}\xD7`, document.getElementById("cfg-speech-pitch").value = state.speechPitch, document.getElementById("cfg-pitch-val").textContent = state.speechPitch.toFixed(1), document.getElementById("cfg-context").value = state.contextWindow, document.getElementById("cfg-temperature").oninput = t => { document.getElementById("cfg-temp-val").textContent = parseFloat(t.target.value).toFixed(2) }, document.getElementById("cfg-speech-rate").oninput = t => { document.getElementById("cfg-rate-val").textContent = `${parseFloat(t.target.value).toFixed(1)}\xD7` }, document.getElementById("cfg-speech-pitch").oninput = t => { document.getElementById("cfg-pitch-val").textContent = parseFloat(t.target.value).toFixed(1) }, document.querySelectorAll(".model-preset-btn").forEach(t => { const n = t.getAttribute("onclick")?.match(/'([^']+)'/); t.classList.toggle("active", n && n[1] === state.model) }) } function openTerminalModal() { $termOutput.children.length || (termPrint("info", "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557"), termPrint("info", "\u2551       JARVIS TERMINAL v2.0           \u2551"), termPrint("info", "\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D"), termPrint("info", "Full system access. Type any command.")), openModal("terminal-modal"), setTimeout(() => $termInput.focus(), 100) } function termPrint(e, t) { const n = document.createElement("div"); n.className = `term-line ${e}`, n.textContent = t, $termOutput.appendChild(n), $termOutput.scrollTop = $termOutput.scrollHeight } async function runTerminalCommand(e) {
+    if (!e.trim()) return; let t = "safe"; try { t = (await window.jarvis.secClassifyCmd(e))?.verdict || "safe" } catch { } if (t === "blocked") { termPrint("cmd", `JARVIS $> ${e}`), termPrint("err", "\u26D4 BLOCKED \u2014 Command rejected by JARVIS Security Policy."), termPrint("err", "This command is classified as destructive or dangerous."), termPrint("info", "[exit BLOCKED]"), showToast("\u26D4 Command blocked by security policy.", "error"); return } state.terminalHistory.unshift(e), state.termHistoryIdx = -1, termPrint("cmd", `JARVIS $> ${e}`); const s = await window.jarvis.runCommand(e); if (s.error && (s.error.includes("\u26D4") || s.error.includes("BLOCKED"))) { termPrint("err", s.error), termPrint("info", "[exit BLOCKED]"); return } s.stdout && s.stdout.split(`
 `).forEach(o => o && termPrint("out", o)), s.stderr && s.stderr.split(`
 `).forEach(o => o && termPrint("err", o)), s.error && !s.stdout && !s.stderr && termPrint("err", s.error), termPrint("info", `[exit ${s.exitCode ?? 0}]`)
   } function showTerminalConfirm(e) { return new Promise(t => { let n = document.getElementById("term-confirm-overlay"); n && n.remove(), n = document.createElement("div"), n.id = "term-confirm-overlay", n.className = "term-confirm-overlay", n.innerHTML = '<div class="term-confirm-box"><div class="term-confirm-icon">\u26A0</div><div class="term-confirm-title">CAUTION \u2014 SENSITIVE COMMAND</div><div class="term-confirm-desc">This command is classified as potentially dangerous. Review it carefully before proceeding.</div><pre class="term-confirm-cmd">' + escHtml(e) + '</pre><div class="term-confirm-btns"><button class="term-confirm-cancel" id="term-confirm-cancel">\u2715 Cancel</button><button class="term-confirm-run" id="term-confirm-run">\u25B6 Execute Anyway</button></div></div>', document.body.appendChild(n), document.getElementById("term-confirm-run").onclick = () => { n.remove(), t(!0) }, document.getElementById("term-confirm-cancel").onclick = () => { n.remove(), t(!1) } }) } function clearTerminal() { $termOutput.innerHTML = "" } window.clearTerminal = clearTerminal; async function quickAction(e) { switch (e) { case "new": newSession(); break; case "clear": clearCurrentChat(); break; case "export": exportChat(); break; case "terminal": openTerminalModal(); break; case "models": await refreshModels(), openModal("models-modal"); break } } window.quickAction = quickAction; function clearCurrentChat() { state.conversations[state.mode] = newConversation(state.mode), clearMessages(), showToast("Chat cleared, sir.", "info") } function newSession() { clearCurrentChat(), showToast("New session started.", "info") } 
@@ -787,7 +732,7 @@ async function playNextAudio() {
         <div class="tech-label-sub">SYSTEMS INTEGRATED</div>
       </div>
     </div>
-    <div class="dash-gen-chips-new">${["What can you help me with today?", "Explain quantum computing simply", "Give me 5 productivity tips", "Help me write a professional email", "Debug my code \u2014 I'll paste it", "Generate a Python automation script", "Research the latest in AI", "Build a React component for me"].map(n => `<button class="welcome-chip" data-action="injectPrompt" data-arg-json="${JSON.stringify(n)}">${escHtml(n)}</button>`).join("")}</div>
+    <div class="dash-gen-chips-new">${["What can you help me with today?", "Explain quantum computing simply", "Give me 5 productivity tips", "Help me write a professional email", "Debug my code \u2014 I'll paste it", "Generate a Python automation script", "Research the latest in AI", "Build a React component for me"].map(n => `<button class="welcome-chip" data-action="injectPrompt" data-arg-json="${escHtml(JSON.stringify(n))}">${escHtml(n)}</button>`).join("")}</div>
   </div>`} function initOrbCanvas() {
     const e = document.getElementById("jarvis-orb-canvas");
     if (!e) return null;
@@ -855,7 +800,6 @@ async function playNextAudio() {
           <option value="powershell">PowerShell</option>
           <option value="bash">Bash / Shell</option>
         </select>
-        <button class="dash-btn dash-btn-green" data-action="runDashCode">\u25B6 RUN</button>
         <button class="dash-btn" data-action="clearDashCode">\u2298 CLEAR</button>
         <div class="dash-sep"></div>
         <button class="dash-btn dash-btn-cyan" data-action="reviewWithJarvis">\u2B21 REVIEW</button>
@@ -882,25 +826,13 @@ print(now.strftime("%A, %d %B %Y  %H:%M:%S"))`}, {
         label: "JSON Parse", code: `import json
 data = '{"name": "JARVIS", "version": 2}'
 obj = json.loads(data)
-print(obj["name"], obj["version"])`}].map(n => `<button class="template-chip" data-action="loadCodeTemplate" data-arg-json="${JSON.stringify(n.code)}">${n.label}</button>`).join("")}
+print(obj["name"], obj["version"])`}].map(n => `<button class="template-chip" data-action="loadCodeTemplate" data-arg-json="${escHtml(JSON.stringify(n.code))}">${n.label}</button>`).join("")}
     </div>
-    <div class="dash-code-workspace">
+    <div class="dash-code-workspace" style="grid-template-columns:1fr">
       <div class="code-editor-panel">
         <div class="code-panel-hdr"><span>EDITOR</span></div>
         <textarea id="dash-code-editor" class="dash-code-textarea" spellcheck="false" autocomplete="off"
-          placeholder="# Write your code here&#10;# RUN executes it \xB7 REVIEW sends to JARVIS \xB7 EXPLAIN for analysis"></textarea>
-      </div>
-      <div class="code-output-panel">
-        <div class="code-panel-hdr">
-          <span>OUTPUT</span>
-          <div class="phdr-actions">
-            <button class="micro-btn" data-action="clearCodeOutput">CLEAR</button>
-            <button class="micro-btn" data-action="sendOutputToJarvis">ASK JARVIS</button>
-          </div>
-        </div>
-        <div id="dash-code-output" class="dash-code-output">
-          <div class="output-placeholder"><span class="op-icon">\u25B6</span><span>Run your code to see output here</span></div>
-        </div>
+          placeholder="# Write your code here&#10;# REVIEW, EXPLAIN, or OPTIMIZE sends it to JARVIS"></textarea>
       </div>
     </div>
   </div>`} function initCodeDash() {
@@ -908,7 +840,7 @@ print(obj["name"], obj["version"])`}].map(n => `<button class="template-chip" da
       const t = e.value.split(`
 `).length, n = e.value.length, s = document.getElementById("code-line-count"); s && (s.textContent = `${t} line${t !== 1 ? "s" : ""} \xB7 ${n} chars`)
     }), e.addEventListener("keydown", t => { if (t.key === "Tab") { t.preventDefault(); const n = e.selectionStart, s = e.selectionEnd; e.value = e.value.substring(0, n) + "    " + e.value.substring(s), e.selectionStart = e.selectionEnd = n + 4 } }), []) : []
-  } window.runDashCode = async function () { const e = document.getElementById("dash-code-editor"), t = document.getElementById("dash-code-output"); if (!e || !t) return; const n = e.value.trim(); if (!n) { showToast("Write some code first.", "error"); return } const s = document.getElementById("code-lang")?.value || "python"; t.innerHTML = '<div class="output-running"><span class="spin-icon">\u25C8</span> Executing\u2026</div>'; const o = await window.jarvis.runCodeSafe(s, n); if (!document.getElementById("dash-code-output")) return; if (!o.ok && o.error?.includes("Rate limit")) { t.innerHTML = `<div class="out-exit err-exit">\u26D4 ${escHtml(o.error)}</div>`, showToast(o.error, "error"); return } let i = ""; o.stdout && (i += `<div class="out-section"><div class="out-lbl stdout-lbl">STDOUT</div><pre class="out-pre">${escHtml(o.stdout.trimEnd())}</pre></div>`), o.stderr && (i += `<div class="out-section"><div class="out-lbl stderr-lbl">STDERR</div><pre class="out-pre err-pre">${escHtml(o.stderr.trimEnd())}</pre></div>`), !o.stdout && !o.stderr && (i = '<div class="out-ok">\u2713 Executed with no output (exit 0)</div>'); const a = o.time != null ? ` \xB7 ${(o.time / 1e3).toFixed(2)}s` : ""; i += `<div class="out-exit ${(o.exitCode ?? 0) === 0 ? "" : "err-exit"}">Exit ${o.exitCode ?? 0}${a} \xB7 ${new Date().toLocaleTimeString()}</div>`, t.innerHTML = i }, window.clearDashCode = function () { const e = document.getElementById("dash-code-editor"); e && (e.value = "", e.dispatchEvent(new Event("input")), e.focus()), window.clearCodeOutput() }, window.clearCodeOutput = function () { const e = document.getElementById("dash-code-output"); e && (e.innerHTML = '<div class="output-placeholder"><span class="op-icon">\u25B6</span><span>Run your code to see output here</span></div>') }, window.reviewWithJarvis = function () {
+  } window.clearDashCode = function () { const e = document.getElementById("dash-code-editor"); e && (e.value = "", e.dispatchEvent(new Event("input")), e.focus()) }, window.reviewWithJarvis = function () {
     const e = document.getElementById("dash-code-editor")?.value?.trim(); if (!e) { showToast("Write code first.", "error"); return } const t = document.getElementById("code-lang")?.value || "code"; dashSend(`Review this ${t} code for correctness, best practices, security, and improvements:\`\`\`${t}
 ${e}
 \`\`\``)
@@ -918,14 +850,6 @@ ${e}
 \`\`\``)
   }, window.optimizeWithJarvis = function () {
     const e = document.getElementById("dash-code-editor")?.value?.trim(); if (!e) { showToast("Write code first.", "error"); return } const t = document.getElementById("code-lang")?.value || "code"; dashSend(`Optimize this ${t} code for performance, readability, and efficiency. Show the improved version:\`\`\`${t}
-${e}
-\`\`\``)
-  }, window.sendOutputToJarvis = function () {
-    const e = document.getElementById("dash-code-output")?.innerText?.trim(), t = document.getElementById("dash-code-editor")?.value?.trim(); if (!e || e.includes("Run your code")) { showToast("Run code first.", "error"); return } dashSend(`I ran this code and got this output. Help me understand it or suggest next steps:Code:
-\`\`\`
-${t}
-\`\`\`Output:
-\`\`\`
 ${e}
 \`\`\``)
   }, window.loadCodeTemplate = function (e) { const t = document.getElementById("dash-code-editor"); t && (t.value = e, t.dispatchEvent(new Event("input")), t.focus()) }, window.onCodeLangChange = function () {
@@ -999,10 +923,10 @@ ${e}
     <div class="research-topbar">
       <span class="res-icon">\u25CE</span>
       <input type="text" id="research-topic" class="research-topic-input" placeholder="Enter research topic, question, or domain\u2026"
-        data-keydown-enter="window.startResearch">
-      <button class="dash-btn dash-btn-purple" data-action="window.startResearch">\u2B21 RESEARCH</button>
-      <button class="dash-btn" data-action="window.generateOutline">\u2261 OUTLINE</button>
-      <button class="dash-btn" data-action="window.findSources">\u238B SOURCES</button>
+        data-keydown-enter="startResearch">
+      <button class="dash-btn dash-btn-purple" data-action="startResearch">\u2B21 RESEARCH</button>
+      <button class="dash-btn" data-action="generateOutline">\u2261 OUTLINE</button>
+      <button class="dash-btn" data-action="findSources">\u238B SOURCES</button>
     </div>
     <div class="research-workspace">
       <div class="research-notes-panel">
@@ -1010,8 +934,8 @@ ${e}
           <span>\u{1F4C4} NOTES</span>
           <div class="phdr-actions">
             <span id="notes-saved" class="save-ind">\u2014</span>
-            <button class="micro-btn" data-action="window.clearResearchNotes">CLEAR</button>
-            <button class="micro-btn" data-action="window.sendNotesToJarvis">ASK JARVIS</button>
+            <button class="micro-btn" data-action="clearResearchNotes">CLEAR</button>
+            <button class="micro-btn" data-action="sendNotesToJarvis">ASK JARVIS</button>
           </div>
         </div>
         <textarea id="research-notes" class="research-notes-ta"
@@ -1022,25 +946,25 @@ ${e}
           <div class="res-phdr">
             <span>\u2261 OUTLINE</span>
             <div class="phdr-actions">
-              <button class="micro-btn" data-action="window.addOutlineItem">+ ADD</button>
-              <button class="micro-btn" data-action="window.clearOutline">CLEAR</button>
+              <button class="micro-btn" data-action="addOutlineItem">+ ADD</button>
+              <button class="micro-btn" data-action="clearOutline">CLEAR</button>
             </div>
           </div>
           <div id="research-outline" class="res-list">${o}</div>
           <input type="text" id="outline-input" class="list-input" placeholder="Add outline item\u2026"
-            data-keydown-enter="window.addOutlineItem">
+            data-keydown-enter="addOutlineItem">
         </div>
         <div class="research-questions-panel">
           <div class="res-phdr">
             <span>? KEY QUESTIONS</span>
             <div class="phdr-actions">
-              <button class="micro-btn" data-action="window.generateQuestions">\u2B21 GENERATE</button>
-              <button class="micro-btn" data-action="window.clearQuestions">CLEAR</button>
+              <button class="micro-btn" data-action="generateQuestions">\u2B21 GENERATE</button>
+              <button class="micro-btn" data-action="clearQuestions">CLEAR</button>
             </div>
           </div>
           <div id="research-questions" class="res-list">${s}</div>
           <input type="text" id="question-input" class="list-input" placeholder="Add research question\u2026"
-            data-keydown-enter="window.addQuestion">
+            data-keydown-enter="addQuestion">
         </div>
       </div>
     </div>
@@ -1053,52 +977,34 @@ ${e}
           <option value="python">Python</option>
           <option value="bash">Bash</option>
         </select>
-        <button class="dash-btn dash-btn-yellow" data-action="runAutoScript">\u25B6 EXECUTE</button>
         <button class="dash-btn" data-action="clearAutoScript">\u2298 CLEAR</button>
         <button class="dash-btn dash-btn-cyan" data-action="generateAutoScript">\u2B21 GENERATE</button>
         <button class="dash-btn" data-action="scheduleScript">\u23F1 SCHEDULE</button>
       </div>
       <textarea id="auto-editor" class="auto-editor-ta" spellcheck="false"
-        placeholder="# Write or generate your automation script here\u2026&#10;# Pick a quick template below or ask JARVIS to generate one"></textarea>
+        placeholder="# Write or generate your automation script here\u2026&#10;# Pick a quick template below or ask JARVIS to generate one. JARVIS never executes this script."></textarea>
       <div class="auto-tpls">
         <span class="tpl-label">QUICK SCRIPTS:</span>${[{ name: "System Info", lang: "powershell", code: "Get-ComputerInfo | Select-Object CsName, OsTotalVisibleMemorySize, OsArchitecture | Format-List" }, { name: "Disk Usage", lang: "powershell", code: 'Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N="Used(GB)";E={[math]::Round($_.Used/1GB,2)}}, @{N="Free(GB)";E={[math]::Round($_.Free/1GB,2)}} | Format-Table' }, { name: "Top Processes", lang: "powershell", code: 'Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 Name, CPU, @{N="Mem(MB)";E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table' }, { name: "Network Info", lang: "powershell", code: 'Get-NetIPAddress | Where-Object {$_.AddressFamily -eq "IPv4"} | Select-Object IPAddress, InterfaceAlias | Format-Table' }, { name: "Ping Google", lang: "powershell", code: "Test-Connection -ComputerName google.com -Count 4 | Select-Object Address, ResponseTime | Format-Table" }, { name: "Running Services", lang: "powershell", code: 'Get-Service | Where-Object {$_.Status -eq "Running"} | Select-Object Name, Status, DisplayName | Sort-Object Name | Format-Table' }, {
         name: "File Backup", lang: "powershell", code: `$src = "$env:USERPROFILE\\Documents"
 $dst = "$env:USERPROFILE\\Desktop\\Backup_$(Get-Date -Format "yyyyMMdd_HHmmss")"
 Copy-Item $src $dst -Recurse -Force
-Write-Host "Backup complete: $dst"`}, { name: "Event Log Errors", lang: "powershell", code: "Get-EventLog -LogName System -Newest 5 -EntryType Error | Select-Object TimeGenerated, Source, Message | Format-List" }].map(n => `<button class="auto-tpl-chip" data-action="loadAutoTemplate" data-arg1="${n.lang}" data-arg2="${n.code}">${n.name}</button>`).join("")}
+Write-Host "Backup complete: $dst"`}, { name: "Event Log Errors", lang: "powershell", code: "Get-EventLog -LogName System -Newest 5 -EntryType Error | Select-Object TimeGenerated, Source, Message | Format-List" }].map(n => `<button class="auto-tpl-chip" data-action="loadAutoTemplate" data-arg1="${escHtml(n.lang)}" data-arg2="${escHtml(n.code)}">${n.name}</button>`).join("")}
       </div>
     </div>
-    <div class="auto-right">
-      <div class="auto-out-hdr">
-        <span>\u2328 EXECUTION OUTPUT</span>
-        <div class="phdr-actions">
-          <span id="auto-exec-time" class="meta-txt">\u2014</span>
-          <button class="micro-btn" data-action="clearAutoOutput">CLEAR</button>
-          <button class="micro-btn" data-action="analyzeAutoOutput">ANALYZE</button>
-        </div>
-      </div>
-      <div id="auto-output" class="auto-output">
-        <div class="output-placeholder"><span class="op-icon">\u2699</span><span>Execute a script to see output</span></div>
-      </div>
-    </div>
-  </div>`} function initAutoDash() { return [] } window.loadAutoTemplate = function (e, t) { const n = document.getElementById("auto-lang"); n && (n.value = e); const s = document.getElementById("auto-editor"); s && (s.value = t, s.focus()) }, window.runAutoScript = async function () { const e = document.getElementById("auto-editor")?.value?.trim(), t = document.getElementById("auto-output"); if (!e || !t) return; t.innerHTML = '<div class="output-running"><span class="spin-icon">\u2699</span> Running automation\u2026</div>'; const n = document.getElementById("auto-lang")?.value || "powershell", s = await window.jarvis.runCodeSafe(n, e), o = s.time != null ? (s.time / 1e3).toFixed(2) : "?", i = document.getElementById("auto-exec-time"); if (i && (i.textContent = `${o}s`), !s.ok && s.error?.includes("Rate limit")) { const c = document.getElementById("auto-output"); c && (c.innerHTML = `<div class="out-exit err-exit">\u26D4 ${escHtml(s.error)}</div>`), showToast(s.error, "error"); return } if (!document.getElementById("auto-output")) return; let a = ""; s.stdout && (a += `<pre class="auto-out-pre">${escHtml(s.stdout.trimEnd())}</pre>`), s.stderr && (a += `<pre class="auto-out-pre auto-err">${escHtml(s.stderr.trimEnd())}</pre>`), !s.stdout && !s.stderr && (a = '<div class="out-ok">\u2713 Script executed successfully with no output</div>'), a += `<div class="out-exit ${(s.exitCode ?? 0) === 0 ? "" : "err-exit"}">Exit ${s.exitCode ?? 0} \xB7 ${o}s \xB7 ${new Date().toLocaleTimeString()}</div>`, document.getElementById("auto-output").innerHTML = a }, window.clearAutoScript = function () { const e = document.getElementById("auto-editor"); e && (e.value = "") }, window.clearAutoOutput = function () { const e = document.getElementById("auto-output"); e && (e.innerHTML = '<div class="output-placeholder"><span class="op-icon">\u2699</span><span>Execute a script to see output</span></div>') }, window.generateAutoScript = function () { const e = document.getElementById("auto-lang")?.value || "PowerShell"; dashSend(`Write a ${e} automation script. Suggest 5 useful automations and let me choose, or describe what you need.`) }, window.scheduleScript = function () {
+  </div>`} function initAutoDash() { return [] } window.loadAutoTemplate = function (e, t) { const n = document.getElementById("auto-lang"); n && (n.value = e); const s = document.getElementById("auto-editor"); s && (s.value = t, s.focus()) }, window.clearAutoScript = function () { const e = document.getElementById("auto-editor"); e && (e.value = "") }, window.generateAutoScript = function () { const e = document.getElementById("auto-lang")?.value || "PowerShell"; dashSend(`Write a ${e} automation script. Suggest 5 useful automations and let me choose, or describe what you need.`) }, window.scheduleScript = function () {
     const e = document.getElementById("auto-editor")?.value?.trim(); if (!e) { showToast("Write a script first.", "error"); return } dashSend(`How do I schedule this script to run automatically on Windows using Task Scheduler?\`\`\`powershell
-${e}
-\`\`\``)
-  }, window.analyzeAutoOutput = function () {
-    const e = document.getElementById("auto-output")?.innerText?.trim(); if (!e || e.includes("Execute a script")) { showToast("Run a script first.", "error"); return } dashSend(`Analyze this script output and explain what it means:\`\`\`
 ${e}
 \`\`\``)
   }; function dashBusiness() {
     const e = [{ label: "REVENUE TARGET", value: "$0", progress: 0, color: "#00ff88" }, { label: "GROWTH RATE", value: "0%", progress: 0, color: "#00d4ff" }, { label: "TASKS DONE", value: "0/0", progress: 0, color: "#b86bff" }, { label: "TEAM HEALTH", value: "\u2014", progress: 0, color: "#f59e0b" }], t = JSON.parse(localStorage.getItem("jarvis-kpis") || "null") || e, n = JSON.parse(localStorage.getItem("jarvis-goals") || "[]"), s = JSON.parse(localStorage.getItem("jarvis-swot") || '{"s":"","w":"","o":"","t":""}'), o = t.map((a, c) => `
     <div class="kpi-card" style="--kc:${a.color}">
       <div class="kpi-label">${a.label}</div>
-      <div class="kpi-value" contenteditable="true" id="kpi-val-${c}" onblur="saveKPI(${c},this.innerText)">${escHtml(a.value)}</div>
+      <div class="kpi-value" contenteditable="true" id="kpi-val-${c}" data-blur="saveKPI" data-idx="${c}">${escHtml(a.value)}</div>
       <div class="kpi-bar-track"><div class="kpi-bar-fill" id="kpi-bar-${c}" style="width:${a.progress}%;background:${a.color}"></div></div>
-      <input type="range" class="kpi-slider" min="0" max="100" value="${a.progress}" oninput="updateKPIProg(${c},this.value)">
+      <input type="range" class="kpi-slider" min="0" max="100" value="${a.progress}" data-input="updateKPIProg" data-idx="${c}">
     </div>`).join(""), i = n.map((a, c) => `
     <div class="goal-item ${a.done ? "done" : ""}">
-      <input type="checkbox" ${a.done ? "checked" : ""} data-change="toggleGoal" data-arg="${c}" id="g-${c}">
+      <input type="checkbox" ${a.done ? "checked" : ""} data-change="toggleGoal" data-arg-json="${c}" id="g-${c}">
       <label for="g-${c}">${escHtml(a.text)}</label>
       <span class="goal-pri goal-${a.priority.toLowerCase()}">${a.priority}</span>
       <button class="item-del" data-action="deleteGoal" data-arg-json="${c}">\u2715</button>
@@ -1139,7 +1045,7 @@ ${e}
   </div>`} function initBizDash() { return [] } window.saveKPI = function (e, t) { const n = JSON.parse(localStorage.getItem("jarvis-kpis") || "null") || []; n[e] && (n[e].value = t, localStorage.setItem("jarvis-kpis", JSON.stringify(n))) }, window.updateKPIProg = function (e, t) { const n = document.getElementById(`kpi-bar-${e}`); n && (n.style.width = t + "%"); const s = JSON.parse(localStorage.getItem("jarvis-kpis") || "null") || []; s[e] && (s[e].progress = parseInt(t), localStorage.setItem("jarvis-kpis", JSON.stringify(s))) }, window.addGoal = function () { const e = document.getElementById("goal-input"), t = document.getElementById("goal-priority")?.value || "MED"; if (!e?.value?.trim()) return; const n = JSON.parse(localStorage.getItem("jarvis-goals") || "[]"); n.push({ id: Date.now(), text: e.value.trim(), priority: t, done: !1 }), localStorage.setItem("jarvis-goals", JSON.stringify(n)), e.value = "", renderGoals(n) }, window.toggleGoal = function (e) { const t = JSON.parse(localStorage.getItem("jarvis-goals") || "[]"); t[e] && (t[e].done = !t[e].done, localStorage.setItem("jarvis-goals", JSON.stringify(t)), renderGoals(t)) }, window.deleteGoal = function (e) { const t = JSON.parse(localStorage.getItem("jarvis-goals") || "[]"); t.splice(e, 1), localStorage.setItem("jarvis-goals", JSON.stringify(t)), renderGoals(t) }; function renderGoals(e) {
     const t = document.getElementById("goals-list"); t && (t.innerHTML = e.map((n, s) => `
     <div class="goal-item ${n.done ? "done" : ""}">
-      <input type="checkbox" ${n.done ? "checked" : ""} data-change="toggleGoal" data-arg="${s}" id="g-${s}">
+      <input type="checkbox" ${n.done ? "checked" : ""} data-change="toggleGoal" data-arg-json="${s}" id="g-${s}">
       <label for="g-${s}">${escHtml(n.text)}</label>
       <span class="goal-pri goal-${n.priority.toLowerCase()}">${n.priority}</span>
       <button class="item-del" data-action="deleteGoal" data-arg-json="${s}">\u2715</button>
@@ -1213,7 +1119,7 @@ Make it complete, compelling, and publication-ready.`)
     ${s.input ? `<input class="gcp-input" id="gcp-field" placeholder="${s.placeholder || ""}" autocomplete="off">` : ""}
     <div class="gcp-btns">
       <button class="gcp-cancel" data-action="closeHamburger">\u2715 Cancel</button>
-      <button class="gcp-run" data-action="executeGitConfirm" data-arg="${e}">\u25B6 Run</button>
+      <button class="gcp-run" data-action="executeGitConfirm" data-arg="${escHtml(String(e))}">\u25B6 Run</button>
     </div>`, o.hidden = !1, setTimeout(() => { const i = document.getElementById("gcp-field"); i && i.focus() }, 50)
   } window.executeGitConfirm = function (e) { const t = getGitCwd(), n = (document.getElementById("gcp-field")?.value || "").trim(); if (e === "push") { if (n !== "CONFIRM") { showToast("\u26D4 Type CONFIRM exactly to push.", "error"); return } closeHamburger(), runGitCommand("git push", t, "PUSH") } else if (e === "pull") closeHamburger(), runGitCommand("git pull", t, "PULL"); else if (e === "add-commit") { if (!n) { showToast("\u26D4 Enter a commit message.", "error"); return } const s = n.replace(/["`$\\]/g, "").slice(0, 200); closeHamburger(), runGitCommand(`git add -A && git commit -m "${s}"`, t, "COMMIT") } }; async function runGitCommand(e, t, n) {
     const s = e.toLowerCase(); if (GIT_BLOCKED_PATTERNS.some(r => s.includes(r))) { showToast("\u26D4 Destructive command blocked by JARVIS safety policy.", "error"); return } showToast(`\u{1F500} Running git ${n}\u2026`, "info"); let o; try { o = await window.jarvis.runCommand(e, t) } catch (r) { appendJarvisMessage(`\u274C Git error: ${r.message}`); return } const i = o.stdout?.trim(), a = o.stderr?.trim(), c = [i ? `\`\`\`
@@ -1229,23 +1135,11 @@ ${i}
     const t = e.name, n = t.split(".").pop().toLowerCase(), s = e.path || ""; if (FDROP_BAD_PATHS.some(r => s.toLowerCase().includes(r))) { showToast(`\u26D4 System path blocked \u2014 ${t}`, "error"); return } if (!FDROP_ALLOWED.has(n)) { showToast(`\u26D4 .${n} files not allowed \u2014 ${t}`, "error"); return } if (e.size > FDROP_MAX_BYTES) { showToast(`\u26D4 File too large (max 500KB) \u2014 ${t}`, "error"); return } let o; try { const r = await window.jarvis.readFile(s, state.projectContext?.token); if (!r.ok) throw new Error(r.error); o = r.data } catch (r) { showToast(`\u274C Cannot read ${t}: ${r.message}`, "error"); return } if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(o.slice(0, 512))) { showToast(`\u26D4 Binary file rejected \u2014 ${t}`, "error"); return } const i = { js: "javascript", ts: "typescript", py: "python", html: "html", css: "css", json: "json", md: "markdown", sh: "bash", ps1: "powershell", sql: "sql", java: "java", cpp: "cpp", c: "c", rs: "rust", go: "go", rb: "ruby", php: "php" }[n] || n, a = o.length > 12e3, c = `\u{1F4C1} **File: \`${t}\`** (${formatBytes(e.size)})\`\`\`${i}
 ${o.slice(0, 12e3)}
 \`\`\`${a ? "_\u26A0\uFE0F Truncated to 12KB._" : ""}`; showToast(`\u{1F4C1} ${t} loaded`, "info"), sendMessage(c)
-  } function formatBytes(e) { return e < 1024 ? `${e} B` : e < 1048576 ? `${(e / 1024).toFixed(1)} KB` : `${(e / 1048576).toFixed(2)} MB` } window.loadProject = async function () { showToast("\u{1F4E6} Opening folder picker\u2026", "info"); try { const t = await window.jarvis.readProject(); if (!t?.ok) { t?.error && showToast(`\u274C ${t.error}`, "error"); return } showToast(`\u{1F4E6} Scanning ${t.name}\u2026`, "info"); state.projectContext = { name: t.name, token: t.token, fileCount: t.fileCount, totalBytes: t.totalBytes }, updateProjectBadge(), appendJarvisMessage(`\u{1F4E6} **Project loaded: \`${state.projectContext.name}\`**- **${t.fileCount} files** \xB7 ${formatBytes(t.totalBytes)}\nI now have full context of your project. Ask me anything about it.`), showToast(`\u2705 ${t.fileCount} files loaded`, "success") } catch (e) { showToast(`\u274C ${e.message}`, "error") } }, window.clearProject = function () { state.projectContext = null, updateProjectBadge(), showToast("\u{1F4E6} Project context cleared.", "info") }; function updateProjectBadge() { let e = document.getElementById("project-badge"); state.projectContext ? (e || (e = document.createElement("div"), e.id = "project-badge", e.className = "project-badge", e.title = "Click to clear project context", e.onclick = () => window.clearProject(), document.getElementById("top-left").appendChild(e)), e.innerHTML = `\u{1F4E6} <span>${state.projectContext.name}</span><span class="pb-count">${state.projectContext.fileCount}f</span><span class="pb-x">\u2715</span>`) : e && e.remove() } state.memory = []; async function memoryInit() { try { const e = await window.jarvis.memoryLoad(); state.memory = e.facts || [] } catch { state.memory = [] } } async function memorySave() { try { await window.jarvis.memorySave(state.memory) } catch { } } window.memoryAdd = async function () { const e = document.getElementById("mem-input"), t = e?.value?.trim(); if (t) { if (state.memory.length >= 30) { showToast("Memory full (30 facts max). Remove some first.", "error"); return } state.memory.push(t), await memorySave(), e.value = "", renderMemory(), showToast("\u{1F9E0} Memory updated", "success") } }, window.memoryDelete = async function (e) { state.memory.splice(e, 1), await memorySave(), renderMemory() }, window.renderMemory = function () {
-    const e = document.getElementById("mem-list"); if (e) {
-      if (!state.memory.length) { e.innerHTML = '<div class="mem-empty">\u{1F9E0} No memories yet. Add facts about yourself below.</div>'; return } e.innerHTML = state.memory.map((t, n) => `
-    <div class="mem-item">
-      <span class="mem-item-icon">\u25C8</span>
-      <span class="mem-item-text">${t}</span>
-      <button class="mem-item-del" data-action="memoryDelete" data-arg-json="${n}" title="Remove">\u2715</button>
-    </div>`).join("")
-    }
-  }; function getMemoryPrefix() {
-    return state.memory.length ? `[USER MEMORY \u2014 always remember these facts about the user]
-${state.memory.map(e => `\u2022 ${e}`).join(`
-`)}
-[END MEMORY]`: ""
-  } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", _initMemoryUI, { once: !0 }) : _initMemoryUI(); function _initMemoryUI() { const e = document.getElementById("mem-input"); e && !e.dataset.bound && (e.dataset.bound = "1", e.addEventListener("keydown", t => { t.key === "Enter" && window.memoryAdd() })), memoryInit() } const CMD_LIST = [{ group: "SWITCH MODE", icon: "\u2B21", name: "General Mode", shortcut: "G", action: () => setMode("general") }, { group: "SWITCH MODE", icon: "\u{1F4BB}", name: "Code Mode", shortcut: "C", action: () => setMode("code") }, { group: "SWITCH MODE", icon: "\u{1F41B}", name: "Debug Mode", shortcut: "D", action: () => setMode("debug") }, { group: "SWITCH MODE", icon: "\u{1F52C}", name: "Research Mode", shortcut: "R", action: () => setMode("research") }, { group: "SWITCH MODE", icon: "\u26A1", name: "Automation Mode", shortcut: "A", action: () => setMode("automation") }, { group: "SWITCH MODE", icon: "\u{1F4C8}", name: "Business Mode", shortcut: "B", action: () => setMode("business") }, { group: "SWITCH MODE", icon: "\u{1F3A8}", name: "Creative Mode", shortcut: "X", action: () => setMode("creative") }, { group: "SWITCH MODE", icon: "\u26A1", name: "Productivity Mode", shortcut: "P", action: () => setMode("productivity") }, { group: "ACTIONS", icon: "\u{1F195}", name: "New Session", shortcut: "", action: () => newSession() }, { group: "ACTIONS", icon: "\u{1F5D1}\uFE0F", name: "Clear Chat", shortcut: "", action: () => clearCurrentChat() }, { group: "ACTIONS", icon: "\u{1F4E6}", name: "Load Project", shortcut: "", action: () => window.loadProject() }, { group: "ACTIONS", icon: "\u{1F9E0}", name: "Open Memory", shortcut: "", action: () => { openModal("memory-modal"), renderMemory() } }, { group: "ACTIONS", icon: "\u{1F3A4}", name: "Toggle Wake Word", shortcut: "", action: () => toggleWakeWord() }, { group: "ACTIONS", icon: "\u{1F4DC}", name: "Git Log", shortcut: "", action: () => gitAction("log") }, { group: "ACTIONS", icon: "\u{1F4CB}", name: "Git Status", shortcut: "", action: () => gitAction("status") }, { group: "ACTIONS", icon: "\u2193", name: "Export Chat", shortcut: "", action: () => exportChat() }, { group: "ACTIONS", icon: "\u2699\uFE0F", name: "Settings", shortcut: "", action: () => openModal("settings-modal") }, { group: "ACTIONS", icon: "\u23FB", name: "Power Off", shortcut: "", action: () => window.confirmPowerOff() }, { group: "\u{1F3A8} THEMES", icon: "\u2B21", name: "Theme: Iron Man (Default Cyan)", shortcut: "", action: () => applyTheme("ironman") }, { group: "\u{1F3A8} THEMES", icon: "\u2620", name: "Theme: Phantom (Blood Red)", shortcut: "", action: () => applyTheme("phantom") }, { group: "\u{1F3A8} THEMES", icon: "\u229E", name: "Theme: Matrix (Terminal Green)", shortcut: "", action: () => applyTheme("matrix") }, { group: "\u{1F3A8} THEMES", icon: "\u2726", name: "Theme: Nova (Deep Space Purple)", shortcut: "", action: () => applyTheme("nova") }, { group: "\u{1F3A8} THEMES", icon: "\u25C8", name: "Theme: Ghost (Light Military)", shortcut: "", action: () => applyTheme("ghost") }]; let cmdActiveIdx = 0, cmdFiltered = [...CMD_LIST]; function openCmdPalette() { const e = document.getElementById("cmd-palette"), t = document.getElementById("cmd-input"); e && (e.hidden = !1, cmdActiveIdx = 0, cmdFiltered = [...CMD_LIST], renderCmdResults(""), setTimeout(() => t?.focus(), 30)) } window.openCmdPalette = openCmdPalette; function closeCmdPalette() { const e = document.getElementById("cmd-palette"); e && (e.hidden = !0) } window.closeCmdPalette = closeCmdPalette; function renderCmdResults(e) {
+  } function formatBytes(e) { return e < 1024 ? `${e} B` : e < 1048576 ? `${(e / 1024).toFixed(1)} KB` : `${(e / 1048576).toFixed(2)} MB` } window.loadProject = async function () { showToast("\u{1F4E6} Opening folder picker\u2026", "info"); try { const t = await window.jarvis.readProject(); if (!t?.ok) { t?.error && showToast(`\u274C ${t.error}`, "error"); return } showToast(`\u{1F4E6} Scanning ${t.name}\u2026`, "info"); state.projectContext = { name: t.name, token: t.token, fileCount: t.fileCount, totalBytes: t.totalBytes }, updateProjectBadge(), appendJarvisMessage(`\u{1F4E6} **Project loaded: \`${state.projectContext.name}\`**- **${t.fileCount} files** \xB7 ${formatBytes(t.totalBytes)}\nI now have full context of your project. Ask me anything about it.`), showToast(`\u2705 ${t.fileCount} files loaded`, "success") } catch (e) { showToast(`\u274C ${e.message}`, "error") } }, window.clearProject = function () { state.projectContext = null, updateProjectBadge(), showToast("\u{1F4E6} Project context cleared.", "info") }; function updateProjectBadge() { let e = document.getElementById("project-badge"); state.projectContext ? (e || (e = document.createElement("div"), e.id = "project-badge", e.className = "project-badge", e.title = "Click to clear project context", e.onclick = () => window.clearProject(), document.getElementById("top-left").appendChild(e)), e.innerHTML = `\u{1F4E6} <span>${state.projectContext.name}</span><span class="pb-count">${state.projectContext.fileCount}f</span><span class="pb-x">\u2715</span>`) : e && e.remove() } // Memory UI and writes live in modules/memoryClient.js.
+if (window.MemoryPanel) window.MemoryPanel.init();
+const CMD_LIST = [{ group: "SWITCH MODE", icon: "\u2B21", name: "General Mode", shortcut: "G", action: () => setMode("general") }, { group: "SWITCH MODE", icon: "\u{1F4BB}", name: "Code Mode", shortcut: "C", action: () => setMode("code") }, { group: "SWITCH MODE", icon: "\u{1F41B}", name: "Debug Mode", shortcut: "D", action: () => setMode("debug") }, { group: "SWITCH MODE", icon: "\u{1F52C}", name: "Research Mode", shortcut: "R", action: () => setMode("research") }, { group: "SWITCH MODE", icon: "\u26A1", name: "Automation Mode", shortcut: "A", action: () => setMode("automation") }, { group: "SWITCH MODE", icon: "\u{1F4C8}", name: "Business Mode", shortcut: "B", action: () => setMode("business") }, { group: "SWITCH MODE", icon: "\u{1F3A8}", name: "Creative Mode", shortcut: "X", action: () => setMode("creative") }, { group: "SWITCH MODE", icon: "\u26A1", name: "Productivity Mode", shortcut: "P", action: () => setMode("productivity") }, { group: "ACTIONS", icon: "\u{1F195}", name: "New Session", shortcut: "", action: () => newSession() }, { group: "ACTIONS", icon: "\u{1F5D1}\uFE0F", name: "Clear Chat", shortcut: "", action: () => clearCurrentChat() }, { group: "ACTIONS", icon: "\u{1F4E6}", name: "Load Project", shortcut: "", action: () => window.loadProject() }, { group: "ACTIONS", icon: "\u{1F9E0}", name: "Open Memory", shortcut: "", action: () => { openModal("memory-modal"), renderMemory() } }, { group: "ACTIONS", icon: "\u{1F3A4}", name: "Toggle Wake Word", shortcut: "", action: () => toggleWakeWord() }, { group: "ACTIONS", icon: "\u{1F4DC}", name: "Git Log", shortcut: "", action: () => gitAction("log") }, { group: "ACTIONS", icon: "\u{1F4CB}", name: "Git Status", shortcut: "", action: () => gitAction("status") }, { group: "ACTIONS", icon: "\u2193", name: "Export Chat", shortcut: "", action: () => exportChat() }, { group: "ACTIONS", icon: "\u2699\uFE0F", name: "Settings", shortcut: "", action: () => openModal("settings-modal") }, { group: "ACTIONS", icon: "\u23FB", name: "Power Off", shortcut: "", action: () => window.confirmPowerOff() }, { group: "\u{1F3A8} THEMES", icon: "\u2B21", name: "Theme: Iron Man (Default Cyan)", shortcut: "", action: () => applyTheme("ironman") }, { group: "\u{1F3A8} THEMES", icon: "\u2620", name: "Theme: Phantom (Blood Red)", shortcut: "", action: () => applyTheme("phantom") }, { group: "\u{1F3A8} THEMES", icon: "\u229E", name: "Theme: Matrix (Terminal Green)", shortcut: "", action: () => applyTheme("matrix") }, { group: "\u{1F3A8} THEMES", icon: "\u2726", name: "Theme: Nova (Deep Space Purple)", shortcut: "", action: () => applyTheme("nova") }, { group: "\u{1F3A8} THEMES", icon: "\u25C8", name: "Theme: Ghost (Light Military)", shortcut: "", action: () => applyTheme("ghost") }]; let cmdActiveIdx = 0, cmdFiltered = [...CMD_LIST]; function openCmdPalette() { const e = document.getElementById("cmd-palette"), t = document.getElementById("cmd-input"); e && (e.hidden = !1, cmdActiveIdx = 0, cmdFiltered = [...CMD_LIST], renderCmdResults(""), setTimeout(() => t?.focus(), 30)) } window.openCmdPalette = openCmdPalette; function closeCmdPalette() { const e = document.getElementById("cmd-palette"); e && (e.hidden = !0) } window.closeCmdPalette = closeCmdPalette; function renderCmdResults(e) {
     const t = e.toLowerCase().trim(); cmdFiltered = t ? CMD_LIST.filter(i => i.name.toLowerCase().includes(t) || i.group.toLowerCase().includes(t)) : [...CMD_LIST], cmdActiveIdx = 0; const n = document.getElementById("cmd-results"); if (!n) return; if (!cmdFiltered.length) { n.innerHTML = '<div class="cmd-empty">No commands found</div>'; return } let s = "", o = ""; cmdFiltered.forEach((i, a) => {
-      i.group !== o && (s += `<div class="cmd-group-label">${i.group}</div>`, o = i.group), s += `<button class="cmd-item${a === 0 ? " active" : ""}" data-idx="${a}" data-action="runCmdItem" data-arg-json="${a}">
+      i.group !== o && (s += `<div class="cmd-group-label">${i.group}</div>`, o = i.group), s += `<button class="cmd-item${a === 0 ? " active" : ""}" data-action="runCmdItem" data-arg-json="${a}">
       <span class="cmd-item-icon">${i.icon}</span>
       <span class="cmd-name">${i.name}</span>
       ${i.shortcut ? `<span class="cmd-shortcut">${i.shortcut}</span>` : ""}
@@ -1299,7 +1193,7 @@ ${state.memory.map(e => `\u2022 ${e}`).join(`
     if (!e || !e.length) return ""; const t = { "Google News": "\u{1F4F0}", "BBC News": "\u{1F310}", DuckDuckGo: "\u{1F986}" }; return `<div class="source-chips-wrap">
     <span class="source-chips-label">\u{1F310} Live Sources</span>
     <div class="source-chips-list">${e.filter(s => s.url && s.title).slice(0, 8).map(s => {
-      const o = t[s.engine] || "\u{1F517}", i = (() => { try { return new URL(s.url).hostname.replace("www.", "") } catch { return s.engine || "Web" } })(), a = escHtml(s.title.slice(0, 60)), c = s.pubDate ? ` \xB7 ${new Date(s.pubDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "", r = escHtml(s.url); return `<button class="source-chip" data-action="window.jarvis.openExternal" data-arg-json="${JSON.stringify(s.url)}" title="${r}">
+      const o = t[s.engine] || "\u{1F517}", i = (() => { try { return new URL(s.url).hostname.replace("www.", "") } catch { return s.engine || "Web" } })(), a = escHtml(s.title.slice(0, 60)), c = s.pubDate ? ` \xB7 ${new Date(s.pubDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "", r = escHtml(s.url); return `<button class="source-chip" data-action="openExternalLink" data-arg-json="${escHtml(JSON.stringify(s.url))}" title="${r}">
         <span class="source-chip-favicon">${o}</span>
         <span class="source-chip-info">
           <span class="source-chip-title">${a}</span>
@@ -1316,21 +1210,339 @@ ${e}`; state.conversations[state.mode].messages.push({ role: "user", content: o,
 ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondream for real image analysis. Responding based on prompt only.`; injectPrompt(s), showToast(`\u26A0 ${state.model} is not a vision model. Use llava for real image analysis.`, "warning"), window.clearImgState()
     }
   } window.analyzeImage = analyzeImage, setTimeout(() => { typeof CMD_LIST < "u" && CMD_LIST.push({ group: "\u{1F6E0} TOOLS", icon: "\u{1F50D}", name: "Search Chat (Ctrl+F)", shortcut: "", action: () => openChatSearch() }, { group: "\u{1F6E0} TOOLS", icon: "\u{1F4DD}", name: "Prompt Library (Ctrl+P)", shortcut: "", action: () => openPromptLibrary() }, { group: "\u{1F6E0} TOOLS", icon: "\u29C9", name: "Snippet Manager", shortcut: "", action: () => openSnippetManager() }, { group: "\u{1F6E0} TOOLS", icon: "\u{1F4D3}", name: "Notes Scratchpad (Ctrl+N)", shortcut: "", action: () => openNotes() }, { group: "\u{1F6E0} TOOLS", icon: "\u{1F310}", name: "API Tester (Ctrl+T)", shortcut: "", action: () => openApiTester() }, { group: "\u{1F6E0} TOOLS", icon: "\u{1F5BC}", name: "Image Analysis", shortcut: "", action: () => openImageAnalysis() }, { group: "\u{1F6E0} TOOLS", icon: "\u2328", name: "Keyboard Shortcuts (Ctrl+?)", shortcut: "", action: () => openShortcuts() }) }, 200), document.addEventListener("DOMContentLoaded", () => { buildCalcPanel(); const e = document.getElementById("chat-messages"); e && _msgObserver.observe(e, { childList: !0 }) }, { once: !0 }); window._runBootSequence = function (cb) {
-    const bs = document.getElementById("boot-screen"); if (!bs) { cb && cb(); return; }
+    const bs = document.getElementById("boot-screen");
+    if (!bs) { window.__jarvisBooted = true; cb && cb(); return; }
     bs.classList.remove("hidden");
     const bt = document.getElementById("boot-terminal"), bc = document.getElementById("boot-core-flash");
-    const lines = ["J.A.R.V.I.S SYSTEM KERNEL v2.0", "INITIALIZING NEURAL NETWORKS...", "LOADING COGNITIVE MODULES... [OK]", "SECURING DATA ENCLAVES... [OK]", "ESTABLISHING UPLINK TO OLLAMA CORE...", "POWER GRID STABLE.", "SYSTEMS INTEGRATION COMPLETE.", "IGNITING CORE..."];
-    let li = 0, ci = 0; bt.textContent = "";
-    let actx = null; try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { }
-    const pS = () => { if (!actx) return; try { const o = actx.createOscillator(), g = actx.createGain(); o.type = 'sawtooth'; o.frequency.setValueAtTime(50, actx.currentTime); o.frequency.exponentialRampToValueAtTime(400, actx.currentTime + 0.6); g.gain.setValueAtTime(0, actx.currentTime); g.gain.linearRampToValueAtTime(0.08, actx.currentTime + 0.2); g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.6); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.6); } catch (e) { } };
-    const pB = () => { if (!actx) return; try { const o = actx.createOscillator(), g = actx.createGain(); o.type = 'square'; o.frequency.setValueAtTime(800 + Math.random() * 200, actx.currentTime); g.gain.setValueAtTime(0.015, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.05); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.05); } catch (e) { } };
-    const pI = () => { if (!actx) return; try { const o1 = actx.createOscillator(), o2 = actx.createOscillator(), g = actx.createGain(); o1.type = 'sine'; o2.type = 'sine'; o1.frequency.setValueAtTime(200, actx.currentTime); o2.frequency.setValueAtTime(300, actx.currentTime); g.gain.setValueAtTime(0, actx.currentTime); g.gain.linearRampToValueAtTime(0.1, actx.currentTime + 0.1); g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 1.5); o1.connect(g); o2.connect(g); g.connect(actx.destination); o1.start(); o2.start(); o1.stop(actx.currentTime + 1.5); o2.stop(actx.currentTime + 1.5); } catch (e) { } };
-    pS();
-    const tc = () => {
-      if (li >= lines.length) { setTimeout(() => { pI(); bc && bc.classList.add("ignite"); setTimeout(() => { bs.classList.add("hidden"); setTimeout(() => { bs.remove(); cb && cb(); }, 600); }, 1200); }, 300); return; }
-      if (ci < lines[li].length) { bt.textContent += lines[li][ci]; if (ci % 3 === 0) pB(); ci++; setTimeout(tc, 10 + Math.random() * 20); } else { bt.textContent += '\n'; li++; ci = 0; setTimeout(tc, 80 + Math.random() * 60); }
-    }; setTimeout(tc, 300);
-  }; const TaskQueue = { _queue: [], _draining: !1, enqueue: function (e) { if (!state.isStreaming) { sendMessage(e); return } TaskQueue._queue.push(e), TaskQueue._updateHUD(), showToast("Command queued \u2014 JARVIS will process it shortly, sir.", "info") }, drainNext: function () { if (TaskQueue._draining || TaskQueue._queue.length === 0) { TaskQueue._updateHUD(); return } TaskQueue._draining = !0; const e = TaskQueue._queue.shift(); TaskQueue._updateHUD(), setTimeout(function () { TaskQueue._draining = !1, sendMessage(e) }, 200) }, _updateHUD: function () { const e = document.getElementById("task-queue-hud"), t = document.getElementById("tq-count"), n = TaskQueue._queue.length; e && e.classList.toggle("hidden", n === 0), t && (t.textContent = n) }, getQueue: function () { return TaskQueue._queue.slice() }, clear: function () { TaskQueue._queue = [], TaskQueue._draining = !1, TaskQueue._updateHUD() } }; window.TaskQueue = TaskQueue; const _origFinalizeStreamingEl = finalizeStreamingEl; window.finalizeStreamingEl = function (e, t) { _origFinalizeStreamingEl(e, t), setTimeout(function () { !state.isStreaming && TaskQueue._queue.length > 0 && TaskQueue.drainNext() }, 300) }; const Skills = { _manifest: [], _loaded: !1, load: async function () { try { if (!window.jarvis || !window.jarvis.skillsList) return; const e = await window.jarvis.skillsList(); if (e.ok) { Skills._manifest = e.skills || [], Skills._loaded = !0; const t = document.getElementById("skills-count"); t && (t.textContent = Skills._manifest.length) } } catch (e) { console.error("[Skills] Failed to load:", e) } }, run: async function (e, t) { if (!window.jarvis || !window.jarvis.skillsRun) return null; try { return await window.jarvis.skillsRun(e, t || {}) } catch { return null } } }; window.Skills = Skills; const Auth = { _input: "", _setupMode: !1, _firstPin: null, _keyHandler: null, init: async function () { if (!window.jarvis || !window.jarvis.authLoad) return; const e = await window.jarvis.authLoad(), t = document.getElementById("auth-screen"); if (t) { if (!e.ok || !e.data) { Auth._setupMode = !0, t.classList.remove("hidden"); const n = document.getElementById("auth-subtitle"); n && (n.textContent = "FIRST RUN \u2014 SET YOUR PIN"); const s = document.getElementById("auth-hint"); s && (s.textContent = "Set a 4-digit PIN to secure JARVIS"); const o = document.getElementById("auth-setup"); o && o.classList.remove("hidden") } else if (e.data.hasPin) { t.classList.remove("hidden") } else setTimeout(() => { if (window._runBootSequence) window._runBootSequence(triggerLLMGreeting); else triggerLLMGreeting(); }, 100); Auth._keyHandler = function (n) { const s = document.getElementById("auth-screen"); !s || s.classList.contains("hidden") || (n.key >= "0" && n.key <= "9" ? (n.preventDefault(), Auth.pressKey(n.key)) : n.key === "Backspace" ? (n.preventDefault(), Auth.pressKey("clear")) : n.key === "Enter" && (n.preventDefault(), Auth.pressKey("enter"))) }, document.addEventListener("keydown", Auth._keyHandler) } }, pressKey: function (e) { const t = document.getElementById("auth-error"); if (t && t.classList.add("hidden"), e === "clear") Auth._input = Auth._input.slice(0, -1); else if (e === "enter") { Auth._verify(); return } else Auth._input.length < 4 && (Auth._input += e); Auth._updateDots(), Auth._input.length === 4 && setTimeout(Auth._verify, 120) }, _updateDots: function () { for (let e = 1; e <= 4; e++) { const t = document.getElementById("pin-d" + e); t && (t.classList.toggle("filled", Auth._input.length >= e), t.classList.remove("error")) } }, _verify: async function () { if (Auth._setupMode) { if (Auth._firstPin) if (Auth._input === Auth._firstPin) { /* MED-05 fix: send raw PIN to main for PBKDF2 hashing */ window.jarvis && window.jarvis.authSave && await window.jarvis.authSave({ pin: Auth._input }), Auth._unlock() } else { Auth._showError("PINs do not match. Try again."), Auth._firstPin = null, Auth._input = "", Auth._updateDots(); const t = document.getElementById("auth-subtitle"); t && (t.textContent = "FIRST RUN \u2014 SET YOUR PIN") } else { Auth._firstPin = Auth._input, Auth._input = "", Auth._updateDots(); const t = document.getElementById("auth-subtitle"); t && (t.textContent = "CONFIRM YOUR PIN") } return } /* MED-05 fix: delegate PIN check to main process via auth-verify */ if (!window.jarvis || !window.jarvis.authVerify) { Auth._showError("Auth service unavailable."); return } const res = await window.jarvis.authVerify(Auth._input); Auth._input = ""; if (res.rateLimited) { Auth._showError("Too many attempts. Try again in 15 minutes."); document.querySelectorAll(".keypad-btn").forEach(b => b.disabled = !0); return } if (res.ok) { Auth._unlock(); } else { for (let t = 1; t <= 4; t++) { const n = document.getElementById("pin-d" + t); n && (n.classList.add("error"), n.classList.remove("filled")) } setTimeout(function () { for (let t = 1; t <= 4; t++) { const n = document.getElementById("pin-d" + t); n && n.classList.remove("error") } }, 600); Auth._showError(res.error || "Incorrect PIN.") } }, _showError: function (e) { const t = document.getElementById("auth-error"); t && (t.textContent = e, t.classList.remove("hidden")) }, _unlock: function () { Auth._keyHandler && (document.removeEventListener("keydown", Auth._keyHandler), Auth._keyHandler = null); const e = document.getElementById("auth-screen"); e && (e.classList.add("unlocking"), showToast("Identity confirmed. Welcome back, sir.", "success"), setTimeout(function () { e.classList.add("hidden") }, 600), setTimeout(() => { if (window._runBootSequence) window._runBootSequence(triggerLLMGreeting); else triggerLLMGreeting(); }, 650)) }, skip: async function () { window.jarvis && window.jarvis.authSave && await window.jarvis.authSave({ skipPin: true }), Auth._unlock() } }; window.Auth = Auth, window.authKey = function (e) { Auth.pressKey(e) }, window.authSkip = function () { Auth.skip() }, document.addEventListener("visibilitychange", () => { document.hidden ? (typeof gpuPollInterval < "u" && gpuPollInterval && (clearInterval(gpuPollInterval), gpuPollInterval = null), typeof hudInterval < "u" && hudInterval && (clearInterval(hudInterval), hudInterval = null)) : (!hudInterval && typeof updateLiveHUD == "function" && (updateLiveHUD(), hudInterval = setInterval(updateLiveHUD, 3e4))) }); function openChangePinModal() { closeModal("settings-modal"), ["chpin-current", "chpin-new", "chpin-confirm"].forEach(t => { const n = document.getElementById(t); n && (n.value = "") }); const e = document.getElementById("chpin-error"); e && e.classList.add("hidden"), openModal("change-pin-modal"), setTimeout(() => { const t = document.getElementById("chpin-current"); t && t.focus() }, 100) } window.openChangePinModal = openChangePinModal; async function submitChangePin() { const e = document.getElementById("chpin-current")?.value.trim(), t = document.getElementById("chpin-new")?.value.trim(), n = document.getElementById("chpin-confirm")?.value.trim(), s = document.getElementById("chpin-error"); function o(a) { s && (s.textContent = a, s.classList.remove("hidden")) } if (!/^\d{4}$/.test(t)) return o("New PIN must be exactly 4 digits."); if (t !== n) return o("New PINs do not match."); /* MED-05 fix: verify current PIN via main process, then save raw new PIN for main to hash */ const verifyRes = window.jarvis && window.jarvis.authVerify ? await window.jarvis.authVerify(e) : { ok: false }; if (!verifyRes.ok) return o("Current PIN is incorrect."); window.jarvis && window.jarvis.authSave && await window.jarvis.authSave({ pin: t }), closeModal("change-pin-modal"), showToast("PIN updated successfully, sir.", "success") } window.submitChangePin = submitChangePin; async function refreshDiagnostics() { const e = document.getElementById("diag-grid"), t = document.getElementById("diag-skills-list"), n = document.getElementById("diag-queue-list"); e && (e.innerHTML = '<div class="panel-placeholder">Loading...</div>'); try { let s = null; if (window.jarvis && window.jarvis.getRuntimeStats && (s = await window.jarvis.getRuntimeStats()), e && s && s.ok) { const o = s.process, i = s.system, a = s.jarvis, c = Math.round(parseFloat(o.heap_used_mb) / parseFloat(o.heap_total_mb) * 100), r = Math.round((parseFloat(i.total_mem_gb) - parseFloat(i.free_mem_gb)) / parseFloat(i.total_mem_gb) * 100); e.innerHTML = ['<div class="diag-card">', '<div class="diag-card-title">PROCESS</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">UPTIME</span><span class="diag-stat-val">' + o.uptime_human + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP USED</span><span class="diag-stat-val">' + o.heap_used_mb + " MB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP TOTAL</span><span class="diag-stat-val">' + o.heap_total_mb + " MB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP %</span><span class="diag-stat-val ' + (c > 80 ? "warn" : "ok") + '">' + c + "%</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RSS</span><span class="diag-stat-val">' + o.rss_mb + " MB</span></div>", "</div>", '<div class="diag-card">', '<div class="diag-card-title">SYSTEM</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">SYS UPTIME</span><span class="diag-stat-val">' + i.uptime_human + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM FREE</span><span class="diag-stat-val">' + i.free_mem_gb + " GB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM TOTAL</span><span class="diag-stat-val">' + i.total_mem_gb + " GB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM USED</span><span class="diag-stat-val ' + (r > 85 ? "warn" : "ok") + '">' + r + "%</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">CPU CORES</span><span class="diag-stat-val">' + i.cpu_cores + "</span></div>", "</div>", '<div class="diag-card">', '<div class="diag-card-title">JARVIS</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">OLLAMA</span><span class="diag-stat-val ' + (a.ollama_running ? "ok" : "err") + '">' + (a.ollama_running ? "ONLINE" : "OFFLINE") + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">SKILLS</span><span class="diag-stat-val">' + a.skill_count + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">SESSIONS</span><span class="diag-stat-val">' + a.session_count + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">ELECTRON</span><span class="diag-stat-val">' + a.electron_ver + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">NODE</span><span class="diag-stat-val">' + a.node_ver + "</span></div>", "</div>"].join("") } else e && (e.innerHTML = '<div class="panel-placeholder">Could not fetch diagnostics.</div>') } catch (s) { e && (e.innerHTML = '<div class="panel-placeholder">Error: ' + (s.message || "unknown") + "</div>") } if (t) if (!Skills._manifest.length) t.innerHTML = '<div class="panel-placeholder">No skills loaded.</div>'; else { const s = { get_datetime: "\u23F0", calculator: "\u{1F9F8}", system_status: "\u{1F4BB}", web_search: "\u{1F310}" }; t.innerHTML = Skills._manifest.map(function (o) { return '<div class="diag-skill-chip"><span class="diag-skill-icon">' + (s[o.id] || "\u2B21") + '</span><div><div class="diag-skill-name">' + escHtml(o.name) + '</div><div class="diag-skill-desc">' + escHtml(o.description) + "</div></div></div>" }).join("") } if (n) { const s = TaskQueue.getQueue(); s.length ? n.innerHTML = s.map(function (o, i) { return '<div class="diag-queue-item"><span class="diag-qi-pos">#' + (i + 1) + '</span><span class="diag-qi-text">' + escHtml(o) + "</span></div>" }).join("") : n.innerHTML = '<div class="panel-placeholder">Queue empty \u2014 JARVIS is ready.</div>' } } window.refreshDiagnostics = refreshDiagnostics; function openDiagnosticsModal() { openModal("diag-modal"), refreshDiagnostics() } window.openDiagnosticsModal = openDiagnosticsModal, document.addEventListener("DOMContentLoaded", async function () { await Skills.load(); try { typeof WakeWord !== "undefined" && WakeWord.init() } catch (err) { console.warn("[WakeWord] Init failed:", err) } await Auth.init(), document.addEventListener("keydown", function (e) { e.ctrlKey && e.key === "d" && (e.preventDefault(), openDiagnosticsModal()) }), console.log("[JARVIS] New features initialized: TaskQueue, Skills, Auth, WakeWord, Diagnostics") }); const JarvisSec = { config: { blockWritesOutsideWorkspace: !1, terminalEnabled: !0, requirePinForDestructive: !1, auditLogging: !0, screenCaptureEnabled: !1 }, async load() { try { const e = await window.jarvis.secConfigLoad(); e.ok && (this.config = { ...this.config, ...e.config }) } catch { } }, async save() { try { await window.jarvis.secConfigSave(this.config), showToast("\u{1F512} Security settings saved.", "success") } catch (e) { showToast("Error saving security config: " + e.message, "error") } } }; window.openSecurityModal = function () {
+    if (!bt) { window.__jarvisBooted = true; bs.classList.add("hidden"); setTimeout(() => { bs.remove(); cb && cb(); }, 600); return; }
+    const fill = document.getElementById("boot-progress-fill");
+    const reducedMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    let finished = false, failsafe = null;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(failsafe);
+      window.__jarvisBooted = true;
+      if (fill) fill.style.width = "100%";
+      bc && bc.classList.add("ignite");
+      setTimeout(() => {
+        bs.classList.add("hidden");
+        setTimeout(() => { bs.remove(); cb && cb(); }, 800);
+      }, reducedMotion ? 100 : 450);
+    };
+    // Never let the boot overlay strand the app if an animation callback fails.
+    failsafe = setTimeout(finish, 20000);
+    const lines = [
+      "SYSTEM KERNEL v2.0",
+      "Neural core online",
+      "Cognitive modules ready",
+      "Secure enclaves verified",
+      "Local models connected",
+      "All systems nominal"
+    ];
+    bt.textContent = "";
+    let index = 0;
+    const next = () => {
+      if (finished) return;
+      if (index >= lines.length) { setTimeout(finish, reducedMotion ? 150 : 650); return; }
+      const line = document.createElement("div");
+      line.className = "boot-line";
+      line.textContent = lines[index];
+      bt.appendChild(line);
+      requestAnimationFrame(() => line.classList.add("visible"));
+      index += 1;
+      if (fill) fill.style.width = `${Math.round((index / lines.length) * 100)}%`;
+      setTimeout(next, reducedMotion ? 90 : 520);
+    };
+    setTimeout(next, reducedMotion ? 60 : 420);
+  }; const TaskQueue = { _queue: [], _draining: !1, enqueue: function (e) { if (!state.isStreaming) { sendMessage(e); return } TaskQueue._queue.push(e), TaskQueue._updateHUD(), showToast("Command queued \u2014 JARVIS will process it shortly, sir.", "info") }, drainNext: function () { if (TaskQueue._draining || TaskQueue._queue.length === 0) { TaskQueue._updateHUD(); return } TaskQueue._draining = !0; const e = TaskQueue._queue.shift(); TaskQueue._updateHUD(), setTimeout(function () { TaskQueue._draining = !1, sendMessage(e) }, 200) }, _updateHUD: function () { const e = document.getElementById("task-queue-hud"), t = document.getElementById("tq-count"), n = TaskQueue._queue.length; e && e.classList.toggle("hidden", n === 0), t && (t.textContent = n) }, getQueue: function () { return TaskQueue._queue.slice() }, clear: function () { TaskQueue._queue = [], TaskQueue._draining = !1, TaskQueue._updateHUD() } }; window.TaskQueue = TaskQueue; const _origFinalizeStreamingEl = finalizeStreamingEl; window.finalizeStreamingEl = function (e, t) { _origFinalizeStreamingEl(e, t), setTimeout(function () { !state.isStreaming && TaskQueue._queue.length > 0 && TaskQueue.drainNext() }, 300) }; const Skills = { _manifest: [], _loaded: !1, load: async function () { try { if (!window.jarvis || !window.jarvis.skillsList) return; const e = await window.jarvis.skillsList(); if (e.ok) { Skills._manifest = e.skills || [], Skills._loaded = !0; const t = document.getElementById("skills-count"); t && (t.textContent = Skills._manifest.length) } } catch (e) { console.error("[Skills] Failed to load:", e) } } }; window.Skills = Skills; const Auth = { _input: "", _setupMode: !1, _firstPin: null, _keyHandler: null, _controlsBound: !1, _errorState: !1, init: async function () {
+    if (!window.jarvis || !window.jarvis.authLoad) return;
+    Auth._bindStaticControls();
+    Auth._detachKeyHandler();
+    let e;
+    try {
+      e = await window.jarvis.authLoad();
+    } catch (error) {
+      e = { ok: false, state: "error", error: error && error.message ? error.message : "Authentication status could not be read." };
+    }
+    const t = document.getElementById("auth-screen");
+    if (!t) return;
+    const state = e && typeof e.state === "string" ? e.state : "error";
+    const subtitle = document.getElementById("auth-subtitle");
+    const hint = document.getElementById("auth-hint");
+    const setupPanel = document.getElementById("auth-setup");
+    const recoveryPanel = document.getElementById("auth-recovery");
+    Auth._setupMode = !1;
+    Auth._firstPin = null;
+    Auth._input = "";
+    Auth._updateDots();
+    recoveryPanel && recoveryPanel.classList.add("hidden");
+    if (state === "error") {
+      Auth._showRecoveryState((e && e.error) || "JARVIS cannot verify the stored credential.");
+      return;
+    }
+    Auth._errorState = !1;
+    if (state === "setup") {
+      Auth._setupMode = !0;
+      t.classList.remove("hidden");
+      t.classList.remove("unlocking");
+      setupPanel && setupPanel.classList.remove("hidden");
+      subtitle && (subtitle.textContent = "FIRST RUN \u2014 SET YOUR PIN");
+      hint && (hint.textContent = "Set a 4-digit PIN to secure JARVIS");
+      document.querySelectorAll(".keypad-btn").forEach(b => { b.disabled = !1; });
+      const setupError = document.getElementById("auth-error");
+      setupError && setupError.classList.add("hidden");
+    } else if (state === "locked") {
+      Auth._showLockedPrompt(e && e.data && e.data.recoveredFromBackup);
+    } else if (state === "unlocked" || state === "no-lock") {
+      t.classList.add("hidden");
+      setTimeout(() => { if (window._runBootSequence) window._runBootSequence(triggerLLMGreeting); else triggerLLMGreeting(); }, 100);
+    } else {
+      Auth._showRecoveryState("Reload JARVIS to re-check the authentication state.");
+      return;
+    }
+    Auth._keyHandler = function (n) {
+      const s = document.getElementById("auth-screen");
+      if (!s || s.classList.contains("hidden")) return;
+      if (n.key >= "0" && n.key <= "9") { n.preventDefault(); Auth.pressKey(n.key); }
+      else if (n.key === "Backspace") { n.preventDefault(); Auth.pressKey("clear"); }
+      else if (n.key === "Enter") { n.preventDefault(); Auth.pressKey("enter"); }
+    };
+    document.addEventListener("keydown", Auth._keyHandler);
+  }, _bindStaticControls: function () {
+    if (Auth._controlsBound) return;
+    Auth._controlsBound = !0;
+    const skip = document.getElementById("auth-skip-btn");
+    const recovery = document.getElementById("auth-recovery-btn");
+    skip && skip.addEventListener("click", () => Auth.skip());
+    recovery && recovery.addEventListener("click", () => Auth.recover());
+  }, _detachKeyHandler: function () {
+    if (Auth._keyHandler) document.removeEventListener("keydown", Auth._keyHandler);
+    Auth._keyHandler = null;
+  }, _showRecoveryState: function (message) {
+    Auth._errorState = !0;
+    Auth._setupMode = !1;
+    Auth._input = "";
+    Auth._firstPin = null;
+    Auth._updateDots();
+    const t = document.getElementById("auth-screen");
+    const subtitle = document.getElementById("auth-subtitle");
+    const hint = document.getElementById("auth-hint");
+    const setupPanel = document.getElementById("auth-setup");
+    const recoveryPanel = document.getElementById("auth-recovery");
+    t && t.classList.remove("hidden");
+    setupPanel && setupPanel.classList.add("hidden");
+    recoveryPanel && recoveryPanel.classList.remove("hidden");
+    subtitle && (subtitle.textContent = "AUTHENTICATION STORE ERROR");
+    hint && (hint.textContent = message || "JARVIS cannot verify the stored credential. Recovery is required.");
+    document.querySelectorAll(".keypad-btn").forEach(b => { b.disabled = !0; });
+    Auth._detachKeyHandler();
+  }, _showLockedPrompt: function (recovered) {
+    const t = document.getElementById("auth-screen");
+    const subtitle = document.getElementById("auth-subtitle");
+    const hint = document.getElementById("auth-hint");
+    const setupPanel = document.getElementById("auth-setup");
+    const recoveryPanel = document.getElementById("auth-recovery");
+    Auth._errorState = !1;
+    Auth._setupMode = !1;
+    Auth._firstPin = null;
+    Auth._input = "";
+    Auth._updateDots();
+    t && t.classList.remove("hidden");
+    t && t.classList.remove("unlocking");
+    setupPanel && setupPanel.classList.add("hidden");
+    recoveryPanel && recoveryPanel.classList.add("hidden");
+    subtitle && (subtitle.textContent = "ENTER SECURITY PIN");
+    hint && (hint.textContent = recovered
+      ? "Credential recovered from the last-known-good backup. Enter your PIN to continue."
+      : "Enter your 4-digit PIN to continue");
+    document.querySelectorAll(".keypad-btn").forEach(b => { b.disabled = !1; });
+    const error = document.getElementById("auth-error");
+    error && error.classList.add("hidden");
+  }, pressKey: function (e) { const t = document.getElementById("auth-error"); if (t && t.classList.add("hidden"), e === "clear") Auth._input = Auth._input.slice(0, -1); else if (e === "enter") { Auth._verify(); return } else Auth._input.length < 4 && (Auth._input += e); Auth._updateDots(), Auth._input.length === 4 && setTimeout(Auth._verify, 120) }, _updateDots: function () { for (let e = 1; e <= 4; e++) { const t = document.getElementById("pin-d" + e); t && (t.classList.toggle("filled", Auth._input.length >= e), t.classList.remove("error")) } }, _verify: async function () {
+    if (Auth._setupMode) {
+      if (!Auth._firstPin) {
+        Auth._firstPin = Auth._input;
+        Auth._input = "";
+        Auth._updateDots();
+        const t = document.getElementById("auth-subtitle");
+        t && (t.textContent = "CONFIRM YOUR PIN");
+        return;
+      }
+      if (Auth._input !== Auth._firstPin) {
+        Auth._showError("PINs do not match. Try again.");
+        Auth._firstPin = null;
+        Auth._input = "";
+        Auth._updateDots();
+        const t = document.getElementById("auth-subtitle");
+        t && (t.textContent = "FIRST RUN \u2014 SET YOUR PIN");
+        return;
+      }
+      if (!window.jarvis || !window.jarvis.authSetupPin) {
+        Auth._showError("Auth service unavailable.");
+        return;
+      }
+      const pin = Auth._input;
+      const saved = await window.jarvis.authSetupPin(pin);
+      Auth._input = "";
+      Auth._updateDots();
+      if (!saved || !saved.ok) {
+        Auth._showError(saved && saved.error || "Could not store the PIN.");
+        Auth._firstPin = null;
+        return;
+      }
+      // Main stores the PIN and moves to locked. Require one PIN entry instead
+      // of auto-unlocking the freshly configured session.
+      Auth._showLockedPrompt(false);
+      const hint = document.getElementById("auth-hint");
+      hint && (hint.textContent = "PIN saved. Enter it once to unlock JARVIS.");
+      showToast("PIN saved. Enter it to unlock.", "success");
+      return;
+    }
+    if (!window.jarvis || !window.jarvis.authVerify) {
+      Auth._showError("Auth service unavailable.");
+      return;
+    }
+    const res = await window.jarvis.authVerify(Auth._input);
+    Auth._input = "";
+    if (res && res.recoveryRequired) {
+      Auth._showRecoveryState(res.error || "Authentication state is unreadable. Local recovery is required.");
+      return;
+    }
+    if (res && res.rateLimited) {
+      Auth._showError(res.error || "Too many attempts. Try again in 15 minutes.");
+      document.querySelectorAll(".keypad-btn").forEach(b => b.disabled = !0);
+      return;
+    }
+    if (res && res.ok) {
+      Auth._unlock();
+      return;
+    }
+    for (let t = 1; t <= 4; t++) {
+      const n = document.getElementById("pin-d" + t);
+      n && (n.classList.add("error"), n.classList.remove("filled"));
+    }
+    setTimeout(function () {
+      for (let t = 1; t <= 4; t++) {
+        const n = document.getElementById("pin-d" + t);
+        n && n.classList.remove("error");
+      }
+    }, 600);
+    Auth._showError(res && res.error || "Incorrect PIN.");
+  }, _showError: function (e) { const t = document.getElementById("auth-error"); t && (t.textContent = e, t.classList.remove("hidden")) }, _unlock: function () { Auth._keyHandler && (document.removeEventListener("keydown", Auth._keyHandler), Auth._keyHandler = null); const e = document.getElementById("auth-screen"); e && (e.classList.add("unlocking"), showToast("Identity confirmed. Welcome back, sir.", "success"), setTimeout(function () { e.classList.add("hidden") }, 600), setTimeout(() => { if (window._runBootSequence) window._runBootSequence(triggerLLMGreeting); else triggerLLMGreeting(); }, 650)) }, skip: async function () {
+    if (!window.jarvis || !window.jarvis.authSkip) {
+      Auth._showError("Auth service unavailable.");
+      return;
+    }
+    const res = await window.jarvis.authSkip();
+    if (!res || !res.ok) {
+      Auth._showError(res && res.error || "Could not skip the PIN.");
+      return;
+    }
+    Auth._unlock();
+  }, recover: async function () {
+    if (!window.jarvis || !window.jarvis.authRecoverReset) {
+      Auth._showError("Auth service unavailable.");
+      return;
+    }
+    const res = await window.jarvis.authRecoverReset();
+    if (!res || !res.ok) {
+      Auth._showError(res && res.error || "Local recovery was not completed.");
+      return;
+    }
+    Auth._errorState = !1;
+    Auth._setupMode = !0;
+    Auth._input = "";
+    Auth._firstPin = null;
+    Auth._updateDots();
+    showToast("Local lock reset. Set a new PIN.", "success");
+    await Auth.init();
+  } }; window.Auth = Auth, window.authKey = function (e) { Auth.pressKey(e) }, window.authSkip = function () { Auth.skip() }, document.addEventListener("visibilitychange", () => { document.hidden ? (typeof gpuPollInterval < "u" && gpuPollInterval && (clearInterval(gpuPollInterval), gpuPollInterval = null), typeof hudInterval < "u" && hudInterval && (clearInterval(hudInterval), hudInterval = null)) : (!hudInterval && typeof updateLiveHUD == "function" && (updateLiveHUD(), hudInterval = setInterval(updateLiveHUD, 3e4))) }); function openChangePinModal() { closeModal("settings-modal"), ["chpin-current", "chpin-new", "chpin-confirm"].forEach(t => { const n = document.getElementById(t); n && (n.value = "") }); const e = document.getElementById("chpin-error"); e && e.classList.add("hidden"), openModal("change-pin-modal"), setTimeout(() => { const t = document.getElementById("chpin-current"); t && t.focus() }, 100) } window.openChangePinModal = openChangePinModal; async function submitChangePin() {
+  const currentPin = document.getElementById("chpin-current")?.value.trim();
+  const newPin = document.getElementById("chpin-new")?.value.trim();
+  const confirmPin = document.getElementById("chpin-confirm")?.value.trim();
+  const error = document.getElementById("chpin-error");
+  function showPinError(message) {
+    if (error) {
+      error.textContent = message;
+      error.classList.remove("hidden");
+    }
+  }
+  if (!/^\d{4}$/.test(currentPin || "")) return showPinError("Current PIN must be exactly 4 digits.");
+  if (!/^\d{4}$/.test(newPin || "")) return showPinError("New PIN must be exactly 4 digits.");
+  if (newPin !== confirmPin) return showPinError("New PINs do not match.");
+  if (!window.jarvis || typeof window.jarvis.authChangePin !== "function") {
+    return showPinError("Auth service unavailable.");
+  }
+  // Main verifies the current PIN and writes the new hash atomically. The
+  // renderer never calls auth-verify from an unlocked settings screen.
+  const result = await window.jarvis.authChangePin({ currentPin, newPin });
+  if (!result || !result.ok) {
+    if (result && result.recoveryRequired && window.Auth) {
+      closeModal("change-pin-modal");
+      window.Auth._showRecoveryState(result.error || "Local recovery is required.");
+      return;
+    }
+    showPinError(result && result.error || "Could not update the PIN.");
+    return;
+  }
+  closeModal("change-pin-modal");
+  showToast("PIN updated successfully, sir.", "success");
+} window.submitChangePin = submitChangePin; async function refreshDiagnostics() { const e = document.getElementById("diag-grid"), t = document.getElementById("diag-skills-list"), n = document.getElementById("diag-queue-list"); e && (e.innerHTML = '<div class="panel-placeholder">Loading...</div>'); try { let s = null; if (window.jarvis && window.jarvis.getRuntimeStats && (s = await window.jarvis.getRuntimeStats()), e && s && s.ok) { const o = s.process, i = s.system, a = s.jarvis, c = Math.round(parseFloat(o.heap_used_mb) / parseFloat(o.heap_total_mb) * 100), r = Math.round((parseFloat(i.total_mem_gb) - parseFloat(i.free_mem_gb)) / parseFloat(i.total_mem_gb) * 100); e.innerHTML = ['<div class="diag-card">', '<div class="diag-card-title">PROCESS</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">UPTIME</span><span class="diag-stat-val">' + o.uptime_human + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP USED</span><span class="diag-stat-val">' + o.heap_used_mb + " MB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP TOTAL</span><span class="diag-stat-val">' + o.heap_total_mb + " MB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP %</span><span class="diag-stat-val ' + (c > 80 ? "warn" : "ok") + '">' + c + "%</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RSS</span><span class="diag-stat-val">' + o.rss_mb + " MB</span></div>", "</div>", '<div class="diag-card">', '<div class="diag-card-title">SYSTEM</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">SYS UPTIME</span><span class="diag-stat-val">' + i.uptime_human + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM FREE</span><span class="diag-stat-val">' + i.free_mem_gb + " GB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM TOTAL</span><span class="diag-stat-val">' + i.total_mem_gb + " GB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM USED</span><span class="diag-stat-val ' + (r > 85 ? "warn" : "ok") + '">' + r + "%</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">CPU CORES</span><span class="diag-stat-val">' + i.cpu_cores + "</span></div>", "</div>", '<div class="diag-card">', '<div class="diag-card-title">JARVIS</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">OLLAMA</span><span class="diag-stat-val ' + (a.ollama_running ? "ok" : "err") + '">' + (a.ollama_running ? "ONLINE" : "OFFLINE") + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">SKILLS</span><span class="diag-stat-val">' + a.skill_count + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">SESSIONS</span><span class="diag-stat-val">' + a.session_count + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">ELECTRON</span><span class="diag-stat-val">' + a.electron_ver + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">NODE</span><span class="diag-stat-val">' + a.node_ver + "</span></div>", "</div>"].join("") } else e && (e.innerHTML = '<div class="panel-placeholder">Could not fetch diagnostics.</div>') } catch (s) { e && (e.innerHTML = '<div class="panel-placeholder">Error: ' + (s.message || "unknown") + "</div>") } if (t) if (!Skills._manifest.length) t.innerHTML = '<div class="panel-placeholder">No skills loaded.</div>'; else { const s = { get_datetime: "\u23F0", calculator: "\u{1F9F8}", system_status: "\u{1F4BB}", web_search: "\u{1F310}" }; t.innerHTML = Skills._manifest.map(function (o) { return '<div class="diag-skill-chip"><span class="diag-skill-icon">' + (s[o.id] || "\u2B21") + '</span><div><div class="diag-skill-name">' + escHtml(o.name) + '</div><div class="diag-skill-desc">' + escHtml(o.description) + "</div></div></div>" }).join("") } if (n) { const s = TaskQueue.getQueue(); s.length ? n.innerHTML = s.map(function (o, i) { return '<div class="diag-queue-item"><span class="diag-qi-pos">#' + (i + 1) + '</span><span class="diag-qi-text">' + escHtml(o) + "</span></div>" }).join("") : n.innerHTML = '<div class="panel-placeholder">Queue empty \u2014 JARVIS is ready.</div>' } } window.refreshDiagnostics = refreshDiagnostics; function openDiagnosticsModal() { openModal("diag-modal"), refreshDiagnostics() } window.openDiagnosticsModal = openDiagnosticsModal, document.addEventListener("DOMContentLoaded", async function () { await Skills.load(); try { typeof WakeWord !== "undefined" && WakeWord.init() } catch (err) { console.warn("[WakeWord] Init failed:", err) } await Auth.init(), document.addEventListener("keydown", function (e) { e.ctrlKey && e.key === "d" && (e.preventDefault(), openDiagnosticsModal()) }), console.log("[JARVIS] New features initialized: TaskQueue, Skills, Auth, WakeWord, Diagnostics") }); const JarvisSec = {
+  state: { ok: false, capabilities: {}, legacy: null },
+  capability(id) {
+    const capabilities = this.state && this.state.capabilities;
+    return capabilities && capabilities[id] ? capabilities[id] : null;
+  },
+  async load() {
+    try {
+      const result = await window.jarvis.securityGet();
+      if (result && result.ok) this.state = result;
+      return result;
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  },
+  async request(id) {
+    try {
+      const result = await window.jarvis.securityRequest({ capability: id });
+      if (result && result.ok) this.state = result;
+      return result;
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  },
+  async revoke(id) {
+    try {
+      const payload = id ? { capability: id } : { all: true };
+      const result = await window.jarvis.securityRevoke(payload);
+      if (result && result.ok) this.state = result;
+      return result;
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  },
+  render() {
+    const terminal = document.getElementById("sec-terminal");
+    if (terminal) terminal.checked = !!(this.capability("terminal") || {}).granted;
+    const screenState = document.getElementById("sec-screen-state");
+    if (screenState) {
+      screenState.textContent = (this.capability("screen-capture") || {}).granted
+        ? "APPROVAL READY"
+        : "APPROVAL REQUIRED EACH TIME";
+    }
+    const legacy = document.getElementById("sec-legacy-notice");
+    if (legacy) {
+      const info = this.state && this.state.legacy;
+      if (info && info.detected) {
+        legacy.hidden = false;
+        legacy.textContent = "Legacy security settings were found and kept disabled. Request capabilities above; they require native main-process consent.";
+      } else {
+        legacy.hidden = true;
+      }
+    }
+  },
+}; window.openSecurityModal = function () {
     let e = document.getElementById("security-modal"); e || (e = document.createElement("div"), e.id = "security-modal", e.className = "modal", e.setAttribute("role", "dialog"), e.setAttribute("aria-modal", "true"), e.innerHTML = `
       <div class="modal-backdrop" data-action="closeModal" data-arg="security-modal"></div>
       <div class="modal-box" style="max-width:640px">
@@ -1342,55 +1554,47 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
           <div class="sec-status-banner" id="sec-status-banner">
             <span class="sec-shield-icon">\u{1F6E1}</span>
             <div>
-              <div class="sec-banner-title">SECURITY BOUNDARY ACTIVE</div>
-              <div class="sec-banner-sub">Path Guard \xB7 Command Classifier \xB7 Audit Logger \xB7 Rate Limiter</div>
+              <div class="sec-banner-title">MAIN-OWNED SECURITY BOUNDARY ACTIVE</div>
+              <div class="sec-banner-sub">Native Consent \xB7 Session Grants \xB7 Path Guard \xB7 Audit Logger</div>
             </div>
           </div>
 
-          <div class="sec-section-title">PERMISSION TOGGLES</div>
+          <div class="sec-section-title">MAIN-APPROVED CAPABILITIES</div>
+          <div class="sec-toggle-desc" id="sec-legacy-notice" hidden style="margin:0 0 10px"></div>
 
           <div class="sec-toggle-row" id="sec-row-terminal">
             <div class="sec-toggle-info">
               <div class="sec-toggle-label">\u2328 Terminal Access</div>
-              <div class="sec-toggle-desc">Allow JARVIS terminal to execute system commands</div>
+              <div class="sec-toggle-desc">Request session-scoped terminal execution. Main asks for native consent and revokes the grant on lock, hide, reload, crash, timeout, or quit.</div>
             </div>
             <label class="toggle-row">
-              <input type="checkbox" id="sec-terminal" data-change="secToggle" data-arg="'terminalEnabled', this.checked">
+              <input type="checkbox" id="sec-terminal" data-change="secToggle" data-arg="terminal">
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
 
           <div class="sec-toggle-row">
             <div class="sec-toggle-info">
-              <div class="sec-toggle-label">\u{1F4C1} Restrict File Writes</div>
-              <div class="sec-toggle-desc">Block file writes outside the current workspace directory</div>
+              <div class="sec-toggle-label">\u{1F4C1} File Write Boundary</div>
+              <div class="sec-toggle-desc">Always enforced by main path policy. No renderer toggle can disable workspace restrictions.</div>
             </div>
-            <label class="toggle-row">
-              <input type="checkbox" id="sec-writes" data-change="secToggle" data-arg="'blockWritesOutsideWorkspace', this.checked">
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </label>
+            <span class="sec-cap-state">ALWAYS ENFORCED</span>
           </div>
 
           <div class="sec-toggle-row">
             <div class="sec-toggle-info">
               <div class="sec-toggle-label">\u{1F4F8} Screen Capture</div>
-              <div class="sec-toggle-desc">Allow JARVIS to capture your screen for visual analysis (disabled by default)</div>
+              <div class="sec-toggle-desc">Each screenshot needs a fresh native approval. There is no persistent capture setting or background recording.</div>
             </div>
-            <label class="toggle-row">
-              <input type="checkbox" id="sec-screen" data-change="secToggle" data-arg="'screenCaptureEnabled', this.checked">
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </label>
+            <span class="sec-cap-state" id="sec-screen-state">APPROVAL REQUIRED EACH TIME</span>
           </div>
 
           <div class="sec-toggle-row">
             <div class="sec-toggle-info">
               <div class="sec-toggle-label">\u{1F4CB} Audit Logging</div>
-              <div class="sec-toggle-desc">Log all sensitive operations (terminal, file writes, screen capture) to security_audit.log</div>
+              <div class="sec-toggle-desc">Grant, denial, expiry, revocation, and sensitive operations are always recorded.</div>
             </div>
-            <label class="toggle-row">
-              <input type="checkbox" id="sec-audit" data-change="secToggle" data-arg="'auditLogging', this.checked">
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </label>
+            <span class="sec-cap-state">ALWAYS ON</span>
           </div>
 
           <div class="sec-section-title" style="margin-top:16px">HARD BOUNDARIES (Always Active)</div>
@@ -1408,16 +1612,60 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
           <button class="micro-btn" data-action="refreshSecAudit" style="margin-top:6px">\u21BB REFRESH LOG</button>
 
           <div class="cfg-actions" style="margin-top:16px">
-            <button class="cfg-btn-primary" data-action="JarvisSec.save">\u{1F512} SAVE SECURITY CONFIG</button>
+            <button class="cfg-btn-primary" data-action="closeModal" data-arg="security-modal">\u2715 CLOSE</button>
           </div>
         </div>
-      </div>`, document.body.appendChild(e)), JarvisSec.load().then(() => { const t = (n, s) => { const o = document.getElementById(n); o && (o.checked = s) }; t("sec-terminal", JarvisSec.config.terminalEnabled), t("sec-writes", JarvisSec.config.blockWritesOutsideWorkspace), t("sec-screen", JarvisSec.config.screenCaptureEnabled), t("sec-audit", JarvisSec.config.auditLogging), refreshSecAudit() }), openModal("security-modal")
-  }, window.secToggle = function (e, t) { JarvisSec.config[e] = t }, window.refreshSecAudit = async function () {
+      </div>`, document.body.appendChild(e)), JarvisSec.load().then(() => { JarvisSec.render(); refreshSecAudit() }), openModal("security-modal")
+  }, window.secToggle = async function (event, key) {
+    if (key !== "terminal") {
+      if (event && event.target) event.target.checked = false;
+      showToast("That security boundary is enforced by main and cannot be changed here.", "info");
+      return;
+    }
+    const input = event && event.target ? event.target : document.getElementById("sec-terminal");
+    const wanted = !!(input && input.checked);
+    const before = !!((JarvisSec.capability("terminal") || {}).granted);
+    if (input) input.disabled = true;
+    const result = wanted ? await JarvisSec.request("terminal") : await JarvisSec.revoke("terminal");
+    const effective = !!((JarvisSec.capability("terminal") || {}).granted);
+    if (input) {
+      input.checked = result && result.ok ? effective : before;
+      input.disabled = false;
+    }
+    if (!result || !result.ok) {
+      showToast((result && result.error) || "Terminal permission was not changed.", "error");
+    } else {
+      showToast(effective ? "Terminal access granted for this session." : "Terminal access revoked.", effective ? "success" : "info");
+    }
+  }, window.refreshSecAudit = async function () {
     const e = document.getElementById("sec-audit-log"); if (e) try {
       const t = await window.jarvis.secAuditRead(); if (!t.ok || !t.data) { e.textContent = "No audit log entries yet."; return } const n = t.data.split(`
 `).filter(Boolean).slice(-20).reverse(); e.innerHTML = n.map(s => { const o = s.includes("[BLOCKED]") || s.includes("[RATE_LIMITED]"), i = s.includes("[WARN"); return `<div class="sec-log-entry ${o ? "sec-log-blocked" : i ? "sec-log-warn" : "sec-log-ok"}">${escHtml(s)}</div>` }).join("")
     } catch { e.textContent = "Error loading audit log." }
-  }, window.captureScreenForAnalysis = async function () { showToast("\u{1F4F8} Capturing screen\u2026", "info"); try { const e = await window.jarvis.captureScreen(); if (!e.ok) { showToast(`\u26D4 ${e.error}`, "error"), e.error.includes("disabled") && showToast("Go to Security settings to enable screen capture.", "info"); return } window.setImgState(e.data, e.mimeType); const t = document.getElementById("img-preview"); t && (t.src = `data:${window.getImgMime()};base64,${window.getImgB64()}`), document.getElementById("img-drop-zone-inner")?.setAttribute("hidden", ""), document.getElementById("img-preview-wrap")?.removeAttribute("hidden"), document.getElementById("img-analyze-btn")?.removeAttribute("disabled"), showToast(`\u{1F4F8} Screen captured: ${e.source || "Desktop"}`, "success") } catch (e) { showToast("Screen capture failed: " + e.message, "error") } }, (function () {
+  }, window.captureScreenForAnalysis = async function () {
+    const consent = await JarvisSec.request("screen-capture");
+    if (!consent || !consent.ok) {
+      showToast((consent && consent.error) || "Screen capture permission was denied.", "info");
+      return;
+    }
+    showToast("\u{1F4F8} Capturing screen\u2026", "info");
+    try {
+      const e = await window.jarvis.captureScreen();
+      if (!e.ok) {
+        showToast(`\u26D4 ${e.error}`, "error");
+        return;
+      }
+      window.setImgState(e.data, e.mimeType);
+      const t = document.getElementById("img-preview");
+      t && (t.src = `data:${window.getImgMime()};base64,${window.getImgB64()}`);
+      document.getElementById("img-drop-zone-inner")?.setAttribute("hidden", "");
+      document.getElementById("img-preview-wrap")?.removeAttribute("hidden");
+      document.getElementById("img-analyze-btn")?.removeAttribute("disabled");
+      showToast(`\u{1F4F8} Screen captured: ${e.source || "Desktop"}`, "success");
+    } catch (e) {
+      showToast("Screen capture failed: " + e.message, "error");
+    }
+  }, (function () {
     let t = null; async function n() {
       try {
         const s = await window.jarvis.getRuntimeStats(); if (!s?.ok) return; const o = parseFloat(s.system.free_mem_gb), i = parseFloat(s.system.total_mem_gb), a = i - o, c = Math.round(a / i * 100); let r = document.getElementById("live-hud-panel"); if (!r) {
@@ -1435,7 +1683,7 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
         } const l = document.getElementById("hud-ram-bar"), p = document.getElementById("hud-ram-val"); l && (l.style.width = `${c}%`, l.className = `gpu-bar-fill${c > 85 ? " hot" : c > 65 ? " warm" : ""}`), p && (p.textContent = `${a.toFixed(1)}/${i.toFixed(1)}GB`); const g = document.getElementById("hud-uptime"); g && (g.textContent = s.process.uptime_human || "-"); const d = document.getElementById("hud-sessions"); d && (d.textContent = s.jarvis.session_count); const u = document.getElementById("hud-skills"); u && (u.textContent = s.jarvis.skill_count)
       } catch { }
     } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => { n(), t = setInterval(n, 3e4) }, { once: !0 }) : (n(), t = setInterval(n, 3e4))
-  })(), (function () { function t() { if (document.getElementById("btn-security")) return; const n = document.getElementById("sidebar-bottom"); if (!n) return; const s = document.createElement("button"); s.id = "btn-security", s.className = "sb-btn", s.title = "Security Control Center", s.innerHTML = '<span class="sb-icon">\u{1F512}</span><span class="sb-label">SECURITY</span>', s.onclick = () => window.openSecurityModal(); const o = document.getElementById("btn-poweroff"); o ? n.insertBefore(s, o) : n.appendChild(s) } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", t, { once: !0 }) : t() })(), (function () { function t() { const n = document.getElementById("img-drop-zone"); if (!n || document.getElementById("screen-capture-btn")) return; const s = document.createElement("button"); s.id = "screen-capture-btn", s.className = "dash-btn", s.style.cssText = "margin-top:10px;width:100%", s.innerHTML = "\u{1F4F8} CAPTURE SCREEN", s.onclick = () => window.captureScreenForAnalysis(), n.parentNode.insertBefore(s, n.nextSibling) } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", t, { once: !0 }) : t() })(), document.addEventListener("DOMContentLoaded", () => { JarvisSec.load().then(() => { console.log("[JARVIS] Security boundary initialized.", JarvisSec.config) }) }, { once: !0 });
+  })(), (function () { function t() { if (document.getElementById("btn-security")) return; const n = document.getElementById("sidebar-bottom"); if (!n) return; const s = document.createElement("button"); s.id = "btn-security", s.className = "sb-btn", s.title = "Security Control Center", s.innerHTML = '<span class="sb-icon">\u{1F512}</span><span class="sb-label">SECURITY</span>', s.onclick = () => window.openSecurityModal(); const o = document.getElementById("btn-poweroff"); o ? n.insertBefore(s, o) : n.appendChild(s) } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", t, { once: !0 }) : t() })(), (function () { function t() { const n = document.getElementById("img-drop-zone"); if (!n || document.getElementById("screen-capture-btn")) return; const s = document.createElement("button"); s.id = "screen-capture-btn", s.className = "dash-btn", s.style.cssText = "margin-top:10px;width:100%", s.innerHTML = "\u{1F4F8} CAPTURE SCREEN", s.onclick = () => window.captureScreenForAnalysis(), n.parentNode.insertBefore(s, n.nextSibling) } document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", t, { once: !0 }) : t() })(), document.addEventListener("DOMContentLoaded", () => { JarvisSec.load().then(() => { console.log("[JARVIS] Security capability state initialized.") }) }, { once: !0 });
   (function () {
     if (window.jarvis && window.jarvis.onTelemetry) {
       window.jarvis.onTelemetry((data) => {
@@ -1489,8 +1737,8 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
 
 // ─── GLOBAL EVENT DELEGATION (CSP FIX) ───────────────────────────
 
-// JarvisSec is a top-level const, so data-action="JarvisSec.save" cannot
-// resolve through window unless it is explicitly exposed.
+// JarvisSec is a top-level const used by the tests and legacy integrations.
+// The action registry does not expose a renderer-writable security config.
 window.JarvisSec = JarvisSec;
 
 // AgentClient uses this to announce pending approvals in the chat, not just
@@ -1557,149 +1805,94 @@ window.appendJarvisMessage = appendJarvisMessage;
   schedule();
 })();
 
-function resolveAndCall(actionStr, argsArray) {
-  if (!actionStr) return;
-  if (actionStr === 'toggleSchedulerType') {
-    if (typeof window.syncSchedulerType === 'function') window.syncSchedulerType();
+async function openDocUpload() {
+  if (!window.jarvis || typeof window.jarvis.openDocDialog !== "function") {
+    showToast("Document upload is unavailable.", "error");
     return;
   }
-  // Handle some hardcoded composite actions that were previously inline JS
-  if (actionStr === 'openModels') { window.refreshModels(); window.openModal('models-modal'); return; }
-  if (actionStr === 'openMemoryModal') { window.openModal('memory-modal'); window.renderMemory(); window.closeHamburger(); return; }
-  if (actionStr === 'toggleWakeWordAndClose') { window.toggleWakeWord(); window.closeHamburger(); return; }
-  if (actionStr === 'loadProject') { window.loadProject(); window.closeHamburger(); return; }
-  if (actionStr === 'clearProjectAndClose') { window.clearProject(); window.closeHamburger(); return; }
-  if (actionStr === 'openTerminalAndClose') { window.openTerminalModal(); window.closeHamburger(); return; }
-  if (actionStr === 'exportChatAndClose') { window.exportChat(); window.closeHamburger(); return; }
-  if (actionStr === 'selectModelAndClose') { window.selectModel(argsArray[0]); window.closeModal('models-modal'); return; }
-  if (actionStr === 'jarvisApi') { window.jarvis[argsArray[0]](); return; }
-  if (actionStr === 'applyTheme') { window.applyTheme(argsArray[0]); window.closeHamburger(); return; }
-
-  const parts = actionStr.split('.');
-  let obj = window;
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (!obj) return;
-    obj = obj[parts[i]];
+  const picked = await window.jarvis.openDocDialog();
+  if (!picked || !picked.ok || !picked.filePath) return;
+  const lower = String(picked.filePath).toLowerCase();
+  const result = lower.endsWith(".pdf")
+    ? await window.jarvis.readPdf(picked.filePath)
+    : await window.jarvis.readTextDoc(picked.filePath);
+  if (!result || !result.ok) {
+    showToast(result && result.error || "Could not read the document.", "error");
+    return;
   }
-  if (!obj) return;
-  const func = obj[parts[parts.length - 1]];
-  if (typeof func === 'function') {
-    func.apply(obj, argsArray);
-  }
+  const name = String(picked.filePath).split(/[\\/]/).pop() || "Document";
+  state.activeDocument = {
+    path: picked.filePath,
+    name,
+    text: String(result.text || result.data || ""),
+  };
+  const indicator = document.getElementById("active-doc-indicator");
+  const nameEl = document.getElementById("active-doc-name");
+  if (nameEl) nameEl.textContent = name;
+  if (indicator) indicator.style.display = "flex";
+  showToast("Document attached: " + name, "success");
 }
 
-function extractArgs(el) {
-  const args = [];
-  if (el.hasAttribute('data-arg')) args.push(el.getAttribute('data-arg'));
-  if (el.hasAttribute('data-arg1')) args.push(el.getAttribute('data-arg1'));
-  if (el.hasAttribute('data-arg2')) args.push(el.getAttribute('data-arg2'));
-  if (el.hasAttribute('data-col') && el.hasAttribute('data-idx')) {
-    args.push(el.getAttribute('data-col'));
-    args.push(parseInt(el.getAttribute('data-idx'), 10));
-  }
-  if (el.hasAttribute('data-idx') && !el.hasAttribute('data-col')) {
-    args.push(parseInt(el.getAttribute('data-idx'), 10));
-  }
-  if (el.hasAttribute('data-arg-json')) {
-    try { args.push(JSON.parse(el.getAttribute('data-arg-json'))); } catch(e){}
-  }
-  return args;
+function clearActiveDoc() {
+  state.activeDocument = null;
+  const indicator = document.getElementById("active-doc-indicator");
+  if (indicator) indicator.style.display = "none";
 }
 
-document.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-action]');
-  if (el) {
-    const action = el.getAttribute('data-action');
-    const args = extractArgs(el);
-    resolveAndCall(action, args);
-  }
-});
-
-document.addEventListener('change', (e) => {
-  const el = e.target.closest('[data-change]');
-  if (el) {
-    const action = el.getAttribute('data-change');
-    let args = extractArgs(el);
-    if (e.target.tagName === 'SELECT') {
-      args = [e.target.value];
-    } else if (args.length === 0 && action.includes('toggle')) {
-      args = [e.target.checked];
+const ACTION_CUSTOM_HANDLERS = Object.freeze({
+  windowMinimize: () => window.jarvis && window.jarvis.minimize && window.jarvis.minimize(),
+  windowMaximize: () => window.jarvis && window.jarvis.maximize && window.jarvis.maximize(),
+  windowClose: () => window.jarvis && window.jarvis.close && window.jarvis.close(),
+  openExternalLink: url => {
+    let parsed;
+    try { parsed = new URL(url); } catch { showToast("Invalid link.", "error"); return; }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      showToast("Only HTTP(S) links can be opened.", "error");
+      return;
     }
-    resolveAndCall(action, args);
-  }
+    if (window.jarvis && typeof window.jarvis.openExternal === "function") window.jarvis.openExternal(parsed.href);
+  },
+  openModels: () => { refreshModels(); openModal("models-modal"); },
+  selectModelAndClose: name => { selectModel(name); closeModal("models-modal"); },
+  applyTheme: theme => { applyTheme(theme); closeHamburger(); },
+  exportChatAndClose: () => { exportChat(); closeHamburger(); },
+  openDocUpload,
+  clearActiveDoc,
+  openMemoryModal: () => { openModal("memory-modal"); if (typeof window.renderMemory === "function") window.renderMemory(); closeHamburger(); },
+  openTerminalAndClose: () => { openTerminalModal(); closeHamburger(); },
+  clearProjectAndClose: () => { if (typeof window.clearProject === "function") window.clearProject(); closeHamburger(); },
+  copyCodeBlock,
+  deleteSession: (id, event) => deleteSession(id, event),
+  toggleSchedulerType: () => { if (typeof window.syncSchedulerType === "function") window.syncSchedulerType(); },
 });
 
-document.addEventListener('input', (e) => {
-  const el = e.target.closest('[data-input]');
-  if (el) {
-    const action = el.getAttribute('data-input');
-    const args = extractArgs(el);
-    if (action === 'updateKPIProg') args.push(e.target.value);
-    resolveAndCall(action, args);
-  }
+function denyAction(id, reason) {
+  const safeId = typeof id === "string" ? id.slice(0, 64) : "non-string";
+  console.warn("[ACTION_DENIED]", safeId, reason);
+}
+
+const actionRegistry = JarvisActionRegistry.createRegistry(window.JarvisActionManifest, {
+  globalObject: window,
+  customHandlers: ACTION_CUSTOM_HANDLERS,
+  onDenied: denyAction,
+  onError: (id, error) => {
+    console.error("[ACTION_ERROR]", id, error && error.message ? error.message : error);
+    showToast("That action could not be completed.", "error");
+  },
 });
-
-document.addEventListener('blur', (e) => {
-  const el = e.target.closest('[data-blur]');
-  if (el) {
-    const action = el.getAttribute('data-blur');
-    const args = extractArgs(el);
-    if (action === 'saveKPI') args.push(e.target.innerText);
-    resolveAndCall(action, args);
-  }
-}, true);
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    const el = e.target.closest('[data-keydown-enter]');
-    if (el) {
-      const action = el.getAttribute('data-keydown-enter');
-      const args = extractArgs(el);
-      resolveAndCall(action, args);
+JarvisActionRegistry.installDelegatedEvents(document, actionRegistry, { onDenied: denyAction });
+JarvisActionRegistry.installUntrustedLinkGuard(
+  document,
+  href => {
+    if (window.jarvis && typeof window.jarvis.openExternal === "function") {
+      window.jarvis.openExternal(href);
     }
-  }
-});
-
-document.addEventListener('dragstart', (e) => {
-  const el = e.target.closest('[data-dragstart]');
-  if (el) {
-    const action = el.getAttribute('data-dragstart');
-    const args = [e, ...extractArgs(el)];
-    resolveAndCall(action, args);
-  }
-});
-
-document.addEventListener('dragend', (e) => {
-  const el = e.target.closest('[data-dragend]');
-  if (el) {
-    const action = el.getAttribute('data-dragend');
-    resolveAndCall(action, [e]);
-  }
-});
-
-document.addEventListener('dragover', (e) => {
-  const el = e.target.closest('[data-dragover]');
-  if (el) {
-    const action = el.getAttribute('data-dragover');
-    resolveAndCall(action, [e]);
-  }
-});
-
-document.addEventListener('dragleave', (e) => {
-  const el = e.target.closest('[data-dragleave]');
-  if (el) {
-    const action = el.getAttribute('data-dragleave');
-    resolveAndCall(action, [e]);
-  }
-});
-
-document.addEventListener('drop', (e) => {
-  const el = e.target.closest('[data-drop]');
-  if (el) {
-    const action = el.getAttribute('data-drop');
-    const args = [e, ...extractArgs(el)];
-    resolveAndCall(action, args);
-  }
+  },
+  { onDenied: denyAction },
+);
+window.jarvisActionRegistry = Object.freeze({
+  has: id => typeof id === "string" && Object.prototype.hasOwnProperty.call(actionRegistry.actions, id),
+  dispatch: (id, args = [], event = null) => actionRegistry.dispatch(id, args, event),
 });
 
 if (typeof hljs !== 'undefined') hljs.highlightAll && document.addEventListener('DOMContentLoaded', () => hljs.highlightAll());
@@ -1717,6 +1910,7 @@ Object.assign(window, {
   MODES,
   showToast,
   renderMarkdown,
+  enhanceCodeBlocks,
   speakText,
   extractPlainText,
   saveSession,

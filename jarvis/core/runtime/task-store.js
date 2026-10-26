@@ -18,9 +18,14 @@ const {
 const TASK_SCHEMA_VERSION = 1;
 const DEFAULT_MAX_STEPS = 15;
 const MAX_STEPS_LIMIT = 100;
+const DEFAULT_MAX_DURATION_MS = 10 * 60 * 1000;
+const MAX_DURATION_LIMIT_MS = 30 * 60 * 1000;
+const DEFAULT_MAX_TOKENS = 120000;
+const MAX_TOKENS_LIMIT = 2_000_000;
 const MAX_GOAL_LENGTH = 20000;
 const MAX_SOURCE_LENGTH = 80;
 const MAX_LIST_LIMIT = 500;
+const PLAN_STATUSES = new Set(['none', 'active', 'partial', 'completed', 'invalid']);
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
@@ -112,8 +117,48 @@ class TaskStore {
     // Backward-compatible defaults for tasks created before these fields existed.
     if (task.messages === undefined) task.messages = [];
     if (task.tainted === undefined) task.tainted = false;
+    if (task.errorCode === undefined) task.errorCode = null;
     if (!Array.isArray(task.messages)) throw new Error('Task messages must be an array');
     if (typeof task.tainted !== 'boolean') throw new Error('Task tainted must be a boolean');
+    if (task.errorCode !== null && typeof task.errorCode !== 'string') {
+      throw new Error('Task errorCode must be a string or null');
+    }
+
+    if (task.plan === undefined) task.plan = [];
+    if (task.planStatus === undefined) task.planStatus = 'none';
+    if (task.currentPlanStepId === undefined) task.currentPlanStepId = null;
+    if (!Array.isArray(task.plan)) throw new Error('Task plan must be an array');
+    if (!PLAN_STATUSES.has(task.planStatus)) throw new Error('Task planStatus is invalid');
+    if (task.currentPlanStepId !== null && typeof task.currentPlanStepId !== 'string') {
+      throw new Error('Task currentPlanStepId must be a string or null');
+    }
+
+    if (task.maxDurationMs === undefined) task.maxDurationMs = DEFAULT_MAX_DURATION_MS;
+    if (task.maxTokens === undefined) task.maxTokens = DEFAULT_MAX_TOKENS;
+    if (!Number.isInteger(task.maxDurationMs) || task.maxDurationMs < 1 || task.maxDurationMs > MAX_DURATION_LIMIT_MS) {
+      throw new Error(`Task maxDurationMs must be an integer between 1 and ${MAX_DURATION_LIMIT_MS}`);
+    }
+    if (!Number.isInteger(task.maxTokens) || task.maxTokens < 1 || task.maxTokens > MAX_TOKENS_LIMIT) {
+      throw new Error(`Task maxTokens must be an integer between 1 and ${MAX_TOKENS_LIMIT}`);
+    }
+
+    if (task.tokenUsage === undefined) {
+      task.tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    }
+    if (!task.tokenUsage || typeof task.tokenUsage !== 'object' || Array.isArray(task.tokenUsage)) {
+      throw new Error('Task tokenUsage must be an object');
+    }
+    for (const key of ['promptTokens', 'completionTokens', 'totalTokens']) {
+      if (task.tokenUsage[key] === undefined) task.tokenUsage[key] = 0;
+      if (!Number.isInteger(task.tokenUsage[key]) || task.tokenUsage[key] < 0) {
+        throw new Error(`Task tokenUsage.${key} must be a non-negative integer`);
+      }
+    }
+
+    if (task.verification === undefined) task.verification = null;
+    if (task.verification !== null && (typeof task.verification !== 'object' || Array.isArray(task.verification))) {
+      throw new Error('Task verification must be an object or null');
+    }
 
     if (!Number.isFinite(task.createdAt)) throw new Error('Task createdAt must be a number');
     if (!Number.isFinite(task.updatedAt)) throw new Error('Task updatedAt must be a number');
@@ -216,6 +261,8 @@ class TaskStore {
     permissions = { profile: 'default' },
     metadata = {},
     maxSteps = this.defaultMaxSteps,
+    maxDurationMs = DEFAULT_MAX_DURATION_MS,
+    maxTokens = DEFAULT_MAX_TOKENS,
   } = {}) {
     if (typeof goal !== 'string' || !goal.trim()) {
       throw new Error('Task goal must be a non-empty string');
@@ -228,6 +275,12 @@ class TaskStore {
     }
     if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > MAX_STEPS_LIMIT) {
       throw new Error(`Task maxSteps must be an integer between 1 and ${MAX_STEPS_LIMIT}`);
+    }
+    if (!Number.isInteger(maxDurationMs) || maxDurationMs < 1 || maxDurationMs > MAX_DURATION_LIMIT_MS) {
+      throw new Error(`Task maxDurationMs must be an integer between 1 and ${MAX_DURATION_LIMIT_MS}`);
+    }
+    if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > MAX_TOKENS_LIMIT) {
+      throw new Error(`Task maxTokens must be an integer between 1 and ${MAX_TOKENS_LIMIT}`);
     }
     if (permissions !== null && typeof permissions !== 'object' && typeof permissions !== 'string') {
       throw new Error('Task permissions must be an object or string');
@@ -248,12 +301,20 @@ class TaskStore {
       status: TASK_STATUS.QUEUED,
       stepCount: 0,
       maxSteps,
+      maxDurationMs,
+      maxTokens,
       steps: [],
       approvals: [],
       messages: [],
+      plan: [],
+      planStatus: 'none',
+      currentPlanStepId: null,
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      verification: null,
       tainted: false,
       result: null,
       error: null,
+      errorCode: null,
       createdAt: now,
       updatedAt: now,
       startedAt: null,
@@ -272,6 +333,8 @@ class TaskStore {
         source: task.source,
         permissions: task.permissions,
         maxSteps: task.maxSteps,
+        maxDurationMs: task.maxDurationMs,
+        maxTokens: task.maxTokens,
       });
 
       return clone(task);
@@ -415,5 +478,9 @@ module.exports = {
   TASK_SCHEMA_VERSION,
   DEFAULT_MAX_STEPS,
   MAX_STEPS_LIMIT,
+  DEFAULT_MAX_DURATION_MS,
+  MAX_DURATION_LIMIT_MS,
+  DEFAULT_MAX_TOKENS,
+  MAX_TOKENS_LIMIT,
   MAX_GOAL_LENGTH,
 };

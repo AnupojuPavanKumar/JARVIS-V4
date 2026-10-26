@@ -23,11 +23,12 @@ function makeFakeRegistry(ok = true) {
   };
 }
 
-async function setup({ skillsOk = true, holdRun = false, listModels, onAgentEvent = null } = {}) {
+async function setup({ skillsOk = true, holdRun = false, listModels, onAgentEvent = null, controllerOptions = {} } = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-agent-controller-test-'));
   const handlers = new Map();
   const audit = [];
   const runs = [];
+  const runtimeConfigs = [];
   let store = null;
   let registry = makeFakeRegistry(skillsOk);
 
@@ -38,7 +39,10 @@ async function setup({ skillsOk = true, holdRun = false, listModels, onAgentEven
     getPath() { return tempDir; },
   };
 
-  const createRuntime = ({ store: taskStore }) => ({
+  const createRuntime = config => {
+    runtimeConfigs.push(config);
+    const taskStore = config.store;
+    return {
     runTask(taskId, context, options) {
       runs.push({ type: 'run', taskId, context, options });
       if (holdRun) return new Promise(() => {});
@@ -55,11 +59,13 @@ async function setup({ skillsOk = true, holdRun = false, listModels, onAgentEven
       }
       return taskStore.transition(taskId, TASK_STATUS.RUNNING, { reason: 'approval-granted' });
     },
-  });
+    };
+  };
 
   const controller = registerAgentController({
     ipcMain,
     app,
+    ...controllerOptions,
     secAudit(action, detail, verdict) { audit.push({ action, detail, verdict }); },
     secCheckRate() { return true; },
     mainWindowProvider() { return null; },
@@ -74,7 +80,7 @@ async function setup({ skillsOk = true, holdRun = false, listModels, onAgentEven
   });
 
   await controller.ensureReady();
-  return { tempDir, handlers, store, controller, runs, audit, registry };
+  return { tempDir, handlers, store, controller, runs, audit, registry, runtimeConfigs };
 }
 
 function cleanup(context) {
@@ -103,6 +109,34 @@ test('starts a task, validates input, and persists runtime metadata', async () =
 
     assert.equal((await start({}, { goal: '   ' })).ok, false);
     assert.equal((await start({}, { goal: 'x', model: 'bad model!' })).ok, false);
+  } finally {
+    cleanup(context);
+  }
+});
+
+test('seeds one generic monitoring tool call for a timed GPU goal', async () => {
+  const context = await setup();
+  try {
+    const start = context.handlers.get('agent-task-start');
+    const started = await start({}, {
+      goal: 'observe the gpu 1 usage, dedicated memory for 30 sec',
+      model: 'llama3.1:8b',
+      maxSteps: 4,
+    });
+
+    assert.equal(started.ok, true);
+    assert.equal(started.task.metadata.runtime.initialToolCall.tool, 'system_metrics');
+    assert.deepEqual(started.task.metadata.runtime.initialToolCall.args, {
+      target: 'gpu 1',
+      duration_sec: 30,
+    });
+    assert.equal(started.task.metadata.runtime.completeWithToolResult, true);
+    assert.equal(context.runs.length, 1);
+    assert.equal(context.runs[0].context.initialToolCall.tool, 'system_metrics');
+    assert.equal(context.runs[0].context.completeWithToolResult, true);
+
+    const plain = await start({}, { goal: 'Inspect the workspace' });
+    assert.equal(plain.task.metadata.runtime.initialToolCall, undefined);
   } finally {
     cleanup(context);
   }
@@ -252,7 +286,8 @@ test('starts durable tasks from scheduler jobs (headless path)', async () => {
       payload: { goal: 'Summarize the notes', maxSteps: 2, mode: 'research' },
     });
     assert.equal(scheduled.ok, true);
-    assert.equal(scheduled.task.source, 'scheduler');
+    assert.equal(scheduled.task.source, 'schedule');
+    assert.equal(scheduled.task.permissions.profile, 'background-restricted');
     assert.equal(scheduled.task.maxSteps, 2);
     assert.equal(scheduled.task.metadata.schedule.id, 'job_abc');
     assert.equal(scheduled.task.metadata.schedule.name, 'Nightly digest');
@@ -270,7 +305,7 @@ test('starts durable tasks from scheduler jobs (headless path)', async () => {
       payload: { text: 'Say hello to the user' },
     });
     assert.equal(viaText.ok, true);
-    assert.equal(viaText.task.source, 'scheduler');
+    assert.equal(viaText.task.source, 'schedule');
     assert.equal(viaText.task.goal, 'Say hello to the user');
     assert.equal(viaText.task.metadata.schedule.name, 'Text job');
 
@@ -319,7 +354,36 @@ test('falls back to the default model when the installed-model probe fails', asy
       payload: { goal: 'Try anyway' },
     });
     assert.equal(result.ok, true);
-    assert.equal(result.task.metadata.runtime.model, 'llama3.2');
+    assert.equal(result.task.metadata.runtime.model, 'llama3.1:8b');
+  } finally {
+    cleanup(context);
+  }
+});
+
+test('routes task purpose and planner/verifier roles through configured models', async () => {
+  const context = await setup({
+    controllerOptions: {
+      smallModel: 'tiny:1b',
+      strongModel: 'strong:70b',
+      plannerModel: 'planner:7b',
+      verifierModel: 'verifier:7b',
+    },
+  });
+  try {
+    const start = context.handlers.get('agent-task-start');
+    const classified = await start({}, { goal: 'Classify this request', purpose: 'classification' });
+    assert.equal(classified.ok, true);
+    assert.equal(classified.task.metadata.runtime.model, 'tiny:1b');
+
+    const planned = await start({}, { goal: 'Plan a complex request', purpose: 'planning' });
+    assert.equal(planned.ok, true);
+    assert.equal(planned.task.metadata.runtime.model, 'strong:70b');
+
+    const configs = context.runtimeConfigs;
+    assert.equal(configs[0].model, 'tiny:1b');
+    assert.equal(configs[0].plannerModel, 'planner:7b');
+    assert.equal(configs[0].verifierModel, 'verifier:7b');
+    assert.equal(configs[1].model, 'strong:70b');
   } finally {
     cleanup(context);
   }

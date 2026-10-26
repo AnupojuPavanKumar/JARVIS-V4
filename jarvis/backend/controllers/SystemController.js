@@ -22,8 +22,49 @@ function checkOllamaRunning() {
   });
 }
 
-module.exports = function registerSystemController({ ipcMain, app, mainWindowProvider, secAudit, liveSecConfig, secCheckRate }) {
-  
+module.exports = function registerSystemController({
+  ipcMain,
+  app,
+  mainWindowProvider,
+  secAudit,
+  secCheckRate,
+  capabilityStore = null,
+  sessionState = null,
+  nativeDialog = dialog,
+}) {
+  const sessionIsPrivileged = () => !!sessionState && sessionState.canUsePrivileges === true;
+  const terminalGranted = () => sessionIsPrivileged()
+    && !!capabilityStore
+    && capabilityStore.isGranted('terminal');
+
+  async function confirmNativeAction({ title, message, detail, auditAction, auditTarget }) {
+    if (!nativeDialog || typeof nativeDialog.showMessageBox !== 'function') {
+      secAudit(auditAction, auditTarget, 'BLOCKED - native confirmation unavailable');
+      return false;
+    }
+    const win = typeof mainWindowProvider === 'function' ? mainWindowProvider() : null;
+    if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) {
+      secAudit(auditAction, auditTarget, 'BLOCKED - confirmation window unavailable');
+      return false;
+    }
+    try {
+      const result = await nativeDialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['Allow', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        title,
+        message,
+        detail,
+      });
+      return !!result && result.response === 0;
+    } catch (error) {
+      secAudit(auditAction, `${auditTarget}: ${error.message}`, 'BLOCKED - confirmation failed');
+      return false;
+    }
+  }
+
   ipcMain.handle('get-user-data-path', () => app.getPath('userData'));
   
   ipcMain.handle('get-runtime-stats', async () => {
@@ -82,11 +123,19 @@ module.exports = function registerSystemController({ ipcMain, app, mainWindowPro
   });
 
   ipcMain.handle('run-command', async (_, command, cwd, timeout) => {
+    const cmdStr = String(command == null ? '' : command).trim();
+    if (!sessionIsPrivileged()) {
+      secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - session locked');
+      return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Unlock JARVIS before running commands' };
+    }
+    if (!terminalGranted()) {
+      secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - terminal capability not granted');
+      return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Terminal execution requires main-process consent' };
+    }
     if (!secCheckRate('runCommand', 15)) {
       return { ok: false, stdout: '', stderr: '', exitCode: 1, error: '⛔ Rate limit: max 15 commands/minute.' };
     }
 
-    const cmdStr = String(command).trim();
     // Assuming ipc-policy is at root of jarvis/
     const { classifyCommand, INTERNAL_ALLOWLIST } = require('../../ipc-policy');
 
@@ -101,36 +150,33 @@ module.exports = function registerSystemController({ ipcMain, app, mainWindowPro
     }
 
     if (!INTERNAL_ALLOWLIST.has(cmdStr) && !isAllowedGit) {
-      if (!liveSecConfig.terminalEnabled) {
-        secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - terminal disabled');
-        return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Terminal execution is disabled' };
-      }
       const verdict = classifyCommand(cmdStr);
       if (verdict === 'blocked') {
         secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - policy');
         return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Command blocked by security policy' };
       }
-      if (verdict === 'confirm') {
-        const mainWindow = mainWindowProvider();
-        if (!mainWindow) {
-          secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - no window for confirm');
-          return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Command requires confirmation but no window available' };
-        }
-        const { response } = await dialog.showMessageBox(mainWindow, {
-          type: 'warning',
-          buttons: ['Run Command', 'Cancel'],
-          defaultId: 1,
-          cancelId: 1,
-          title: 'JARVIS — Command Confirmation Required',
-          message: 'This command requires your approval before running.',
-          detail: `Command:\n${cmdStr.slice(0, 500)}`,
-        });
-        if (response !== 0) {
-          secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'BLOCKED - user cancelled confirm');
-          return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Command cancelled by user' };
-        }
-        secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'ALLOWED - user confirmed');
+      // Every command outside the fixed internal/git read-only allowlist gets
+      // its own main-process confirmation, including commands the classifier
+      // considers low risk. The renderer cannot skip this step.
+      const approved = await confirmNativeAction({
+        title: 'JARVIS — Command Confirmation Required',
+        message: verdict === 'confirm'
+          ? 'This command requires your approval before running.'
+          : 'Allow this non-allowlisted command?',
+        detail: [
+          `Command:\n${cmdStr.slice(0, 500)}`,
+          `Working directory: ${typeof cwd === 'string' && cwd ? cwd.slice(0, 300) : 'app default'}`,
+          `Classifier result: ${verdict.toUpperCase()}`,
+          '',
+          'Only allow commands you understand. The terminal capability alone does not approve this individual command.',
+        ].join('\n'),
+        auditAction: 'RUN_COMMAND',
+        auditTarget: cmdStr.slice(0, 200),
+      });
+      if (!approved) {
+        return { ok: false, stdout: '', stderr: '', exitCode: 1, error: 'Command cancelled by user' };
       }
+      secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'ALLOWED - user confirmed');
     }
 
     secAudit('RUN_COMMAND', cmdStr.slice(0, 200), 'ALLOWED');
@@ -251,10 +297,21 @@ module.exports = function registerSystemController({ ipcMain, app, mainWindowPro
     const a = action.toLowerCase();
 
     if (a === 'close' || a === 'kill') {
-      if (!liveSecConfig.terminalEnabled) {
-        secAudit('SYSTEM_CMD_KILL', t, 'BLOCKED - terminal disabled');
-        return { ok: false, error: 'Process termination is disabled (terminal permission required)' };
+      if (!terminalGranted()) {
+        secAudit('SYSTEM_CMD_KILL', t, 'BLOCKED - terminal capability not granted');
+        return { ok: false, error: 'Process termination requires main-process terminal consent' };
       }
+      const approved = await confirmNativeAction({
+        title: 'JARVIS — Confirm Process Termination',
+        message: `Terminate ${t}?`,
+        detail: [
+          `Process: ${t}`,
+          'This ends the process immediately. Unsaved work in that application may be lost.',
+        ].join('\n'),
+        auditAction: 'SYSTEM_CMD_KILL',
+        auditTarget: t,
+      });
+      if (!approved) return { ok: false, error: 'Process termination cancelled by user' };
     }
 
     if (a === 'open-app' || a === 'start-app') {

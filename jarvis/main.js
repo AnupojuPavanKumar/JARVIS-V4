@@ -5,14 +5,22 @@
 // ═══════════════════════════════════════════════════════════════
 
 const {
-  app, BrowserWindow, ipcMain, globalShortcut,
-  Tray, Menu, nativeImage, shell, dialog, Notification
+  app, BrowserWindow, ipcMain, globalShortcut, session, safeStorage,
+  Tray, Menu, nativeImage, shell, dialog, Notification, powerMonitor
 } = require('electron');
 
 const _path = require('path');
 const _url = require('url');
 
 // IPC sender validation is installed later (lines ~95) after mainWindow is known.
+
+// Pin the Windows AppUserModelId before any notification or login-item call.
+// Electron's getLoginItemSettings() compares the Run registry value against
+// this id; a custom `name` passed to setLoginItemSettings() is invisible to
+// that readback and made the background-presence toggle snap back off.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('JARVIS');
+}
 
 // LOW-02 fix: --expose_gc removed (was leaking V8 internals to renderer context)
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048');
@@ -30,15 +38,74 @@ const os = require('os');
 const http = require('http');
 const https = require('https');
 const JarvisMemory = require('./memory');
-const JarvisScheduler = require('./scheduler');
+const { MemoryStore } = require('./core/memory/memory-store');
+const { Scheduler } = require('./core/scheduler/scheduler');
+const { ElectronBrowserDriver } = require('./backend/browser/electron-browser-driver');
+const { parseAllowedOrigins } = require('./core/browser/browser-policy');
+const { IntegrationStore } = require('./core/integrations/integration-store');
+const { FixtureProvider } = require('./core/integrations/fixture-provider');
+const { IntegrationService } = require('./core/integrations/integration-service');
+const { createSafeStorageVault } = require('./backend/integrations/safe-storage-vault');
+const { DocumentIndex } = require('./core/documents/document-index');
+const { AmbientService } = require('./backend/ambient/ambient-service');
+const { FaceProfileStore } = require('./backend/face/face-profile-store');
+const { FaceModelServer } = require('./backend/face/face-model-server');
+const { createMicrophoneGate } = require('./backend/voice/microphone-gate');
+const { normalizeMediaTypes, decideMediaPermission } = require('./backend/voice/media-permission');
+const { getAuthStatus } = require('./backend/auth/auth-store');
+const { createSessionState } = require('./backend/security/session-state');
+const { createCapabilityStore } = require('./backend/security/capability-store');
+const { createIpcGuard } = require('./backend/security/ipc-guard');
+const { attachRendererSessionGuards } = require('./backend/security/renderer-guards');
+
+// Keep the existing development data directory when running the packaged
+// JARVIS.exe. Electron would otherwise switch from `jarvis-ai-os` to a
+// product-name folder and strand the user's PIN, face profile, memory, and
+// scheduler data. Tests and explicit --user-data-dir launches keep their own
+// isolated paths.
+if (process.env.JARVIS_TEST_MODE !== '1' && !app.commandLine.hasSwitch('user-data-dir')) {
+  try {
+    app.setPath('userData', path.join(app.getPath('appData'), 'jarvis-ai-os'));
+  } catch (error) {
+    console.error('[MAIN] Could not pin the JARVIS user data directory:', error.message);
+  }
+}
 
 // ─── State ───────────────────────────────────────────────────────
 let mainWindow = null;
 let tray = null;
 app.isQuitting = false;
-let liveSecConfig = { terminalEnabled: false, screenCaptureEnabled: false };
 const notifiedApprovals = new Set();
+const notifiedOutcomes = new Set();
+let memoryStore = null;
+let scheduler = null;
+let browserDriver = null;
+let integrationService = null;
+let documentIndex = null;
+let ambientService = null;
+let faceProfileStore = null;
+let faceModelServer = null;
+let faceCameraArmedUntil = 0;
+const voiceMicrophoneGate = createMicrophoneGate();
+const faceEnrollmentState = { active: false, until: 0 };
+let sessionState = null;
 const DEFAULT_TRAY_TOOLTIP = 'JARVIS — AI Operating System  [Ctrl+Space]';
+
+// A second launch (for example, from the Start menu while JARVIS is already
+// resident in the tray) must focus the existing instance instead of creating a
+// duplicate scheduler, browser, or task runtime. Tests use isolated user-data
+// directories and skip the lock so their multiple Electron processes can run.
+const singleInstanceLock = process.env.JARVIS_TEST_MODE === '1'
+  ? true
+  : app.requestSingleInstanceLock();
+if (singleInstanceLock) {
+  app.on('second-instance', () => {
+    if (app.isReady()) focusExistingInstance();
+    else app.whenReady().then(focusExistingInstance).catch(() => {});
+  });
+} else {
+  app.quit();
+}
 
 // ─── Security Rate Limiting ──────────────────────────────────────────
 const rateLimits = {};
@@ -60,46 +127,168 @@ function secAudit(action, detail, verdict) {
   console.log(`[SEC] ${verdict} | ${action} | ${entry.detail}`);
 }
 
-// ─── Global IPC Sender Validation ──────────────────────────────────────────
-// Defense-in-depth: checks both senderFrame URL (origin) and webContents identity.
-// Fails closed if mainWindow is null or destroyed.
-const _allowedRendererBase = process.env.VITE_DEV_SERVER_URL ? (new _url.URL(process.env.VITE_DEV_SERVER_URL).href) : (_url.pathToFileURL(_path.join(__dirname, 'renderer')).href + '/');
+// Grants live only in main memory. They are never loaded from renderer data or
+// the legacy security settings file.
+const capabilityStore = createCapabilityStore({ audit: secAudit });
 
-const originalIpcHandle = ipcMain.handle.bind(ipcMain);
+// ─── Main-owned session state and default-deny IPC ────────────────────────
+// The exact approved entry document, not a path prefix. Subframes, destroyed
+// frames, unknown channels, and every channel without a policy entry are denied.
+const _approvedRendererUrl = _url.pathToFileURL(_path.join(__dirname, 'renderer', 'index.html')).href;
 global.workspaceTokens = {};
 
-ipcMain.handle = (channel, listener) => {
-  originalIpcHandle(channel, async (event, ...args) => {
-    const senderOk = mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
-    const urlOk = event.senderFrame && typeof event.senderFrame.url === 'string' &&
-      event.senderFrame.url.startsWith(_allowedRendererBase);
-    if (!senderOk || !urlOk) {
-      secAudit('IPC_BLOCK', channel, `BLOCKED sender=${senderOk} url=${urlOk}`);
-      return { ok: false, error: 'untrusted sender' };
+sessionState = createSessionState({
+  initial: 'booting',
+  audit: secAudit,
+});
+
+const ipcGuard = createIpcGuard({
+  ipcMain,
+  getMainWindow: () => mainWindow,
+  approvedRendererUrl: _approvedRendererUrl,
+  sessionState,
+  audit: secAudit,
+  strictPolicy: !app.isPackaged,
+});
+ipcGuard.install();
+
+// ─── Session Lock / Media Permission Boundary ────────────────────
+// The face camera is armed only for a short, explicit unlock or enrollment
+// attempt. The microphone is armed only after the user explicitly enables the
+// local wake word or push-to-talk. Every other renderer permission request is
+// denied. These are convenience/privacy gates, not OS-level security boundaries.
+function armFaceCamera(durationMs = 15000) {
+  const bounded = Math.min(Math.max(Number(durationMs) || 15000, 1000), 30000);
+  faceCameraArmedUntil = Date.now() + bounded;
+}
+
+function disarmFaceCamera() {
+  faceCameraArmedUntil = 0;
+}
+
+function faceCameraIsArmed() {
+  return Date.now() < faceCameraArmedUntil;
+}
+
+function installMediaPermissionHandlers() {
+  const ses = session.defaultSession;
+  if (!ses) return;
+  ses.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {
+    const isMainRenderer = !!mainWindow && !mainWindow.isDestroyed() && webContents === mainWindow.webContents;
+    const mediaTypes = normalizeMediaTypes(details);
+    const allowed = decideMediaPermission({
+      permission,
+      isMainRenderer,
+      mediaTypes,
+      faceCameraArmed: faceCameraIsArmed(),
+      microphoneArmed: voiceMicrophoneGate.isArmed(),
+    });
+    if (!allowed) {
+      secAudit('PERMISSION_BLOCK', permission || 'unknown', 'BLOCKED');
     }
-    return listener(event, ...args);
+    callback(allowed);
   });
-};
+  ses.setPermissionCheckHandler((webContents, permission, _requestingOrigin, details = {}) => {
+    const isMainRenderer = !!mainWindow && !mainWindow.isDestroyed() && webContents === mainWindow.webContents;
+    return decideMediaPermission({
+      permission,
+      isMainRenderer,
+      mediaTypes: normalizeMediaTypes(details),
+      faceCameraArmed: faceCameraIsArmed(),
+      microphoneArmed: voiceMicrophoneGate.isArmed(),
+    });
+  });
+}
 
-const originalIpcOn = ipcMain.on.bind(ipcMain);
-ipcMain.on = (channel, listener) => {
-  originalIpcOn(channel, (event, ...args) => {
-    const senderOk = mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
-    const urlOk = event.senderFrame && typeof event.senderFrame.url === 'string' &&
-      event.senderFrame.url.startsWith(_allowedRendererBase);
-    if (!senderOk || !urlOk) {
-      secAudit('IPC_BLOCK', channel, `BLOCKED sender=${senderOk} url=${urlOk}`);
-      event.returnValue = { ok: false, error: 'untrusted sender' };
-      return;
+// Renderer-facing microphone gate. The renderer can request capture for a
+// persisted wake-word session while the lock screen is showing, but only in
+// wake-phrase-only mode. One-shot capture and all other requests stay blocked
+// until the session is unlocked. The gate still expires on its own.
+ipcMain.handle('voice-arm-microphone', async (_event, payload = {}) => {
+  const lockScreenWake = !!(payload && typeof payload === 'object' && payload.lockScreen === true);
+  const sessionLocked = sessionState && sessionState.locked === true;
+  if (sessionLocked && !lockScreenWake) {
+    secAudit('VOICE_MIC_ARM', 'session locked', 'BLOCKED');
+    return { ok: false, error: 'Unlock JARVIS before enabling the microphone' };
+  }
+  const durationMs = typeof payload === 'number' ? payload : payload.durationMs;
+  const result = voiceMicrophoneGate.arm(durationMs);
+  secAudit(
+    'VOICE_MIC_ARM',
+    lockScreenWake
+      ? `wake-word capture${sessionLocked ? ' (lock screen)' : ''} ${result.durationMs}ms`
+      : `local capture ${result.durationMs}ms`,
+    'ALLOW'
+  );
+  return result;
+});
+
+ipcMain.handle('voice-disarm-microphone', async () => {
+  voiceMicrophoneGate.disarm();
+  secAudit('VOICE_MIC_DISARM', 'local capture stopped', 'OK');
+  return { ok: true };
+});
+
+function sendRenderer(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send(channel, payload);
+  } catch (_) { /* window may be closing */ }
+}
+
+function sendAuthState() {
+  if (!sessionState) return;
+  sendRenderer('auth-state', sessionState.snapshot());
+}
+
+function broadcastAppVisibility() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const visible = mainWindow.isVisible();
+  sendRenderer('app-visibility', {
+    visible,
+    focused: mainWindow.isFocused(),
+    session: sessionState ? sessionState.snapshot() : null,
+  });
+  sendAuthState();
+  if (visible && sessionState && sessionState.locked) {
+    sendRenderer('auth-lock');
+  }
+}
+
+function lockSessionForHide() {
+  capabilityStore.revokeAll('window hidden');
+  if (!sessionState || !sessionState.locked) {
+    if (sessionState && sessionState.state === 'unlocked') {
+      sessionState.lock('window hidden');
     }
-    listener(event, ...args);
+  }
+  if (!sessionState || sessionState.state === 'no-lock') return;
+  faceEnrollmentState.active = false;
+  faceEnrollmentState.until = 0;
+  disarmFaceCamera();
+  try { voiceMicrophoneGate.disarm(); } catch (_) {}
+  sendRenderer('face-camera-stop');
+  sendRenderer('auth-lock');
+  sendAuthState();
+}
+
+if (sessionState) {
+  sessionState.subscribe((view, previous) => {
+    if (view.locked && previous !== view.state) {
+      capabilityStore.revokeAll('session locked');
+      faceEnrollmentState.active = false;
+      faceEnrollmentState.until = 0;
+      disarmFaceCamera();
+      try { voiceMicrophoneGate.disarm(); } catch (_) {}
+      sendRenderer('face-camera-stop');
+      sendRenderer('auth-lock');
+    }
+    sendRenderer('auth-state', view);
   });
-};
-
-
+}
 
 // ─── Window Factory ──────────────────────────────────────────────
-function createWindow() {
+function createWindow({ startHidden = false } = {}) {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -115,9 +304,31 @@ function createWindow() {
       // CRIT-01 fix: webSecurity restored. Ollama API is called via IPC not
       // directly from the renderer, so this will not break core functionality.
       webSecurity: true,
+      // Phase 5A: the local VAD/recorder must keep running when JARVIS is
+      // minimized or hidden in the tray. This does not affect the camera gate.
+      backgroundThrottling: false,
     },
     show: false,
   });
+
+  // Renderer-boundary guards are independent of page JS: a reload, crash,
+  // destroyed frame, or navigation to an unapproved URL locks the session.
+  attachRendererSessionGuards(mainWindow.webContents, {
+    sessionState,
+    approvedRendererUrl: _approvedRendererUrl,
+    audit: secAudit,
+    isQuitting: () => app.isQuitting,
+    onBoundary: reason => {
+      capabilityStore.revokeAll(`renderer boundary: ${reason}`);
+    },
+    onLock: reason => {
+      faceEnrollmentState.active = false;
+      faceEnrollmentState.until = 0;
+      disarmFaceCamera();
+      try { voiceMicrophoneGate.disarm(); } catch (_) {}
+      secAudit('SESSION_BOUNDARY_LOCK', reason, 'LOCK');
+    },
+  }).install();
 
   // Allow CDN + localhost/127.0.0.1 for Ollama
   // unsafe-eval was removed: every privileged expression evaluator has
@@ -131,10 +342,11 @@ function createWindow() {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self'; " +
-          "connect-src 'self' https:; " +
+          "connect-src 'self' https: http://127.0.0.1:*; " +
           "font-src 'self' https://fonts.gstatic.com data:; " +
           "img-src 'self' data: https:; " +
           "media-src 'self' data: blob:; " +
+          "worker-src 'self' blob:; " +
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
           "script-src 'self';"
         ]
@@ -148,17 +360,37 @@ function createWindow() {
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    broadcastAppVisibility();
+    sendAuthState();
+  });
+
   mainWindow.once('ready-to-show', () => {
+    if (startHidden) {
+      console.log('[MAIN] JARVIS started hidden in the tray.');
+      return;
+    }
     mainWindow.show();
     mainWindow.focus();
   });
 
-  // Hide to tray instead of quitting
+  // Hide to tray instead of quitting. Reopening from the tray requires the
+  // configured PIN/face lock, even if the scheduler kept running in the
+  // background while the window was hidden.
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
       mainWindow.hide();
     }
+  });
+
+  mainWindow.on('show', () => {
+    broadcastAppVisibility();
+  });
+
+  mainWindow.on('hide', () => {
+    if (!app.isQuitting) lockSessionForHide();
+    broadcastAppVisibility();
   });
 
   mainWindow.on('maximize', () => mainWindow.webContents.send('window-state', 'maximized'));
@@ -219,6 +451,19 @@ function focusMainWindow() {
   if (tray) tray.setToolTip(DEFAULT_TRAY_TOOLTIP);
 }
 
+// The second-instance event can arrive while startup is still awaiting memory
+// or controller registration. Retry briefly rather than dropping the user's
+// request to open the existing JARVIS window.
+function focusExistingInstance(attempt = 0) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    focusMainWindow();
+    return;
+  }
+  if (attempt < 40) {
+    setTimeout(() => focusExistingInstance(attempt + 1), 250);
+  }
+}
+
 // A scheduler/task approval can arrive while JARVIS is hidden in the tray.
 // The renderer already posts an in-app message and toast; when the window is
 // not focused, also surface a native Windows notification and flash the
@@ -270,6 +515,76 @@ function notifyApproval(taskId, approval) {
   } catch (_) {}
 }
 
+function showNativeNotification(title, body, onClick = null) {
+  if (!Notification.isSupported()) return false;
+  try {
+    const notification = new Notification({
+      title,
+      body,
+      icon: path.join(__dirname, 'assets', 'icon.png'),
+    });
+    if (typeof onClick === 'function') notification.on('click', onClick);
+    notification.on('failed', (_event, error) => {
+      console.warn('[JARVIS] Native notification failed:', error || 'unknown error');
+    });
+    notification.show();
+    return true;
+  } catch (error) {
+    console.warn('[JARVIS] Could not show native notification:', error.message);
+    return false;
+  }
+}
+
+function windowIsFocused() {
+  return Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused());
+}
+
+function notifyTaskOutcome(task) {
+  if (!task || !task.id || !['completed', 'failed'].includes(task.status)) return;
+  if (windowIsFocused()) return;
+  const key = `${task.id}:${task.status}`;
+  if (notifiedOutcomes.has(key)) return;
+  notifiedOutcomes.add(key);
+
+  const goal = String(task.goal || 'Background task').slice(0, 100);
+  const detail = task.status === 'completed'
+    ? String(task.result || 'Task completed.').replace(/\s+/g, ' ').slice(0, 180)
+    : String(task.error || 'Task failed.').replace(/\s+/g, ' ').slice(0, 180);
+  const title = task.status === 'completed' ? 'JARVIS — Task completed' : 'JARVIS — Task failed';
+  const body = `${goal}\n${detail}`;
+  showNativeNotification(title, body, focusMainWindow);
+  try {
+    if (tray) tray.setToolTip(task.status === 'completed'
+      ? `JARVIS — completed: ${goal}`
+      : `JARVIS — failed: ${goal}`);
+  } catch (_) {}
+}
+
+function handleSchedulerEvent(event) {
+  if (!event || typeof event !== 'object') return;
+  if (!['run.failed', 'run.retry', 'run.deferred'].includes(event.type)) return;
+  const job = event.job || {};
+  const run = event.run || {};
+  if (event.type === 'run.deferred') {
+    try {
+      if (tray) tray.setToolTip(`JARVIS — scheduled task deferred: ${job.name || job.id}`);
+    } catch (_) {}
+    return;
+  }
+
+  const key = `${run.id || job.id}:${event.type}`;
+  if (notifiedOutcomes.has(key)) return;
+  notifiedOutcomes.add(key);
+  if (windowIsFocused()) return;
+
+  const title = event.type === 'run.retry'
+    ? 'JARVIS — Scheduled task retry'
+    : 'JARVIS — Scheduled task failed';
+  const body = `${String(job.name || job.id || 'Scheduled task').slice(0, 100)}\n${String(event.error || 'The scheduled run failed.').slice(0, 180)}`;
+  showNativeNotification(title, body, focusMainWindow);
+  try { if (tray) tray.setToolTip(`${title.replace('JARVIS — ', '')}: ${job.name || job.id}`); } catch (_) {}
+}
+
 function handleAgentEvent(event) {
   if (!event || !event.taskId) return;
   const data = event.data || {};
@@ -278,35 +593,115 @@ function handleAgentEvent(event) {
     : null;
   const approval = data.approval || pending;
   if (approval) notifyApproval(event.taskId, approval);
+  if (data.task) notifyTaskOutcome(data.task);
 }
+
+// The renderer discovers persisted pending approvals when it attaches tasks
+// after a restart. Those were never emitted by AgentRuntime, so this bridge
+// lets it request the same native alert; notifyApproval() deduplicates by
+// approval id against the live event path. Registered before the window is
+// created so a fast-starting renderer cannot miss the handler.
+ipcMain.on('agent-approval-notify', (_event, payload = {}) => {
+  if (!payload || typeof payload !== 'object') return;
+  const taskId = typeof payload.taskId === 'string' ? payload.taskId.slice(0, 200) : '';
+  const approvalId = typeof payload.approvalId === 'string' ? payload.approvalId.slice(0, 160) : '';
+  if (!/^task_[A-Za-z0-9_]+$/.test(taskId) || !approvalId) return;
+  const tool = typeof payload.tool === 'string' && payload.tool.trim()
+    ? payload.tool.trim().slice(0, 80)
+    : 'a tool';
+  const reason = typeof payload.reason === 'string' ? payload.reason.trim().slice(0, 160) : '';
+  notifyApproval(taskId, { id: approvalId, toolCall: { tool }, reason });
+});
 
 // ─── App Lifecycle ───────────────────────────────────────────────
 
 
-app.whenReady().then(() => {
+if (singleInstanceLock) {
+app.whenReady().then(async () => {
   // Ensure history directory exists
   const histDir = path.join(app.getPath('userData'), 'history');
   fs.mkdirSync(histDir, { recursive: true });
 
-  // Initialize JARVIS Memory (JSON file store)
+  // Background presence is initialized before the window so a login launch can
+  // honor the "start hidden" preference. The scheduler is attached later, once
+  // the durable runtime has been registered.
   try {
-    JarvisMemory.init(app.getPath('userData'));
-    console.log('[MAIN] JARVIS Memory (JSON file store) initialized successfully.');
-  } catch (err) {
-    console.error('[MAIN] FATAL ERROR in JarvisMemory.init:', err);
+    ambientService = new AmbientService({
+      app,
+      powerMonitor,
+      mainWindowProvider: () => mainWindow,
+      configPath: path.join(app.getPath('userData'), 'ambient-config.json'),
+      audit: secAudit,
+      logger: console,
+      platform: process.platform,
+      argv: process.argv,
+    });
+    await ambientService.init();
+  } catch (error) {
+    ambientService = null;
+    console.error('[MAIN] Could not initialize background presence:', error);
   }
 
-  // Load security config from disk at startup
+  // Initialize conversation history and the one unified memory-record store.
   try {
-    const fp = path.join(app.getPath('userData'), 'sec-config.json');
-    if (fs.existsSync(fp)) {
-      const cfg = JSON.parse(fs.readFileSync(fp, 'utf8'));
-      if (typeof cfg.terminalEnabled === 'boolean') liveSecConfig.terminalEnabled = cfg.terminalEnabled;
-      if (typeof cfg.screenCaptureEnabled === 'boolean') liveSecConfig.screenCaptureEnabled = cfg.screenCaptureEnabled;
-    }
-  } catch (e) { }
+    JarvisMemory.init(app.getPath('userData'));
+    memoryStore = new MemoryStore({ baseDir: app.getPath('userData') });
+    await memoryStore.init();
+    console.log('[MAIN] JARVIS unified memory initialized successfully.');
+  } catch (err) {
+    console.error('[MAIN] FATAL ERROR initializing memory:', err);
+  }
 
-  let appConfig = { embeddingModel: 'all-minilm', textModel: 'llama3.2' };
+  // Face unlock is local-only. The model server serves bundled model weights
+  // over an ephemeral loopback port; the profile store encrypts embeddings with
+  // safeStorage and never writes raw camera frames.
+  try {
+    faceProfileStore = new FaceProfileStore({
+      app,
+      safeStorage,
+      audit: secAudit,
+      logger: console,
+    });
+  } catch (error) {
+    faceProfileStore = null;
+    secAudit('FACE_STORE_INIT', error.message, 'ERROR');
+  }
+  try {
+    faceModelServer = new FaceModelServer({
+      modelsDir: path.join(__dirname, 'renderer', 'vendor', 'human', 'models'),
+      logger: console,
+    });
+    await faceModelServer.start();
+  } catch (error) {
+    faceModelServer = null;
+    secAudit('FACE_MODEL_INIT', error.message, 'ERROR');
+  }
+  try {
+    const auth = await getAuthStatus(app.getPath('userData'));
+    const face = faceProfileStore ? await faceProfileStore.getStatus() : { enrolled: false };
+    sessionState.initialize({
+      auth,
+      faceEnrolled: !!(face && face.enrolled),
+    });
+  } catch (error) {
+    sessionState.initialize({ auth: null, readError: error.message });
+    secAudit('SESSION_LOCK_INIT', error.message, 'ERROR');
+  }
+  installMediaPermissionHandlers();
+
+  // Register IPC controllers only after the unified store exists. Registering
+  // at module load would capture a null store before app.whenReady().
+  try {
+    await registerControllersAndScheduler();
+  } catch (err) {
+    console.error('[MAIN] FATAL ERROR registering controllers:', err);
+  }
+
+  // Legacy sec-config.json is intentionally not loaded into live policy. The
+  // SecurityController reports it as untrusted information and requires fresh
+  // native consent before any terminal or screen capability is granted.
+
+  let appConfig = { embeddingModel: 'all-minilm', textModel: 'llama3.1:8b' };
   try {
     const fp = path.join(app.getPath('userData'), 'app-config.json');
     if (fs.existsSync(fp)) {
@@ -357,7 +752,8 @@ app.whenReady().then(() => {
   }
   setTimeout(() => probeOllama(), 2000);
 
-  createWindow();
+  const startHidden = ambientService ? ambientService.shouldStartHidden() : false;
+  createWindow({ startHidden });
   createTray();
 
   // Global hotkey: Ctrl+Space to toggle JARVIS
@@ -381,9 +777,22 @@ app.whenReady().then(() => {
     mainWindow.webContents.send('toggle-voice');
   });
 });
+}
+
+// Windows shutdown/logoff and app.quit() must be allowed to close the window
+// instead of being intercepted by the close-to-tray behavior.
+app.on('before-quit', () => {
+  app.isQuitting = true;
+  capabilityStore.revokeAll('app quit');
+});
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  try { voiceMicrophoneGate.disarm(); } catch (_) {}
+  try { ambientService?.dispose(); } catch (_) {}
+  try { scheduler?.shutdown(); } catch (_) {}
+  try { browserDriver?.close(); } catch (_) {}
+  try { faceModelServer?.stop(); } catch (_) {}
 });
 
 // Keep alive in tray — never quit on all-windows-closed
@@ -398,6 +807,11 @@ app.on('window-all-closed', (e) => {
 
 const registerAgentController = require('./backend/controllers/AgentController');
 const registerAIController = require('./backend/controllers/AIController');
+const registerAmbientController = require('./backend/controllers/AmbientController');
+const registerBrowserController = require('./backend/controllers/BrowserController');
+const registerIntegrationController = require('./backend/controllers/IntegrationController');
+const registerDocumentController = require('./backend/controllers/DocumentController');
+const registerFaceController = require('./backend/controllers/FaceController');
 const registerFileController = require('./backend/controllers/FileController');
 const registerKnowledgeController = require('./backend/controllers/KnowledgeController');
 const registerMemoryController = require('./backend/controllers/MemoryController');
@@ -406,50 +820,169 @@ const registerSecurityController = require('./backend/controllers/SecurityContro
 const registerSystemController = require('./backend/controllers/SystemController');
 const registerWindowController = require('./backend/controllers/WindowController');
 
+async function registerControllersAndScheduler() {
   const mainWindowProvider = () => mainWindow;
 
-  registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate, _allowedRendererBase });
+  // The browser is a hidden, isolated Electron window. It is separate from the
+  // JARVIS renderer and uses an ephemeral session partition, so clearing it
+  // cannot affect the main app session or its local preferences.
+  if (process.env.JARVIS_BROWSER_ENABLED !== '0') {
+    browserDriver = new ElectronBrowserDriver({
+      BrowserWindow,
+      session,
+      app,
+      artifactsDir: path.join(app.getPath('userData'), 'browser-artifacts'),
+      allowedOrigins: parseAllowedOrigins(process.env.JARVIS_BROWSER_ALLOWED_ORIGINS),
+      audit: secAudit,
+    });
+  }
+
+  // Personal integrations start with local fixtures. A real provider can replace
+  // FixtureProvider without changing the tool schema, scope checks, or approvals.
+  if (process.env.JARVIS_INTEGRATIONS_ENABLED !== '0') {
+    try {
+      const integrationBase = path.join(app.getPath('userData'), 'integrations');
+      const integrationStore = new IntegrationStore({ baseDir: integrationBase });
+      await integrationStore.init();
+      let integrationVault = null;
+      try {
+        integrationVault = createSafeStorageVault({
+          safeStorage,
+          filePath: path.join(app.getPath('userData'), 'integration-secrets.json'),
+        });
+        await integrationVault.init();
+      } catch (error) {
+        secAudit('INTEGRATION_VAULT_UNAVAILABLE', error.message, 'WARN');
+        integrationVault = null;
+      }
+      integrationService = new IntegrationService({
+        store: integrationStore,
+        provider: new FixtureProvider({ store: integrationStore }),
+        vault: integrationVault,
+        audit: secAudit,
+      });
+    } catch (error) {
+      secAudit('INTEGRATION_INIT_ERROR', error.message, 'ERROR');
+      integrationService = null;
+    }
+  }
+
+  registerBrowserController({ ipcMain, browserDriver, secAudit });
+  registerIntegrationController({ ipcMain, integrationService, secAudit });
+
+  if (process.env.JARVIS_DOCUMENTS_ENABLED !== '0') {
+    try {
+      documentIndex = new DocumentIndex({
+        baseDir: path.join(app.getPath('userData'), 'documents'),
+      });
+      await documentIndex.init();
+    } catch (error) {
+      secAudit('DOCUMENT_INIT_ERROR', error.message, 'ERROR');
+      documentIndex = null;
+    }
+  }
+  registerDocumentController({
+    ipcMain,
+    documentIndex,
+    dialog,
+    mainWindowProvider,
+    secAudit,
+  });
+
+  registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate });
   const agentControllerApi = registerAgentController({
     ipcMain, app, mainWindowProvider, secAudit, secCheckRate,
     onAgentEvent: handleAgentEvent,
+    browserDriver,
+    integrationService,
+    documentIndex,
+    memoryStore,
+    memoryStoreProvider: () => memoryStore,
   });
+
+  // The scheduler owns run records and drives durable tasks directly. It never
+  // sends a renderer trigger: the browser window may be hidden, destroyed, or
+  // not yet created while a scheduled task runs.
+  scheduler = new Scheduler({
+    baseDir: app.getPath('userData'),
+    startTask: async job => {
+      if (process.env.JARVIS_DURABLE_AGENT === '0') {
+        return { ok: false, error: 'Durable agent is disabled (JARVIS_DURABLE_AGENT=0)' };
+      }
+      return agentControllerApi.startTaskFromJob(job);
+    },
+    getTask: taskId => {
+      const store = agentControllerApi.getStore();
+      return store ? store.getTask(taskId) : null;
+    },
+    onRunEvent: handleSchedulerEvent,
+    autoStart: false,
+  });
+
   registerFileController({ ipcMain, app, mainWindowProvider, secAudit });
   registerKnowledgeController({ ipcMain, app, secAudit, secCheckRate });
-  registerMemoryController({ ipcMain, app, JarvisMemory });
-  registerSchedulerController({ ipcMain, JarvisScheduler });
-  registerSecurityController({ ipcMain, app, secAudit, liveSecConfig });
-  registerSystemController({ ipcMain, app, mainWindowProvider, secAudit, liveSecConfig, secCheckRate });
-  registerWindowController({ ipcMain, app, mainWindowProvider, liveSecConfig });
+  registerMemoryController({
+    ipcMain,
+    app,
+    JarvisMemory,
+    MemoryStore: memoryStore,
+    MemoryStoreProvider: () => memoryStore,
+  });
+  registerSchedulerController({ ipcMain, Scheduler: scheduler });
+  registerSecurityController({
+    ipcMain,
+    app,
+    dialog,
+    mainWindowProvider,
+    secAudit,
+    sessionState,
+    faceStore: faceProfileStore,
+    capabilityStore,
+  });
+  registerFaceController({
+    ipcMain,
+    app,
+    faceStore: faceProfileStore,
+    faceModelServer,
+    sessionState,
+    faceEnrollmentState,
+    secAudit,
+    mainWindowProvider,
+    armCamera: armFaceCamera,
+    disarmCamera: disarmFaceCamera,
+  });
+  registerSystemController({
+    ipcMain,
+    app,
+    mainWindowProvider,
+    secAudit,
+    secCheckRate,
+    capabilityStore,
+    sessionState,
+  });
+  registerWindowController({
+    ipcMain,
+    app,
+    mainWindowProvider,
+    secAudit,
+    capabilityStore,
+    sessionState,
+  });
 
-  // Initialize Autonomous Scheduler — due jobs start durable agent tasks so
-  // they keep running while the window is hidden in the tray. Started after
-  // the agent controller so the callback always has a live API handle.
+  // Initialize the headless scheduler after the agent controller so a due job
+  // always has a live task runtime handle. It stays resident in the tray.
   try {
-    JarvisScheduler.init(app.getPath('userData'), (job) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('scheduler-trigger', job);
-      }
-      // Headless execution shares the durable-agent feature flag, which is
-      // enabled by default. JARVIS_DURABLE_AGENT=0 disables it.
-      if (process.env.JARVIS_DURABLE_AGENT === '0') {
-        console.log(`[SCHEDULER] Job ${job.id} fired (durable agent disabled; no task started).`);
-        return;
-      }
-      agentControllerApi.startTaskFromJob(job)
-        .then((result) => {
-          if (result && result.ok) {
-            console.log(`[SCHEDULER] Job ${job.id} started durable task ${result.task.id}.`);
-          } else {
-            console.error(`[SCHEDULER] Job ${job.id} did not start a task:`, result && result.error);
-          }
-        })
-        .catch((error) => {
-          console.error(`[SCHEDULER] Job ${job.id} failed to start:`, error.message);
-        });
-    });
+    await scheduler.init();
+    scheduler.startLoop();
+    console.log('[MAIN] JARVIS scheduler initialized.');
   } catch (err) {
-    console.error('[MAIN] FATAL ERROR in JarvisScheduler.init:', err);
+    console.error('[MAIN] FATAL ERROR in scheduler init:', err);
   }
+
+  // Attach the scheduler to the ambient service so sleep/resume can flush and
+  // restart it, then expose the autostart/status IPC to the settings panel.
+  if (ambientService) ambientService.setScheduler(scheduler);
+  registerAmbientController({ ipcMain, ambientService });
 
   ipcMain.handle('sec-audit-read', async () => {
     return {
@@ -458,4 +991,5 @@ const registerWindowController = require('./backend/controllers/WindowController
       data: _secAuditLog.map(e => `[${e.ts}] [${e.verdict}] ${e.action}: ${e.detail}`).join('\n')
     };
   });
+}
 

@@ -3,6 +3,7 @@ node_modules/
 
 # Build outputs
 renderer/dist/
+dist/
 
 # Runtime logs & artifacts
 renderer_errors.log

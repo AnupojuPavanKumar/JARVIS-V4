@@ -14,6 +14,7 @@ const readSkill = { id: 'read_file', risk: 'read', untrusted: false };
 const webSkill = { id: 'web_read', risk: 'read', untrusted: true };
 const writeSkill = { id: 'write_file', risk: 'write', untrusted: false };
 const destructiveSkill = { id: 'delete_file', risk: 'destructive', untrusted: false };
+const alwaysAllowSkill = { id: 'browser_emergency_stop', risk: 'read', untrusted: false, alwaysAllow: true };
 
 async function makeStore(options = {}) {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-policy-test-'));
@@ -89,6 +90,13 @@ test('requires approval for writes, destructive actions, tainted tasks, and unkn
     });
     assert.equal(tainted.decision, 'require_approval');
     assert.equal(tainted.reason, 'tainted-task');
+
+    const stop = await policy.authorize({
+      taskId: task.id,
+      toolCall: { tool: 'browser_emergency_stop', args: {} },
+      skill: alwaysAllowSkill,
+    });
+    assert.deepEqual(stop, { decision: 'allow', taint: false });
   } finally {
     fs.rmSync(baseDir, { recursive: true, force: true });
   }
