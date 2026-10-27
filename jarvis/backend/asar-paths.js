@@ -23,4 +23,19 @@ function unpackedPath(value) {
   );
 }
 
-module.exports = { unpackedPath };
+/**
+ * Resolve a bundled asset from the Electron app root. `app.getAppPath()` is the
+ * project directory in development and resources/app.asar in a packaged build.
+ * Files covered by build.asarUnpack are resolved to app.asar.unpacked so native
+ * sidecars can be executed directly.
+ */
+function appAssetPath(appPath, ...segments) {
+  if (typeof appPath !== 'string' || appPath.length === 0) return '';
+  const parts = segments
+    .flat()
+    .filter(part => typeof part === 'string' && part.length > 0);
+  if (parts.length === 0) return unpackedPath(path.resolve(appPath));
+  return unpackedPath(path.join(appPath, ...parts));
+}
+
+module.exports = { unpackedPath, appAssetPath };

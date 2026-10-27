@@ -104,11 +104,36 @@ test('local voice: captured PCM is encoded as WAV before local transcription', (
   assert.match(utils, /targetRate/);
 });
 
-test('local voice: Whisper server decodes PCM WAV without requiring ffmpeg', () => {
-  const source = read('skills/transcribe_server.py');
-  assert.match(source, /import wave/);
-  assert.match(source, /def read_wav/);
-  assert.match(source, /looks_like_wav/);
+test('local voice: packaged transcription uses the bundled native Whisper sidecar', () => {
+  const ai = read('backend/controllers/AIController.js');
+  assert.match(ai, /createWhisperSidecar/);
+  assert.match(ai, /WHISPER_ASSET_MANIFEST/);
+  assert.doesNotMatch(ai, /transcribe_server\.py/);
+  assert.doesNotMatch(ai, /spawn\(\s*['"]python['"]/);
+  assert.doesNotMatch(ai, /whisperRetries/);
+
+  const sidecar = read('backend/voice/whisper-sidecar.js');
+  assert.match(sidecar, /shell:\s*false/);
+  assert.match(sidecar, /windowsHide:\s*true/);
+  assert.match(sidecar, /stdio:\s*\['ignore',\s*'pipe',\s*'pipe'\]/);
+  assert.match(sidecar, /'--model'/);
+  assert.match(sidecar, /'--file'/);
+  assert.match(sidecar, /--no-timestamps/);
+  assert.match(sidecar, /--no-prints/);
+  assert.match(sidecar, /--no-gpu/);
+  assert.doesNotMatch(sidecar, /https?:\/\//);
+
+  const manifest = read('backend/voice/whisper-assets-manifest.js');
+  assert.match(manifest, /whisper-cli\.exe/);
+  assert.match(manifest, /ggml-base\.en-q5_1\.bin/);
+
+  const main = read('main.js');
+  assert.match(main, /transcriptionStatus:\s*aiController/);
+  assert.match(read('backend/controllers/VoiceController.js'), /transcriptionStatus/);
+  assert.match(read('renderer/modules/wakeWord.js'), /transcriptionDiagnostic/);
+
+  const pkg = JSON.parse(read('package.json'));
+  assert.ok(pkg.build.asarUnpack.includes('bin/whisper/**'));
 });
 
 test('local voice: preload exposes only the named voice bridges', () => {

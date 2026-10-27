@@ -13,6 +13,7 @@ module.exports = function registerVoiceController({
   mainWindowProvider,
   secAudit = () => {},
   sendRenderer = () => {},
+  transcriptionStatus = null,
 }) {
   if (!voicePolicy) {
     throw new Error('voice controller requires the main-owned voice policy');
@@ -38,7 +39,25 @@ module.exports = function registerVoiceController({
     secAudit(action, String(detail).slice(0, 180), 'BLOCKED');
   }
 
-  ipcMain.handle('voice-status', async () => voicePolicy.status());
+  ipcMain.handle('voice-status', async () => {
+    const status = voicePolicy.status();
+    let transcription = null;
+    if (typeof transcriptionStatus === 'function') {
+      try {
+        const value = transcriptionStatus();
+        transcription = value && typeof value === 'object' ? value : null;
+      } catch (_) {
+        transcription = {
+          available: false,
+          verified: false,
+          pending: false,
+          busy: false,
+          error: 'Local transcription status is unavailable',
+        };
+      }
+    }
+    return { ...status, transcription };
+  });
 
   ipcMain.handle('voice-set-wake-word', async (event, payload = {}) => {
     if (!trustedSender(event)) {

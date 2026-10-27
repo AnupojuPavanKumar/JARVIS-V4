@@ -6,8 +6,9 @@
 //   microphone -> Web Audio energy VAD -> PCM capture -> local Whisper
 //
 // Audio never leaves the machine. Segments are sent over the existing
-// `transcribe-audio` IPC to skills/transcribe_server.py, which keeps the
-// Whisper model resident in memory. There is no cloud speech fallback.
+// `transcribe-audio` IPC to the bundled native whisper.cpp sidecar. Main
+// verifies the sidecar and model hashes before the first utterance. There is
+// no Python dependency and no cloud speech fallback.
 //
 // The loop is intentionally independent of the chat window so it can keep
 // listening while JARVIS is minimized or resident in the tray. If the session
@@ -94,7 +95,18 @@ window.WakeWord = (() => {
     const now = Date.now();
     if (now - lastErrorToastAt < 15000) return;
     lastErrorToastAt = now;
-    toast(message, 'error');
+    toast(String(message || 'Voice input is unavailable').slice(0, 200), 'error');
+  }
+
+  async function transcriptionDiagnostic() {
+    try {
+      if (!window.jarvis || typeof window.jarvis.voiceStatus !== 'function') return null;
+      const status = await window.jarvis.voiceStatus();
+      const transcription = status && status.transcription;
+      return transcription && transcription.error ? String(transcription.error) : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   function voiceButton() {
@@ -190,6 +202,11 @@ window.WakeWord = (() => {
       } catch { /* main unavailable during reload */ }
       if (!status || status.ok !== true) return;
       if (status.wakeWordEnabled !== true || status.windowVisible === false) return;
+      const diagnostic = status.transcription && status.transcription.error;
+      if (diagnostic) {
+        errorToast(diagnostic);
+        return;
+      }
       // The persisted opt-in lives in main. Main will still reject the capture
       // unless the window is visible and the session state permits it.
       start({ silent: true, fromSetting: true });
@@ -464,7 +481,7 @@ window.WakeWord = (() => {
       handleTranscript(result.text || '');
     } catch (error) {
       console.warn('[Voice] Transcription failed:', error.message);
-      errorToast('Local transcription failed. Check that Whisper is installed.');
+      errorToast(error.message || 'Local transcription failed');
     } finally {
       transcribing = false;
       if (!active && !oneShot) {
@@ -718,6 +735,8 @@ window.WakeWord = (() => {
     startInFlight = true;
     let enabledByUser = false;
     try {
+      const diagnostic = await transcriptionDiagnostic();
+      if (diagnostic) throw new Error(diagnostic);
       if (options.fromSetting !== true) {
         // The opt-in is persisted by main. Re-asserting an already-enabled
         // setting is allowed on the lock screen; enabling a new one is not.

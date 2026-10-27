@@ -962,7 +962,7 @@ async function registerControllersAndScheduler() {
     secAudit,
   });
 
-  registerAIController({
+  const aiController = registerAIController({
     ipcMain,
     app,
     mainWindowProvider,
@@ -977,6 +977,7 @@ async function registerControllersAndScheduler() {
       mainWindowProvider,
       secAudit,
       sendRenderer,
+      transcriptionStatus: aiController && aiController.getWhisperStatus,
     });
   } else {
     secAudit('VOICE_CONTROLLER_INIT', 'voice policy unavailable', 'ERROR');

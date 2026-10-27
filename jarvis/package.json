@@ -57,6 +57,7 @@
       "!**/*.log"
     ],
     "asarUnpack": [
+      "bin/whisper/**",
       "bin/**",
       "skills/**",
       "renderer/vendor/human/models/**",
@@ -71,7 +72,10 @@
           ]
         }
       ],
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.png",
+      "signExts": [
+        "!whisper-cli.exe"
+      ]
     },
     "nsis": {
       "oneClick": false,

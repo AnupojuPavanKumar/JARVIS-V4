@@ -40,6 +40,9 @@ function harness(overrides = {}) {
     mainWindowProvider: () => mainWindow,
     secAudit: (action, detail, verdict) => audits.push({ action, detail, verdict }),
     sendRenderer: (channel, payload) => sent.push({ channel, payload }),
+    ...(overrides.transcriptionStatus !== undefined
+      ? { transcriptionStatus: overrides.transcriptionStatus }
+      : {}),
   });
 
   return {
@@ -131,5 +134,33 @@ test('voice controller: disarm uses the capture id and transcription lease uses 
 test('voice controller: status is read through main policy', async () => {
   const { handlers, event } = harness();
   const status = await handlers.get('voice-status')(event);
-  assert.deepEqual(status, { ok: true, wakeWordEnabled: true });
+  assert.deepEqual(status, { ok: true, wakeWordEnabled: true, transcription: null });
+});
+
+test('voice controller: status carries the local transcription diagnostic', async () => {
+  const diagnostic = {
+    available: false,
+    verified: false,
+    pending: false,
+    busy: false,
+    error: 'Local transcription is unavailable: bin/whisper/whisper-cli.exe is missing',
+  };
+  const { handlers, event } = harness({ transcriptionStatus: () => diagnostic });
+  const status = await handlers.get('voice-status')(event);
+  assert.deepEqual(status, {
+    ok: true,
+    wakeWordEnabled: true,
+    transcription: diagnostic,
+  });
+});
+
+test('voice controller: a crashing transcription status provider fails closed', async () => {
+  const { handlers, event } = harness({
+    transcriptionStatus: () => { throw new Error('status exploded'); },
+  });
+  const status = await handlers.get('voice-status')(event);
+  assert.equal(status.transcription.available, false);
+  assert.equal(status.transcription.verified, false);
+  assert.equal(status.transcription.pending, false);
+  assert.match(status.transcription.error, /status is unavailable/);
 });

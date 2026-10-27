@@ -64,7 +64,7 @@ Default model settings:
 - **Background presence:** JARVIS can stay resident in the tray, start at login as an opt-in, start hidden in the tray by default on login, focus the existing instance on a second launch, and suspend/resume the scheduler around system sleep. Auto-start uses the OS login-item API and is currently implemented for Windows and macOS.
 - **Local face unlock:** A PIN can be paired with a locally enrolled face. Detection, iris landmarks, liveness, anti-spoofing, and 1024-value embeddings run in the renderer with vendored Human/TFJS/WebGL models. Only encrypted embeddings are stored; raw frames are never sent over IPC or written to disk. Face recognition can clear the UI session lock, but it cannot approve tools, integrations, or any other privileged action.
 - **Portable Windows build:** `npm run package:win` produces `dist/win-unpacked/JARVIS.exe` through electron-builder. The executable metadata and Task Manager name are `JARVIS`. The output is local and gitignored.
-- **Local voice loop:** The wake word is explicitly opt-in and runs entirely on the machine: Web Audio energy VAD, raw PCM capture encoded as 16 kHz WAV, and the resident local Whisper server. There is no cloud speech fallback, no Chromium Web Speech dependency, and no ffmpeg requirement. Saying "Hey JARVIS" opens command capture, inline commands are supported, and user speech stops Piper output for barge-in. The persisted opt-in also auto-starts while the startup lock screen is showing, so the wake phrase can focus the lock screen; commands are still withheld until PIN or face unlock succeeds. Microphone permission is gated separately from the camera and expires automatically.
+- **Local voice loop:** The wake word is explicitly opt-in and runs entirely on the machine: Web Audio energy VAD, raw PCM capture encoded as 16 kHz WAV, and the bundled native Whisper sidecar. There is no cloud speech fallback, no Chromium Web Speech dependency, and no ffmpeg requirement. Saying "Hey JARVIS" opens command capture, inline commands are supported, and user speech stops Piper output for barge-in. The persisted opt-in also auto-starts while the startup lock screen is showing, so the wake phrase can focus the lock screen; commands are still withheld until PIN or face unlock succeeds. Microphone permission is gated separately from the camera and expires automatically.
 
 ## Architecture
 
@@ -75,7 +75,8 @@ Default model settings:
 | `core/` | Durable runtime, policy engine, planner/verifier, token-budgeted prompts, memory, scheduler, browser tools, integrations, documents, model gateway, evals |
 | `backend/` | IPC controllers, Electron browser driver, ambient/login-item service, encrypted secret vault, auth helpers, encrypted face store, loopback face-model server, microphone/media permission gates |
 | `renderer/` | UI, chat streaming, task timeline, approvals, settings, face lock/enrollment, local voice VAD/wake module, and thin client modules; no agent/tool loop |
-| `skills/` | Signed JS/Python skills, the signed manifest, and the resident local Whisper server |
+| `skills/` | Signed JS/Python skills and the signed manifest |
+| `bin/whisper/` | Pinned native whisper.cpp runtime and local English model |
 | `tests/` | Node unit/integration tests and real Electron smoke suites |
 
 The agent loop lives in the main process:
@@ -104,7 +105,7 @@ The renderer only starts tasks, sends approvals/cancellations, and renders task 
 - **Approval-gated actions:** Writes, destructive operations, messages, and other externally visible actions require approval when policy demands it. Untrusted output taints the task.
 - **Secret handling:** Integration credentials and face embeddings use Electron `safeStorage`; both fail closed when secure OS encryption is unavailable. Raw credentials are not placed in prompts, logs, or tool output.
 - **Face camera boundary:** Camera permission is granted only for an armed unlock or enrollment attempt, video-only, with a short expiry. Raw frames stay in the renderer and are discarded after inference. Face verification changes only the local session lock and is not connected to approvals or privileged IPC.
-- **Microphone boundary:** Audio capture is denied by default and granted only after an explicit wake-word or push-to-talk activation, audio-only, through a bounded main-process gate. Camera and microphone requests are separate; combined audio+video requests are denied. Voice segments are sent only to the local Whisper child process and are deleted after transcription. If the session is locked, wake-word audio can focus the lock screen but commands are not executed until PIN or face unlock succeeds.
+- **Microphone boundary:** Audio capture is denied by default and granted only after an explicit wake-word or push-to-talk activation, audio-only, through a bounded main-process gate. Camera and microphone requests are separate; combined audio+video requests are denied. Voice segments are sent only to the local Whisper sidecar child process and are deleted after transcription. If the session is locked, wake-word audio can focus the lock screen but commands are not executed until PIN or face unlock succeeds.
 - **Browser boundary:** Only loopback origins are allowed by default. External origins must be explicitly added with `JARVIS_BROWSER_ALLOWED_ORIGINS`. Downloads, popups, webviews, and permission requests are denied.
 - **Auditability:** Security decisions, browser actions, integrations, scheduler runs, and ambient changes are recorded locally with bounded retention.
 
@@ -117,7 +118,7 @@ This is a desktop agent with real system access. Review approval requests and on
 - **Node.js 22.12 or newer** (required by Electron 44)
 - **npm**
 - **Ollama** with a chat-capable model installed
-- Optional: **Python 3** with `openai-whisper` and `torch` for the local voice loop. No system `ffmpeg` installation is required; the renderer sends 16 kHz PCM WAV and the server decodes it directly.
+- Local voice is self-contained: the repository includes the native whisper.cpp runtime and English model under `jarvis/bin/whisper`. No Python, PyTorch, or system `ffmpeg` installation is required.
 
 ### Install and Run
 
@@ -139,7 +140,7 @@ npm run package:win
 .\dist\win-unpacked\JARVIS.exe
 ```
 
-The build uses electron-builder and writes to `jarvis/dist/`, which is gitignored. `JARVIS.exe` has `ProductName`/`FileDescription` set to `JARVIS` and Task Manager shows `JARVIS`. External helpers that run as child processes (Piper, Python skills, Whisper, and the Ollama launcher) are kept outside the ASAR archive and resolved through `backend/asar-paths.js`. The portable folder is self-contained; it is not a signed installer. `npm run package:win:installer` is wired for an NSIS installer, but signed installers and auto-update are not part of this milestone.
+The build uses electron-builder and writes to `jarvis/dist/`, which is gitignored. `JARVIS.exe` has `ProductName`/`FileDescription` set to `JARVIS` and Task Manager shows `JARVIS`. External helpers that run as child processes (Piper, Python-based skills, the native Whisper sidecar, and the Ollama launcher) are kept outside the ASAR archive and resolved through `backend/asar-paths.js`. `bin/whisper/**` is pinned by byte size and SHA-256 at startup, and `whisper-cli.exe` is excluded from electron-builder's code-signing list so its pinned bytes stay valid. The upstream sidecar binary itself is unsigned; sign the installer and app for production distribution. The portable folder is self-contained; it is not a signed installer. `npm run package:win:installer` is wired for an NSIS installer, but signed installers and auto-update are not part of this milestone.
 
 Development and packaged builds share the existing `jarvis-ai-os` Electron `userData` folder, so an existing PIN, face profile, memory, scheduler, and settings carry over. Use an explicit `--user-data-dir` launch when you want an isolated test profile.
 
@@ -178,13 +179,7 @@ Local voice is opt-in. Enable **Wake Word** from the hamburger menu, or use the 
 
 Say **“Hey JARVIS”** followed by a command, or say the wake phrase and then the command. While JARVIS is speaking, speaking over it stops Piper output (barge-in). If the session is locked, only the wake phrase is recognized: JARVIS focuses the lock screen, but does not execute a command until PIN or face unlock succeeds.
 
-The local Whisper server is `skills/transcribe_server.py` and requires:
-
-```bash
-pip install openai-whisper torch
-```
-
-The server loads at startup and keeps the model resident. The default is the `base` model with English decoding; override it with `JARVIS_WHISPER_MODEL` and `JARVIS_WHISPER_LANGUAGE`. CUDA is used when PyTorch reports it; CPU works but has higher transcription latency. The renderer converts captured PCM to a 16 kHz mono WAV before sending it over IPC, and the server decodes that WAV directly, so neither a system `ffmpeg` install nor a web codec round-trip is required. Audio is sent only to the local child process and is deleted after transcription. There is no cloud speech fallback.
+JARVIS ships the native whisper.cpp 1.9.5 runtime and a quantized English base model under `jarvis/bin/whisper`. No Python, PyTorch, or system `ffmpeg` install is required. At startup, main verifies the byte size and SHA-256 of the executable, its DLLs, and the model. If any file is missing or modified, local transcription is disabled with a diagnostic while the rest of JARVIS keeps running. Each utterance runs in a JARVIS-owned `whisper-cli.exe` child using CPU inference, English decoding, and four threads. The renderer converts captured PCM to a 16 kHz mono WAV before sending it over IPC, and the temporary WAV is deleted after transcription. There is no resident loopback server and no cloud speech fallback.
 
 Piper TTS remains optional and expects binaries and models under `jarvis/bin/piper`. Missing TTS does not disable voice input.
 
@@ -213,8 +208,6 @@ npm start
 | `JARVIS_STRONG_MODEL` | unset | Optional model for harder tasks |
 | `JARVIS_CLOUD_MODEL` | unset | Optional cloud model for explicitly routed work |
 | `JARVIS_SIGNING_KEY` | unset | Private Ed25519 key path used only by `npm run sign-skills` |
-| `JARVIS_WHISPER_MODEL` | `base` | Local Whisper model used by the resident voice server |
-| `JARVIS_WHISPER_LANGUAGE` | `en` | Language hint passed to local Whisper |
 | `JARVIS_TEST_MODE` | unset | Test-only flag; skips the single-instance lock |
 
 Skill signing details are in [`jarvis/skills/MANIFEST_SIGNING.md`](jarvis/skills/MANIFEST_SIGNING.md).
@@ -242,8 +235,8 @@ Current local verification (2026-10-24):
 - 292 Node tests: 291 pass, 1 expected opt-in real-model skip, 0 failures.
 - All six Electron smoke suites pass, including the tray-first default, start-hidden override, face settings, loopback model server, local voice bridge, and voice-button binding checks.
 - Auth/PIN, encrypted face storage, face controller boundaries, the loopback model server, and PIN rate-limit reset have dedicated unit tests, including upgrading the legacy skipped-PIN profile to a real PIN. A packaged PIN-unlock regression is covered by `tests/auth-ui.test.js`: the boot overlay starts hidden, cannot remain over the app, plays once on the first unlock, and is not replayed when the same session is unlocked again. The lock screen keeps PIN entry in one centered column; during a face attempt the local camera preview appears inside the emblem at the top, and the face action collapses to a compact secondary pill below the keypad.
-- Phase 5A tests cover wake-phrase normalization, inline command extraction, energy-VAD boundaries, microphone-gate expiry, separate audio/video media decisions, removal of Chromium Web Speech from the wake path, PCM-to-WAV encoding, ArrayBuffer normalization at the IPC boundary, direct WAV decoding in the Whisper server, and the barge-in stop/events wiring.
-- Deterministic fake-microphone end-to-end runs passed against the real packaged renderer and main process: local VAD captured generated speech, the renderer produced 16 kHz mono WAV, the resident Whisper server returned "what time is it", and the command reached the queue with no cloud call. Additional runs verified no-gesture auto-start, barge-in while TTS was active, a true packaged relaunch with a real PIN starting locked and auto-starting wake-word-only capture, a minimized locked window focusing with zero commands executed, and a post-stop `getUserMedia` denial with `VOICE_MIC_ARM`/`VOICE_MIC_DISARM` audit entries. These are test harnesses, not always-on product behavior.
+- Phase 5A tests cover wake-phrase normalization, inline command extraction, energy-VAD boundaries, microphone-gate expiry, separate audio/video media decisions, removal of Chromium Web Speech from the wake path, PCM-to-WAV encoding, ArrayBuffer normalization at the IPC boundary, native whisper.cpp sidecar decoding, and the barge-in stop/events wiring.
+- Deterministic fake-microphone end-to-end runs passed against the real packaged renderer and main process: local VAD captured generated speech, the renderer produced 16 kHz mono WAV, the bundled Whisper sidecar returned "what time is it", and the command reached the queue with no cloud call. Additional runs verified no-gesture auto-start, barge-in while TTS was active, a true packaged relaunch with a real PIN starting locked and auto-starting wake-word-only capture, a minimized locked window focusing with zero commands executed, and a post-stop `getUserMedia` denial with `VOICE_MIC_ARM`/`VOICE_MIC_DISARM` audit entries. These are test harnesses, not always-on product behavior.
 - A local Human/TFJS probe loaded the vendored iris model, produced a 1024-value embedding with iris annotations, liveness/anti-spoof scores, and frontal gesture output without sending frames off the machine.
 - Deterministic Phase 3 eval passes: 31 scenarios, 26 expected completions, 0 unsafe actions, and 0 silent budget violations.
 - Real-model eval was previously verified with `llama3.1:8b`: 5/5 completed, 4/5 task success, 5/5 valid tool calls.
@@ -279,9 +272,10 @@ JARVIS-V4-main/
     ├── core/                # runtime, policy, planning, memory, scheduler, tools, evals
     ├── backend/             # controllers, browser driver, ambient service, vault
     ├── renderer/            # UI, modules, vendored browser assets
-    ├── skills/              # signed skills, manifest, Whisper server
+    ├── skills/              # signed skills and manifest
     ├── tests/               # Node tests and Electron smoke suites
     ├── scripts/             # eval runner
+    ├── bin/whisper/         # native whisper.cpp runtime and English model
     ├── bin/piper/           # optional Piper TTS binaries/models
     └── start-ollama-gpu.ps1 # optional Windows/NVIDIA helper
 ```

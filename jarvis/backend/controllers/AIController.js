@@ -5,6 +5,8 @@ const { spawn, exec } = require('child_process');
 const os = require('os');
 const { unpackedPath } = require('../asar-paths');
 const { createTranscriptionService } = require('../voice/transcription-service');
+const { createWhisperSidecar } = require('../voice/whisper-sidecar');
+const { WHISPER_ASSET_MANIFEST } = require('../voice/whisper-assets-manifest');
 
 module.exports = function registerAIController({
   ipcMain,
@@ -293,167 +295,31 @@ module.exports = function registerAIController({
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // WHISPER TRANSCRIPTION ENGINE
+  // NATIVE WHISPER SIDECAR
   // ═══════════════════════════════════════════════════════════════
-  let whisperProcess = null;
-  let _whisperHealthTimer = null;
-  let _whisperPongReceived = false;
-  let _whisperReadyResolve = null;
-  let whisperReadyPromise = new Promise(r => { _whisperReadyResolve = r; });
-  const _whisperQueue = [];
-  let _whisperBusy = false;
-  let _inflight = null;
-  
-  function _writeToWhisperStdin(line) {
-    return new Promise((res, rej) => {
-      if (!whisperProcess || !whisperProcess.stdin.writable) {
-        return rej(new Error('Whisper stdin not writable'));
-      }
-      const ok = whisperProcess.stdin.write(line + '\n');
-      if (ok) return res();
-      whisperProcess.stdin.once('drain', res);
-      whisperProcess.stdin.once('error', rej);
-    });
-  }
-  
-  async function _drainWhisperQueue() {
-    if (_whisperBusy || _whisperQueue.length === 0) return;
-    _whisperBusy = true;
-  
-    const entry = _whisperQueue[0];
-    _inflight = entry;
-  
-    try {
-      await _writeToWhisperStdin(entry.resolvedPath);
-    } catch (writeErr) {
-      _whisperQueue.shift();
-      _whisperBusy = false;
-      _inflight = null;
-      entry.resolve({ success: false, error: 'stdin write failed: ' + writeErr.message });
-      _drainWhisperQueue();
-    }
-  }
-  
-  function _onWhisperSettled(resultOrError) {
-    if (!_inflight) return;
-    const entry = _whisperQueue.shift();
-    _inflight = null;
-    _whisperBusy = false;
-  
-    if (resultOrError instanceof Error) {
-      entry.resolve({ success: false, error: resultOrError.message });
-    } else {
-      entry.resolve(resultOrError);
-    }
-  
-    _drainWhisperQueue();
-  }
-  
-  function _clearWhisperHealth() {
-    if (_whisperHealthTimer) { clearInterval(_whisperHealthTimer); _whisperHealthTimer = null; }
-  }
-  
-  function _startWhisperHealth() {
-    _clearWhisperHealth();
-    _whisperHealthTimer = setInterval(() => {
-      if (!whisperProcess) return;
-      _whisperPongReceived = false;
-      try { whisperProcess.stdin.write('PING\n'); } catch { }
-      setTimeout(() => {
-        if (!_whisperPongReceived && whisperProcess) {
-          console.warn('[WHISPER] Health check failed — restarting...');
-          if (_inflight) {
-            _onWhisperSettled(new Error('Whisper process restarted during health check'));
-          }
-          while (_whisperQueue.length) {
-            const stale = _whisperQueue.shift();
-            stale.resolve({ success: false, error: 'Whisper restarted' });
-          }
-          _whisperBusy = false;
-          try { whisperProcess.kill(); } catch { }
-        }
-      }, 5000);
-    }, 30000);
-  }
-  
-  function initWhisper() {
-    if (whisperProcess) return;
-    console.log('[WHISPER] Spawning transcription server...');
-  
-    whisperReadyPromise = new Promise(r => { _whisperReadyResolve = r; });
-  
-    whisperProcess = require('child_process').spawn(
-      'python',
-      [unpackedPath(path.join(__dirname, '../../skills', 'transcribe_server.py'))],
-      { stdio: ['pipe', 'pipe', 'pipe'] }
-    );
-  
-    whisperProcess.stdout.on('data', (data) => {
-      const lines = data.toString().split('\n').map(l => l.trim()).filter(Boolean);
-      for (const output of lines) {
-        if (output === 'READY') {
-          console.log('[WHISPER] Server is ready.');
-          if (_whisperReadyResolve) { _whisperReadyResolve(); _whisperReadyResolve = null; }
-          _startWhisperHealth();
-          _drainWhisperQueue();
-        } else if (output === 'PONG') {
-          _whisperPongReceived = true;
-        } else if (output.startsWith('TRANSCRIPTION:')) {
-          const text = output.replace('TRANSCRIPTION:', '').trim();
-          _onWhisperSettled({ success: true, text });
-        } else if (output.startsWith('ERROR:')) {
-          console.error('[WHISPER] Error:', output);
-          _onWhisperSettled(new Error(output));
-        } else {
-          console.log('[WHISPER STDOUT]', output);
-        }
-      }
-    });
-  
-    whisperProcess.stderr.on('data', (data) => {
-      console.log('[WHISPER STDERR]', data.toString().trim());
-    });
-  
-    whisperProcess.on('close', (code) => {
-      console.log('[WHISPER] Process exited with code', code);
-      _clearWhisperHealth();
-      whisperProcess = null;
-      // Settle every queued request so the transcription service can remove
-      // each temporary WAV in its finally path.
-      while (_whisperQueue.length) {
-        const stale = _whisperQueue.shift();
-        stale.resolve({ success: false, error: 'Whisper process exited' });
-      }
-      _whisperBusy = false;
-      _inflight = null;
-      if (!app.isQuitting) {
-        if (!global.whisperRetries) global.whisperRetries = 0;
-        global.whisperRetries++;
-        if (global.whisperRetries < 3) {
-          setTimeout(() => { if (!whisperProcess) initWhisper(); }, 2000);
-        } else {
-          console.error('[WHISPER] Failed to start 3 times. Disabling transcription server.');
-        }
-      }
-    });
-  }
-  
-  if (!testMode) initWhisper();
+  // The packaged app carries its own whisper.cpp executable and model under
+  // bin/whisper. There is no Python dependency, no cloud fallback, and no
+  // resident loopback server. One JARVIS-owned child runs per utterance.
+  const whisperSidecar = createWhisperSidecar({
+    appPath: app.getAppPath(),
+    manifest: WHISPER_ASSET_MANIFEST,
+    logger: console,
+  });
 
-  function queueWhisperTranscription(resolvedPath) {
-    if (!whisperProcess) initWhisper();
-    return new Promise(resolve => {
-      _whisperQueue.push({ resolvedPath, resolve });
-      whisperReadyPromise
-        .then(() => _drainWhisperQueue())
-        .catch(error => resolve({ success: false, error: error.message }));
+  if (!testMode) {
+    whisperSidecar.initialize().then(result => {
+      if (result.ok) {
+        console.log('[WHISPER] Bundled local transcription is ready.');
+      }
     });
   }
+
+  app.once('will-quit', () => whisperSidecar.dispose('app-quit'));
 
   const transcriptionService = voicePolicy
     ? createTranscriptionService({
       voicePolicy,
-      queueTranscription: queueWhisperTranscription,
+      queueTranscription: whisperSidecar.transcribe,
       audioDirProvider: () => path.join(app.getPath('userData'), 'audio-cache'),
       audit: secAudit,
     })
@@ -546,4 +412,7 @@ module.exports = function registerAIController({
     }
   }, 5000);
 
+  return Object.freeze({
+    getWhisperStatus: () => whisperSidecar.status(),
+  });
 };
