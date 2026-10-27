@@ -28,7 +28,8 @@
         <div class="auth-hex-ring auth-ring-2"></div>
         <div class="auth-core">◈</div>
         <div id="auth-face-live" class="hidden" aria-hidden="true">
-          <video id="auth-face-video" autoplay muted playsinline></video>
+          <div class="auth-face-reticle" aria-hidden="true"></div>
+          <div class="auth-face-glyph" aria-hidden="true">◈</div>
           <div class="auth-face-scanline" aria-hidden="true"></div>
         </div>
       </div>
@@ -1183,12 +1184,16 @@
           <button id="face-pin-save" class="integration-btn" type="button">SAVE PIN &amp; CONTINUE</button>
         </div>
         <div id="face-setup-camera" class="hidden">
-          <video id="face-setup-video" autoplay muted playsinline></video>
-          <div class="auth-face-scanline" aria-hidden="true"></div>
-          <div id="face-setup-status" class="auth-face-status" role="status">PREPARING LOCAL CAMERA…</div>
+          <div class="face-setup-visual" aria-hidden="true">
+            <div class="face-setup-reticle" aria-hidden="true"></div>
+            <div class="face-setup-glyph" aria-hidden="true">◈</div>
+            <div class="auth-face-scanline" aria-hidden="true"></div>
+          </div>
+          <div id="face-setup-status" class="auth-face-status" role="status">PREPARING ISOLATED LOCAL VERIFIER…</div>
           <div class="face-progress"><div id="face-progress-bar"></div></div>
           <div class="integration-meta" style="margin-top:8px;">Look at the camera, center your face, and blink once.
-            Nothing is uploaded. Raw frames are discarded after each local inference.</div>
+            Capture and matching run in a separate sandboxed verifier. This window shows status only; frames never
+            enter the JARVIS interface and are never stored.</div>
           <button id="face-setup-cancel" class="integration-btn" type="button" style="margin-top:10px;">CANCEL</button>
         </div>
         <div id="face-setup-done" class="hidden">

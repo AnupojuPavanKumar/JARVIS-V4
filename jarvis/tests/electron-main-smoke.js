@@ -150,6 +150,28 @@ app.whenReady().then(async () => {
     const loaded = await win.webContents.executeJavaScript('window.jarvis.memoryLoad()');
     check('real main process reads the record back', loaded.records.some(record => record.id === added.record.id));
 
+    const approvedUrl = win.webContents.getURL();
+    const windowOpenDenied = await win.webContents.executeJavaScript(`
+      window.open('https://example.com/p1-window-open') === null
+    `);
+    check('window.open is denied by the main renderer window-open policy', windowOpenDenied === true);
+    await win.webContents.executeJavaScript(`
+      (() => { try { location.href = 'https://example.com/p1-navigation'; } catch (_) {} })()
+    `).catch(() => {});
+    await wait(400);
+    check(
+      'external navigation cannot replace the approved renderer document',
+      win.webContents.getURL() === approvedUrl,
+      win.webContents.getURL()
+    );
+    const audits = await win.webContents.executeJavaScript('window.jarvis.secAuditRead()');
+    check(
+      'blocked navigation and window-open attempts are audited',
+      audits?.entries?.some(entry => entry.action === 'NAVIGATION_BLOCK') === true
+        && audits?.entries?.some(entry => entry.action === 'WINDOW_OPEN_BLOCK') === true,
+      JSON.stringify(audits?.entries?.slice(-5))
+    );
+
     win.show();
     await waitFor(() => win.isVisible(), 3000);
     win.close();

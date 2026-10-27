@@ -21,6 +21,8 @@ function createIpcGuard({
   ipcMain,
   getMainWindow,
   approvedRendererUrl,
+  getVerifierWebContents = () => null,
+  approvedVerifierUrl = null,
   sessionState,
   audit = () => {},
   strictPolicy = true,
@@ -54,7 +56,7 @@ function createIpcGuard({
     }
   }
 
-  function validateSender(event) {
+  function validateMainSender(event) {
     const win = typeof getMainWindow === 'function' ? getMainWindow() : null;
     if (!win || safeCall(() => win.isDestroyed() === true, true)) {
       return { ok: false, reason: 'no-main-window' };
@@ -81,15 +83,49 @@ function createIpcGuard({
     return { ok: true };
   }
 
+  function validateVerifierSender(event) {
+    if (typeof approvedVerifierUrl !== 'string' || approvedVerifierUrl.length === 0) {
+      return { ok: false, reason: 'no-verifier-policy' };
+    }
+    const verifier = typeof getVerifierWebContents === 'function'
+      ? safeCall(() => getVerifierWebContents(), null)
+      : null;
+    if (!verifier) {
+      return { ok: false, reason: 'no-verifier' };
+    }
+    const sender = event && event.sender;
+    if (!sender || sender !== verifier) {
+      return { ok: false, reason: 'wrong-web-contents' };
+    }
+    if (safeCall(() => sender.isDestroyed() === true, true)) {
+      return { ok: false, reason: 'sender-destroyed' };
+    }
+    const frame = event.senderFrame;
+    if (frameDestroyed(frame)) {
+      return { ok: false, reason: 'frame-destroyed' };
+    }
+    const mainFrame = safeCall(() => sender.mainFrame, null);
+    if (!mainFrame || frame !== mainFrame) {
+      return { ok: false, reason: 'subframe' };
+    }
+    if (frameUrl(frame) !== approvedVerifierUrl) {
+      return { ok: false, reason: 'unapproved-url' };
+    }
+    return { ok: true };
+  }
+
   function authorize(channel, event) {
     const policy = getIpcPolicy(channel);
     if (!policy) {
       auditBlocked('IPC_POLICY_MISSING', channel);
       return { ok: false, error: DEFAULT_DENY_ERROR, reason: 'no-policy' };
     }
-    const sender = validateSender(event);
+    const surface = policy.surface === 'verifier' ? 'verifier' : 'renderer';
+    const sender = surface === 'verifier'
+      ? validateVerifierSender(event)
+      : validateMainSender(event);
     if (!sender.ok) {
-      auditBlocked('IPC_BLOCK', `${channel} sender=${sender.reason}`);
+      auditBlocked('IPC_BLOCK', `${channel} surface=${surface} sender=${sender.reason}`);
       return { ok: false, error: DEFAULT_DENY_ERROR, reason: sender.reason };
     }
     if (!policy.states.includes(sessionState.state)) {
@@ -102,7 +138,7 @@ function createIpcGuard({
         state: sessionState.state,
       };
     }
-    return { ok: true, policy };
+    return { ok: true, policy, surface };
   }
 
   function registerChecked(channel) {
@@ -147,7 +183,7 @@ function createIpcGuard({
   const api = Object.freeze({
     install,
     authorize,
-    validateSender,
+    validateVerifierSender,
   });
   return api;
 }

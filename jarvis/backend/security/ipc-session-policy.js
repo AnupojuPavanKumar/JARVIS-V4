@@ -11,6 +11,7 @@ const LOCKED_ONLY = Object.freeze([S.LOCKED]);
 const SETUP_ONLY = Object.freeze([S.SETUP]);
 const UNLOCKED_ONLY = Object.freeze([S.UNLOCKED]);
 const ERROR_ONLY = Object.freeze([S.ERROR]);
+const FACE_VERIFIER_STATES = Object.freeze([S.LOCKED, S.UNLOCKED, S.NO_LOCK]);
 
 function entry(states, options = {}) {
   return Object.freeze({ states: Object.freeze([...states]), ...options });
@@ -38,21 +39,29 @@ const IPC_POLICY = Object.freeze({
   'auth-recover-reset': entry(ERROR_ONLY, { kind: 'invoke', credential: true }),
 
   // Face unlock is deliberately allowed on the lock screen. Enrollment and
-  // profile mutation are not.
+  // profile mutation are not. The main renderer can start or cancel a verifier
+  // attempt, but only the isolated verifier surface can return a result. It is
+  // never allowed to submit an embedding from the main renderer.
   'face-status': entry(ALL_EXCEPT_BOOTING, { kind: 'invoke', readOnly: true }),
-  'face-verify': entry(LOCKED_ONLY, { kind: 'invoke', credential: true }),
-  'face-arm-camera': entry([S.LOCKED, S.UNLOCKED, S.NO_LOCK], { kind: 'invoke', capability: 'camera' }),
-  'face-disarm-camera': entry(ALL_EXCEPT_BOOTING, { kind: 'invoke' }),
+  'face-start-verifier': entry(FACE_VERIFIER_STATES, { kind: 'invoke', capability: 'camera' }),
+  'face-cancel-verifier': entry(ALL_EXCEPT_BOOTING, { kind: 'invoke' }),
   'face-cancel-enrollment': entry(ALL_EXCEPT_BOOTING, { kind: 'invoke' }),
   'face-begin-enrollment': entry(PRIVILEGED, { kind: 'invoke' }),
-  'face-enroll': entry(PRIVILEGED, { kind: 'invoke', credential: true }),
   'face-delete': entry(PRIVILEGED, { kind: 'invoke', credential: true }),
   'face-set-enabled': entry(PRIVILEGED, { kind: 'invoke' }),
+  'face-verifier-result': entry(FACE_VERIFIER_STATES, { kind: 'invoke', surface: 'verifier' }),
+  'face-verifier-progress': entry(FACE_VERIFIER_STATES, { kind: 'send', surface: 'verifier' }),
 
-  // Lock-screen wake-word capture is allowed; the handler enforces its own
-  // wake-only mode. One-shot microphone use requires an unlocked session.
+  // Local voice policy is main-owned. The lock screen may read status, disable
+  // the opt-in, hold wake-word-only capture, and consume a wake-word
+  // transcription lease. Enabling capture and one-shot use are still denied by
+  // the handler unless main's policy allows them. A renderer-supplied
+  // lockScreen/duration field is rejected outright.
+  'voice-status': entry(ALL_EXCEPT_BOOTING, { kind: 'invoke', readOnly: true }),
+  'voice-set-wake-word': entry([S.LOCKED, S.UNLOCKED, S.NO_LOCK], { kind: 'invoke' }),
   'voice-arm-microphone': entry([S.LOCKED, S.UNLOCKED, S.NO_LOCK], { kind: 'invoke', capability: 'microphone' }),
   'voice-disarm-microphone': entry(ALL_EXCEPT_BOOTING, { kind: 'invoke' }),
+  'voice-create-transcription-lease': entry([S.LOCKED, S.UNLOCKED, S.NO_LOCK], { kind: 'invoke' }),
 
   // Settings/security and audit data are privileged. The renderer can read
   // effective capability state and request/revoke grants, but it cannot write
@@ -63,18 +72,19 @@ const IPC_POLICY = Object.freeze({
   'sec-classify-command': entry(PRIVILEGED, { kind: 'invoke' }),
   'sec-audit-read': entry(PRIVILEGED, { kind: 'invoke' }),
 
-  // File system and project access.
-  'fs-read': entry(PRIVILEGED, { kind: 'invoke' }),
-  'fs-write': entry(PRIVILEGED, { kind: 'invoke' }),
-  'fs-list': entry(PRIVILEGED, { kind: 'invoke' }),
+  // File system and project access. Project content is reachable only through
+  // main-issued project tokens; there is no arbitrary-path fs-read/fs-write.
+  'renderer-log-write': entry(PRIVILEGED, { kind: 'invoke' }),
   'fs-dialog-save': entry(PRIVILEGED, { kind: 'invoke' }),
   'fs-dialog-open-doc': entry(PRIVILEGED, { kind: 'invoke' }),
   'fs-read-binary': entry(PRIVILEGED, { kind: 'invoke' }),
   'read-pdf': entry(PRIVILEGED, { kind: 'invoke' }),
   'read-text-doc': entry(PRIVILEGED, { kind: 'invoke' }),
-  'read-project': entry(PRIVILEGED, { kind: 'invoke' }),
   'open-image-dialog': entry(PRIVILEGED, { kind: 'invoke' }),
-  'open-folder-dialog': entry(PRIVILEGED, { kind: 'invoke' }),
+  'project-open': entry(PRIVILEGED, { kind: 'invoke' }),
+  'project-list': entry(PRIVILEGED, { kind: 'invoke' }),
+  'project-read-file': entry(PRIVILEGED, { kind: 'invoke' }),
+  'project-close': entry(PRIVILEGED, { kind: 'invoke' }),
   'run-command': entry(PRIVILEGED, { kind: 'invoke', capability: 'terminal' }),
   'capture-screen': entry(PRIVILEGED, { kind: 'invoke', capability: 'screen-capture' }),
 
@@ -85,6 +95,8 @@ const IPC_POLICY = Object.freeze({
   'system-command': entry(PRIVILEGED, { kind: 'invoke' }),
   'open-external': entry(PRIVILEGED, { kind: 'send' }),
   'quit-app': entry(PRIVILEGED, { kind: 'send' }),
+  // Write-only clipboard bridge. The renderer has no clipboard read method.
+  'clipboard-write-text': entry(PRIVILEGED, { kind: 'invoke' }),
 
   // Chat/history/memory.
   'history-save': entry(PRIVILEGED, { kind: 'invoke' }),
@@ -110,7 +122,9 @@ const IPC_POLICY = Object.freeze({
   'ollama-stream-start': entry(PRIVILEGED, { kind: 'send' }),
   'ollama-stream-abort': entry(PRIVILEGED, { kind: 'send' }),
   'piper-tts': entry(PRIVILEGED, { kind: 'invoke' }),
-  'transcribe-audio': entry(PRIVILEGED, { kind: 'invoke' }),
+  // The handler requires a single-use main-owned lease. Wake-word leases may be
+  // consumed on the lock screen; one-shot leases are refused there.
+  'transcribe-audio': entry([S.LOCKED, S.UNLOCKED, S.NO_LOCK], { kind: 'invoke' }),
 
   // Notes, prompts, snippets, skills.
   'snippets-load': entry(PRIVILEGED, { kind: 'invoke' }),
@@ -166,7 +180,10 @@ const IPC_POLICY = Object.freeze({
 
 const POLICY_CHANNELS = Object.freeze(Object.keys(IPC_POLICY));
 const LOCKED_ALLOWED_CHANNELS = Object.freeze(
-  POLICY_CHANNELS.filter(channel => IPC_POLICY[channel].states.includes(S.LOCKED))
+  POLICY_CHANNELS.filter(channel => (
+    IPC_POLICY[channel].surface !== 'verifier'
+    && IPC_POLICY[channel].states.includes(S.LOCKED)
+  ))
 );
 
 function getIpcPolicy(channel) {

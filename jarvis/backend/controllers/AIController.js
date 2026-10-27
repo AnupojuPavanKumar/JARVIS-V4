@@ -4,9 +4,16 @@ const http = require('http');
 const { spawn, exec } = require('child_process');
 const os = require('os');
 const { unpackedPath } = require('../asar-paths');
-const { normalizeAudioPayload } = require('../voice/audio-payload');
+const { createTranscriptionService } = require('../voice/transcription-service');
 
-module.exports = function registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate }) {
+module.exports = function registerAIController({
+  ipcMain,
+  app,
+  mainWindowProvider,
+  secAudit,
+  secCheckRate,
+  voicePolicy,
+}) {
   
   // ─── Web Search / DuckDuckGo ────────────────────────────────────────────────────
   // Issue 5 fix: replaced exec()+shell string with spawnShellCommand().
@@ -322,7 +329,6 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
       _whisperQueue.shift();
       _whisperBusy = false;
       _inflight = null;
-      try { fs.unlinkSync(entry.resolvedPath); } catch (_) { }
       entry.resolve({ success: false, error: 'stdin write failed: ' + writeErr.message });
       _drainWhisperQueue();
     }
@@ -333,8 +339,6 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
     const entry = _whisperQueue.shift();
     _inflight = null;
     _whisperBusy = false;
-  
-    try { fs.unlinkSync(entry.resolvedPath); } catch (_) { }
   
     if (resultOrError instanceof Error) {
       entry.resolve({ success: false, error: resultOrError.message });
@@ -363,7 +367,6 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
           }
           while (_whisperQueue.length) {
             const stale = _whisperQueue.shift();
-            try { fs.unlinkSync(stale.resolvedPath); } catch (_) { }
             stale.resolve({ success: false, error: 'Whisper restarted' });
           }
           _whisperBusy = false;
@@ -415,6 +418,14 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
       console.log('[WHISPER] Process exited with code', code);
       _clearWhisperHealth();
       whisperProcess = null;
+      // Settle every queued request so the transcription service can remove
+      // each temporary WAV in its finally path.
+      while (_whisperQueue.length) {
+        const stale = _whisperQueue.shift();
+        stale.resolve({ success: false, error: 'Whisper process exited' });
+      }
+      _whisperBusy = false;
+      _inflight = null;
       if (!app.isQuitting) {
         if (!global.whisperRetries) global.whisperRetries = 0;
         global.whisperRetries++;
@@ -428,38 +439,31 @@ module.exports = function registerAIController({ ipcMain, app, mainWindowProvide
   }
   
   if (!testMode) initWhisper();
-  
-  ipcMain.handle('transcribe-audio', async (_event, payload) => {
-    if (!whisperProcess) initWhisper();
 
-    let audioBuffer;
-    try {
-      audioBuffer = normalizeAudioPayload(payload);
-    } catch (e) {
-      return { success: false, error: 'Invalid audio payload: ' + e.message };
-    }
-  
-    const audioDir = path.join(app.getPath('userData'), 'audio-cache');
-    try { fs.mkdirSync(audioDir, { recursive: true }); } catch (_) { }
-    const tempPath = path.join(audioDir, 'audio_' + Date.now() + '_' + process.pid + '.wav');
-    const resolvedPath = path.resolve(tempPath);
-  
-    if (!resolvedPath.startsWith(path.resolve(audioDir))) {
-      return { success: false, error: 'Refusing to write temp audio outside audio-cache.' };
-    }
-  
-    try {
-      fs.writeFileSync(resolvedPath, audioBuffer);
-    } catch (e) {
-      return { success: false, error: 'Failed to write audio temp file: ' + e.message };
-    }
-  
-    const result = await new Promise((resolve, reject) => {
-      _whisperQueue.push({ resolvedPath, resolve, reject });
-      whisperReadyPromise.then(() => _drainWhisperQueue()).catch(() => { });
+  function queueWhisperTranscription(resolvedPath) {
+    if (!whisperProcess) initWhisper();
+    return new Promise(resolve => {
+      _whisperQueue.push({ resolvedPath, resolve });
+      whisperReadyPromise
+        .then(() => _drainWhisperQueue())
+        .catch(error => resolve({ success: false, error: error.message }));
     });
-  
-    return result;
+  }
+
+  const transcriptionService = voicePolicy
+    ? createTranscriptionService({
+      voicePolicy,
+      queueTranscription: queueWhisperTranscription,
+      audioDirProvider: () => path.join(app.getPath('userData'), 'audio-cache'),
+      audit: secAudit,
+    })
+    : null;
+
+  ipcMain.handle('transcribe-audio', async (event, payload) => {
+    if (!transcriptionService) {
+      return { success: false, error: 'Local voice policy is unavailable' };
+    }
+    return transcriptionService.handle(event, payload);
   });
 
   // ─── Telemetry Broadcast ──────────────────────────────────────────────

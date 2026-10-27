@@ -18,6 +18,9 @@ function fakeWebContents() {
     emit(name, ...args) {
       for (const fn of listeners.get(name) || []) fn(...args);
     },
+    setWindowOpenHandler(fn) {
+      this.windowOpenHandler = fn;
+    },
     listeners,
   };
 }
@@ -29,12 +32,14 @@ function unlockedHarness() {
   assert.equal(state.state, SESSION_STATES.UNLOCKED);
   const webContents = fakeWebContents();
   const locked = [];
+  const audits = [];
   attachRendererSessionGuards(webContents, {
     sessionState: state,
     approvedRendererUrl: APPROVED_URL,
     onLock: reason => locked.push(reason),
+    audit: (action, detail, verdict) => audits.push({ action, detail, verdict }),
   }).install();
-  return { state, webContents, locked };
+  return { state, webContents, locked, audits };
 }
 
 test('renderer guards: reload/navigation locks an unlocked session', () => {
@@ -58,6 +63,43 @@ test('renderer guards: redirect to an unapproved URL is prevented and locks', ()
   h.webContents.emit('will-redirect', { preventDefault: () => { prevented = true; } }, 'file:///C:/Windows/System32/evil.html');
   assert.equal(prevented, true);
   assert.equal(h.state.state, SESSION_STATES.LOCKED);
+});
+
+test('renderer guards: the exact approved entry URL is the only allowed navigation', () => {
+  const h = unlockedHarness();
+  let prevented = false;
+  h.webContents.emit('will-navigate', { preventDefault: () => { prevented = true; } }, APPROVED_URL);
+  assert.equal(prevented, false);
+  assert.equal(h.state.state, SESSION_STATES.UNLOCKED);
+  assert.equal(h.audits.length, 0);
+});
+
+test('renderer guards: window.open is denied, audited, and locks the session', () => {
+  const h = unlockedHarness();
+  assert.equal(typeof h.webContents.windowOpenHandler, 'function');
+  const decision = h.webContents.windowOpenHandler({ url: 'https://evil.example/' });
+  assert.deepEqual(decision, { action: 'deny' });
+  assert.equal(h.state.state, SESSION_STATES.LOCKED);
+  assert.equal(h.audits.at(-1).action, 'WINDOW_OPEN_BLOCK');
+  assert.equal(h.audits.at(-1).verdict, 'BLOCKED - new windows are denied');
+});
+
+test('renderer guards: webview attachment is prevented and locks the session', () => {
+  const h = unlockedHarness();
+  let prevented = false;
+  h.webContents.emit(
+    'will-attach-webview',
+    { preventDefault: () => { prevented = true; } },
+    {},
+    { src: 'https://evil.example/' }
+  );
+  assert.equal(prevented, true);
+  assert.equal(h.state.state, SESSION_STATES.LOCKED);
+  assert.equal(h.audits.at(-1).action, 'WEBVIEW_BLOCK');
+
+  let closed = false;
+  h.webContents.emit('did-attach-webview', {}, { close: () => { closed = true; } });
+  assert.equal(closed, true);
 });
 
 test('renderer guards: renderer crash and webContents destruction lock the session', () => {

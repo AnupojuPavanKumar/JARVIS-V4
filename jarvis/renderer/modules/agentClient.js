@@ -594,6 +594,16 @@ window.AgentClient = (() => {
       return { ok: false, error: 'A task is already active' };
     }
 
+    const project = options.projectContext && typeof options.projectContext === 'object'
+      ? {
+          name: options.projectContext.name,
+          rootPath: options.projectContext.rootPath,
+          files: options.projectContext.files,
+          fileCount: options.projectContext.fileCount,
+          totalBytes: options.projectContext.totalBytes,
+          truncated: options.projectContext.truncated,
+        }
+      : undefined;
     const request = {
       goal,
       source: options.source || 'deep-work',
@@ -602,7 +612,7 @@ window.AgentClient = (() => {
       maxSteps: Number.isInteger(options.maxSteps) ? options.maxSteps : 15,
       systemSpecs: options.systemSpecs,
       memory: Array.isArray(options.memory) ? options.memory : [],
-      projectContext: options.projectContext,
+      projectContext: project,
       webSearchContext: options.webSearchContext,
       deepWorkEnabled: true,
       modelOptions: options.modelOptions || {

@@ -11,6 +11,23 @@ function _uiEscHtml(str) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Clipboard writes go through the write-only preload bridge. This renderer is
+// loaded from a file origin, where navigator.clipboard is not dependable.
+async function copyTextToClipboard(text) {
+  if (typeof text !== 'string' || text.length === 0) return { ok: false, error: 'Nothing to copy' };
+  try {
+    if (!window.jarvis || typeof window.jarvis.clipboardWriteText !== 'function') {
+      return { ok: false, error: 'Clipboard bridge is unavailable' };
+    }
+    const result = await window.jarvis.clipboardWriteText(text);
+    if (result && result.ok) return { ok: true };
+    return { ok: false, error: (result && result.error) || 'Clipboard write failed' };
+  } catch (error) {
+    return { ok: false, error: error && error.message ? error.message : 'Clipboard write failed' };
+  }
+}
+window.copyTextToClipboard = copyTextToClipboard;
+
 // ─── Chat Search ───────────────────────────────────────────────
 
 let _chatSearchVisible = false;
@@ -140,12 +157,30 @@ document.addEventListener('DOMContentLoaded', () => {
   if (container) _msgObserver.observe(container, { childList: true });
 }, { once: true });
 
+// Persist a renderer-owned collection through the named bridge. Returns true
+// only when main confirmed the write, so callers never announce success for a
+// failed save.
+async function _persistUiCollection(save, label) {
+  try {
+    const result = await save();
+    if (result?.ok) return true;
+    if (typeof showToast === 'function') {
+      showToast(`Could not save ${label}: ${result?.error || 'unknown error'}`, 'error');
+    }
+  } catch (error) {
+    if (typeof showToast === 'function') {
+      showToast(`Could not save ${label}: ${error.message}`, 'error');
+    }
+  }
+  return false;
+}
+
 // ─── Prompt Library ────────────────────────────────────────────
 
 let _prompts = [];
 
 async function openPromptLibrary() {
-  try { const res = await window.jarvis.invoke('prompts-load'); _prompts = res?.data || []; } catch { _prompts = []; }
+  try { const res = await window.jarvis.promptsLoad(); _prompts = res?.data || []; } catch { _prompts = []; }
   if (!_prompts.length) {
     _prompts = [
       { id: 'p1', title: 'Professional Email', category: 'Writing', body: 'Write a professional email about {topic}. Keep it concise and polite.' },
@@ -154,7 +189,7 @@ async function openPromptLibrary() {
       { id: 'p4', title: 'Debug Error', category: 'Code', body: 'I\'m getting this error: {error}Code:\n```\n{code}\n```\nHow do I fix it?' },
       { id: 'p5', title: 'Write Unit Tests', category: 'Code', body: 'Write comprehensive unit tests for:```\n{function}\n```' },
     ];
-    try { await window.jarvis.invoke('prompts-save', _prompts); } catch {}
+    await _persistUiCollection(() => window.jarvis.promptsSave(_prompts), 'prompts');
   }
   if (typeof openModal === 'function') openModal('prompts-modal');
   renderPrompts('');
@@ -182,9 +217,9 @@ window.usePrompt = usePrompt;
 
 async function deletePrompt(id) {
   _prompts = _prompts.filter(p => p.id !== id);
-  try { await window.jarvis.invoke('prompts-save', _prompts); } catch {}
+  const saved = await _persistUiCollection(() => window.jarvis.promptsSave(_prompts), 'prompts');
   renderPrompts(document.getElementById('prompts-search')?.value || '');
-  if (typeof showToast === 'function') showToast('Deleted', 'info');
+  if (saved && typeof showToast === 'function') showToast('Deleted', 'info');
 }
 window.deletePrompt = deletePrompt;
 
@@ -197,10 +232,10 @@ async function saveNewPrompt() {
   const body = document.getElementById('prompt-new-body')?.value.trim();
   if (!title || !body) { if (typeof showToast === 'function') showToast('Title and body required', 'error'); return; }
   _prompts.unshift({ id: `p${Date.now()}`, title, category: cat, body });
-  try { await window.jarvis.invoke('prompts-save', _prompts); } catch {}
+  const saved = await _persistUiCollection(() => window.jarvis.promptsSave(_prompts), 'prompts');
   renderPrompts('');
   document.getElementById('prompt-add-form')?.setAttribute('hidden', '');
-  if (typeof showToast === 'function') showToast('Saved!', 'success');
+  if (saved && typeof showToast === 'function') showToast('Saved!', 'success');
 }
 window.saveNewPrompt = saveNewPrompt;
 
@@ -209,14 +244,14 @@ window.saveNewPrompt = saveNewPrompt;
 let _snippets = [];
 
 async function openSnippetManager() {
-  try { const res = await window.jarvis.invoke('snippets-load'); _snippets = res?.data || []; } catch { _snippets = []; }
+  try { const res = await window.jarvis.snippetsLoad(); _snippets = res?.data || []; } catch { _snippets = []; }
   if (!_snippets.length) {
     _snippets = [
       { id: 's1', title: 'HTTP GET (Python)', lang: 'python', code: 'import requests\nres = requests.get("https://api.example.com")\nprint(res.status_code, res.json())' },
       { id: 's2', title: 'Async Fetch (JS)', lang: 'javascript', code: 'const data = await fetch("https://api.example.com").then(r=>r.json());\nconsole.log(data);' },
       { id: 's3', title: 'List Files', lang: 'python', code: 'import os\nfor f in os.listdir("."):\n    print(f)' },
     ];
-    try { await window.jarvis.invoke('snippets-save', _snippets); } catch {}
+    await _persistUiCollection(() => window.jarvis.snippetsSave(_snippets), 'snippets');
   }
   if (typeof openModal === 'function') openModal('snippets-modal');
   renderSnippets('');
@@ -242,17 +277,21 @@ function useSnippet(id) {
 }
 window.useSnippet = useSnippet;
 
-function copySnip(id) {
+async function copySnip(id) {
   const s = _snippets.find(x => x.id === id);
-  if (s) navigator.clipboard.writeText(s.code).then(() => { if (typeof showToast === 'function') showToast('Copied!', 'success'); });
+  if (!s) return;
+  const result = await copyTextToClipboard(s.code);
+  if (typeof showToast === 'function') {
+    showToast(result.ok ? 'Copied!' : `Copy failed: ${result.error}`, result.ok ? 'success' : 'error');
+  }
 }
 window.copySnip = copySnip;
 
 async function deleteSnippet(id) {
   _snippets = _snippets.filter(s => s.id !== id);
-  try { await window.jarvis.invoke('snippets-save', _snippets); } catch {}
+  const saved = await _persistUiCollection(() => window.jarvis.snippetsSave(_snippets), 'snippets');
   renderSnippets(document.getElementById('snippets-search')?.value || '');
-  if (typeof showToast === 'function') showToast('Deleted', 'info');
+  if (saved && typeof showToast === 'function') showToast('Deleted', 'info');
 }
 window.deleteSnippet = deleteSnippet;
 
@@ -265,10 +304,10 @@ async function saveNewSnippet() {
   const code = document.getElementById('snip-new-code')?.value.trim();
   if (!title || !code) { if (typeof showToast === 'function') showToast('Title and code required', 'error'); return; }
   _snippets.unshift({ id: `s${Date.now()}`, title, lang, code });
-  try { await window.jarvis.invoke('snippets-save', _snippets); } catch {}
+  const saved = await _persistUiCollection(() => window.jarvis.snippetsSave(_snippets), 'snippets');
   renderSnippets('');
   document.getElementById('snip-add-form')?.setAttribute('hidden', '');
-  if (typeof showToast === 'function') showToast('Saved!', 'success');
+  if (saved && typeof showToast === 'function') showToast('Saved!', 'success');
 }
 window.saveNewSnippet = saveNewSnippet;
 
@@ -276,7 +315,7 @@ window.saveNewSnippet = saveNewSnippet;
 
 async function openNotes() {
   let content = '';
-  try { const res = await window.jarvis.invoke('notes-load'); content = res?.data || ''; } catch {}
+  try { const res = await window.jarvis.notesLoad(); content = res?.data || ''; } catch {}
   if (typeof openModal === 'function') openModal('notes-modal');
   setTimeout(() => { const ed = document.getElementById('notes-editor'); if (ed) { ed.value = content; updateNotesStatus(); } }, 50);
 }
@@ -295,7 +334,8 @@ async function saveNotes() {
   const ed = document.getElementById('notes-editor');
   if (!ed) return;
   try {
-    await window.jarvis.invoke('notes-save', ed.value);
+    const res = await window.jarvis.notesSave(ed.value);
+    if (!res?.ok) throw new Error(res?.error || 'Save failed');
     if (typeof showToast === 'function') showToast('Notes saved', 'success');
   } catch {
     if (typeof showToast === 'function') showToast('Save failed', 'error');
@@ -487,7 +527,7 @@ window.openImageAnalysis = openImageAnalysis;
 
 async function pickImage() {
   try {
-    const res = await window.jarvis.invoke('open-image-dialog');
+    const res = await window.jarvis.openImageDialog();
     if (!res?.ok) return;
     await loadImg(res.filePath);
   } catch { if (typeof showToast === 'function') showToast('Could not open image dialog', 'error'); }
@@ -496,7 +536,7 @@ window.pickImage = pickImage;
 
 async function loadImg(fp) {
   try {
-    const res = await window.jarvis.invoke('fs-read-binary', fp);
+    const res = await window.jarvis.readFileBinary(fp);
     if (!res?.ok) { if (typeof showToast === 'function') showToast('Failed to read image', 'error'); return; }
     _imgB64 = res.data; _imgMime = res.mimeType;
     const prev = document.getElementById('img-preview');

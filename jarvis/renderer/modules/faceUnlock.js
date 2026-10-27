@@ -1,20 +1,17 @@
 /*
- * JARVIS local face unlock.
+ * JARVIS local face unlock — display-only renderer.
  *
- * Privacy model:
- *  - Camera access is armed only for one explicit unlock/enrollment attempt.
- *  - Inference runs locally in this renderer with bundled Human/TFJS models.
- *  - Only numeric embeddings cross IPC. Frames are never persisted or sent.
- *  - Face verification can only clear the UI session lock. It is deliberately
- *    not connected to approvals, command execution, or integrations.
+ * The main renderer never receives camera frames, runs face inference, or
+ * submits embeddings. Camera capture, liveness, and embedding generation live
+ * in a separate sandboxed verifier webContents. This module only starts or
+ * cancels a verifier attempt and presents non-sensitive status on the existing
+ * lock screen and enrollment modal.
+ *
+ * Face verification can only clear the UI session lock. It is deliberately not
+ * connected to approvals, command execution, integrations, or agent actions.
  */
 
-const FACE_MODEL_SCRIPT = 'vendor/human/human.js';
-const SCAN_TIMEOUT_MS = 25000;
-const MIN_FACE_SIZE = 160;
-const MIN_CONFIDENCE = 0.5;
-const MIN_LIVENESS = 0.5;
-const ENROLL_SAMPLES = 3;
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const state = {
   initialized: false,
@@ -22,12 +19,6 @@ const state = {
   running: false,
   mode: null,
   scanId: 0,
-  abort: false,
-  human: null,
-  stream: null,
-  video: null,
-  lastTensor: null,
-  enrollToken: null,
   setupActive: false,
   autoSuppressed: false,
   windowVisible: true,
@@ -40,10 +31,10 @@ const state = {
   toastTimer: null,
   toastHideTimer: null,
   lastStatusText: '',
+  enrollExpiresAt: 0,
 };
 
 const $ = id => document.getElementById(id);
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function authScreen() {
   return $('auth-screen');
@@ -130,7 +121,13 @@ async function refreshStatus() {
     const result = await window.jarvis.faceStatus();
     state.status = result || null;
   } catch (error) {
-    state.status = { ok: false, available: false, enrolled: false, enabled: false, error: String(error && error.message || error) };
+    state.status = {
+      ok: false,
+      available: false,
+      enrolled: false,
+      enabled: false,
+      error: String(error && error.message || error),
+    };
   }
   updateAuthFacePanel();
   renderSettings();
@@ -161,7 +158,6 @@ function renderSettings() {
   const statusLine = $('face-settings-status');
   const enrollBtn = $('face-enroll-btn');
   const deleteBtn = $('face-delete-btn');
-  const deletePin = $('face-delete-pin');
   if (!enabled || !statusLine || !enrollBtn || !deleteBtn) return;
   const status = state.status;
   const showDeletePin = !!(status && status.enrolled === true && status.hasPin === true);
@@ -174,7 +170,7 @@ function renderSettings() {
     return;
   }
   if (status.available === false || status.ok === false) {
-    const reason = status.error || 'Local face engine unavailable.';
+    const reason = status.error || 'Local face verifier unavailable.';
     statusLine.textContent = reason;
     enabled.checked = false;
     enabled.disabled = true;
@@ -283,7 +279,7 @@ function removePinKeyHandler() {
 function cancelScanForPin() {
   if (!state.running || state.mode !== 'unlock') return;
   state.autoSuppressed = true;
-  stopScan('pin');
+  cancelVerifier('pin');
   updateAuthFacePanel();
   setAuthStatus('PIN ENTRY');
 }
@@ -306,7 +302,7 @@ function bindAuthButtons() {
   });
   $('auth-face-cancel')?.addEventListener('click', () => {
     state.autoSuppressed = true;
-    stopScan('cancelled');
+    cancelVerifier('cancelled');
     updateAuthFacePanel();
     setAuthStatus('PIN ENTRY');
   });
@@ -385,6 +381,7 @@ function installVisibilityListeners() {
     const setupWasOpen = state.setupActive;
     cancelEnrollment(false);
     if (setupWasOpen) window.closeModal?.('face-setup-modal');
+    cancelVerifier('lock');
     showLockScreen();
   });
   window.jarvis?.onAppVisibility?.(payload => {
@@ -393,18 +390,12 @@ function installVisibilityListeners() {
       const setupWasOpen = state.setupActive;
       cancelEnrollment(false);
       if (setupWasOpen) window.closeModal?.('face-setup-modal');
-      stopScan('hidden');
+      cancelVerifier('hidden');
       return;
     }
     if (authScreenVisible() && faceConfigured() && !state.autoSuppressed) {
       scheduleAutoScan(350);
     }
-  });
-  window.jarvis?.onFaceCameraStop?.(() => {
-    const setupWasOpen = state.setupActive;
-    cancelEnrollment(false);
-    if (setupWasOpen) window.closeModal?.('face-setup-modal');
-    stopScan('camera-stop');
   });
   document.addEventListener('visibilitychange', () => {
     state.windowVisible = !document.hidden;
@@ -412,9 +403,44 @@ function installVisibilityListeners() {
       const setupWasOpen = state.setupActive;
       cancelEnrollment(false);
       if (setupWasOpen) window.closeModal?.('face-setup-modal');
-      stopScan('hidden');
+      cancelVerifier('hidden');
     } else if (authScreenVisible() && faceConfigured() && !state.autoSuppressed) {
       scheduleAutoScan(350);
+    }
+  });
+}
+
+function installVerifierListeners() {
+  window.jarvis?.onFaceVerifierStatus?.(payload => {
+    if (!state.running) return;
+    const message = typeof payload.message === 'string' ? payload.message.trim() : '';
+    if (message) setStatus(state.mode, message);
+    if (Number.isFinite(payload.progress)) setProgress(payload.progress);
+  });
+  window.jarvis?.onFaceVerifierOutcome?.(payload => {
+    if (!state.running) return;
+    if (payload.purpose && state.mode && payload.purpose !== state.mode) return;
+    if (state.mode === 'enroll') finishEnrollment(payload);
+    else if (state.mode === 'unlock') finishUnlock(payload);
+  });
+  window.jarvis?.onFaceVerifierStop?.(payload => {
+    if (!state.running) return;
+    // Replacing one attempt with a newer one is not a user-visible failure.
+    if (payload.reason === 'replaced' || payload.reason === 'enrollment-restarted') return;
+    const mode = state.mode;
+    state.running = false;
+    state.mode = null;
+    state.scanId += 1;
+    if (mode === 'unlock') {
+      state.autoSuppressed = true;
+      showAuthLive(false);
+      showAuthError('Face scan stopped. Use your PIN or try again.');
+      setAuthStatus('PIN REQUIRED');
+    } else if (mode === 'enroll') {
+      showSetupCamera(true);
+      setSetupStatus('ENROLLMENT STOPPED');
+      showSetupError('Face enrollment stopped. Try again.');
+      setProgress(0);
     }
   });
 }
@@ -424,12 +450,12 @@ async function beginEnrollment() {
   showSetupError('');
   await refreshStatus();
   if (!faceStatusUsable()) {
-    showToast(state.status?.error || 'Local face engine unavailable.', 'error');
+    showToast(state.status?.error || 'Local face verifier unavailable.', 'error');
     return;
   }
   state.setupActive = true;
   state.autoSuppressed = true;
-  state.enrollToken = null;
+  state.enrollExpiresAt = 0;
   setHidden('face-setup-pin', true);
   setHidden('face-setup-camera', true);
   setHidden('face-setup-done', true);
@@ -458,19 +484,18 @@ async function startEnrollmentCamera() {
   setHidden('face-setup-done', true);
   setHidden('face-setup-camera', false);
   showSetupError('');
-  setSetupStatus('STARTING LOCAL ENROLLMENT…');
+  setSetupStatus('STARTING ISOLATED LOCAL ENROLLMENT…');
   if (!window.jarvis || typeof window.jarvis.faceBeginEnrollment !== 'function') {
     showSetupError('Face enrollment is unavailable.');
     return;
   }
   const begin = await window.jarvis.faceBeginEnrollment().catch(error => ({ ok: false, error: String(error) }));
   if (!begin || !begin.ok) {
+    setSetupStatus('ENROLLMENT UNAVAILABLE');
     showSetupError(begin?.error || 'Could not start face enrollment.');
-    setHidden('face-setup-camera', true);
-    setHidden('face-setup-done', true);
     return;
   }
-  state.enrollToken = begin.token;
+  state.enrollExpiresAt = Number(begin.expiresAt) || 0;
   await startScan('enroll');
 }
 
@@ -521,115 +546,36 @@ function showSetupCamera(show) {
   if (show) setProgress(0);
 }
 
-async function loadHumanScript() {
-  if (window.Human && (window.Human.Human || typeof window.Human === 'function')) return;
-  await new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-jarvis-human]');
-    if (existing) {
-      existing.addEventListener('load', resolve, { once: true });
-      existing.addEventListener('error', () => reject(new Error('Local face engine script failed to load')), { once: true });
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = FACE_MODEL_SCRIPT;
-    script.async = true;
-    script.dataset.jarvisHuman = 'true';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Local face engine script failed to load'));
-    document.head.appendChild(script);
-  });
+function setStatus(mode, message) {
+  if (mode === 'enroll') setSetupStatus(message);
+  else setAuthStatus(message);
 }
 
-async function ensureHuman() {
-  if (state.human) return state.human;
-  if (!state.status?.modelBaseUrl) throw new Error('Local face model server is unavailable');
-  await loadHumanScript();
-  const HumanCtor = window.Human?.Human || window.Human;
-  if (typeof HumanCtor !== 'function') throw new Error('Local face engine did not initialize');
-  const human = new HumanCtor({
-    modelBasePath: state.status.modelBaseUrl,
-    backend: 'webgl',
-    cacheModels: true,
-    debug: false,
-    face: {
-      enabled: true,
-      detector: { rotation: true, maxDetected: 1, minConfidence: 0.5 },
-      mesh: { enabled: true },
-      // Iris landmarks are required for the "looking center" check.
-      iris: { enabled: true },
-      emotion: { enabled: false },
-      description: { enabled: true },
-      antispoof: { enabled: true },
-      liveness: { enabled: true },
-      gear: { enabled: false },
-    },
-    body: { enabled: false },
-    hand: { enabled: false },
-    object: { enabled: false },
-    gesture: { enabled: true },
-    segmentation: { enabled: false },
-  });
-  await human.load();
-  state.human = human;
-  return human;
-}
-
-function disposeLastTensor() {
-  if (!state.lastTensor || !state.human?.tf?.dispose) {
-    state.lastTensor = null;
-    return;
-  }
-  try { state.human.tf.dispose(state.lastTensor); } catch (_) { /* best effort */ }
-  state.lastTensor = null;
-}
-
-async function armCamera(purpose) {
-  if (!window.jarvis || typeof window.jarvis.faceArmCamera !== 'function') {
-    throw new Error('Camera permission gate is unavailable');
-  }
-  const result = await window.jarvis.faceArmCamera({ purpose });
-  if (!result || !result.ok) throw new Error(result?.error || 'Camera access was denied');
-}
-
-async function releaseCamera() {
-  if (state.stream) {
-    try { state.stream.getTracks().forEach(track => track.stop()); } catch (_) { /* best effort */ }
-    state.stream = null;
-  }
-  if (state.video) {
-    try { state.video.pause(); } catch (_) { /* best effort */ }
-    try { state.video.srcObject = null; } catch (_) { /* best effort */ }
-    state.video = null;
-  }
-  try { await window.jarvis?.faceDisarmCamera?.(); } catch (_) { /* best effort */ }
-}
-
-function stopScan(reason) {
-  if (!state.running && !state.stream) return;
-  state.abort = true;
+function cancelVerifier(reason) {
+  const wasRunning = state.running;
   state.running = false;
-  state.scanId += 1;
-  clearTimeout(state.autoTimer);
-  state.autoTimer = null;
-  disposeLastTensor();
-  releaseCamera();
   state.mode = null;
+  state.scanId += 1;
+  if (wasRunning) {
+    try { window.jarvis?.faceCancelVerifier?.().catch?.(() => {}); } catch (_) { /* best effort */ }
+  }
   if (authScreenVisible()) {
     showAuthLive(false);
     if (!faceConfigured()) setHidden('auth-face-panel', true);
   }
   if (state.setupActive) {
-    setSetupStatus(reason === 'hidden' ? 'SCAN STOPPED' : 'SCAN STOPPED');
+    setSetupStatus('SCAN STOPPED');
     setProgress(0);
   }
+  return wasRunning;
 }
 
 async function cancelEnrollment(cancelToken = true) {
-  const wasActive = state.setupActive || !!state.enrollToken;
+  const wasActive = state.setupActive || state.enrollExpiresAt > 0;
   state.setupActive = false;
-  state.enrollToken = null;
+  state.enrollExpiresAt = 0;
   if (state.running && state.mode === 'enroll') {
-    stopScan('cancelled');
+    cancelVerifier('enrollment-cancelled');
   }
   if (cancelToken && wasActive && window.jarvis?.faceCancelEnrollment) {
     try { await window.jarvis.faceCancelEnrollment(); } catch (_) { /* best effort */ }
@@ -639,164 +585,22 @@ async function cancelEnrollment(cancelToken = true) {
   setProgress(0);
 }
 
-function faceGestures(result) {
-  const raw = result && result.gesture;
-  if (!raw) return [];
-  const values = Array.isArray(raw) ? raw : Object.values(raw);
-  return values.map(item => item && item.gesture).filter(Boolean);
-}
-
-function isBlinkGesture(gestures) {
-  return gestures.includes('blink left eye') || gestures.includes('blink right eye');
-}
-
-function faceChecks(face, gestures) {
-  const box = Array.isArray(face.box) ? face.box : [];
-  const width = Number(box[2]) || 0;
-  const height = Number(box[3]) || 0;
-  const confidence = Math.max(Number(face.faceScore) || 0, Number(face.boxScore) || 0);
-  return {
-    confidence: confidence >= MIN_CONFIDENCE,
-    size: Math.min(width, height) >= MIN_FACE_SIZE,
-    facing: gestures.includes('facing center'),
-    looking: gestures.includes('looking center'),
-    real: (Number(face.real) || 0) >= MIN_LIVENESS,
-    live: (Number(face.live) || 0) >= MIN_LIVENESS,
-    embedding: Array.isArray(face.embedding) && face.embedding.length >= 128,
-  };
-}
-
-function pairwiseConsistent(samples) {
-  if (samples.length < 2) return true;
-  for (let i = 0; i < samples.length; i += 1) {
-    for (let j = i + 1; j < samples.length; j += 1) {
-      let dot = 0;
-      let left = 0;
-      let right = 0;
-      const a = samples[i];
-      const b = samples[j];
-      if (a.length !== b.length) return false;
-      for (let k = 0; k < a.length; k += 1) {
-        dot += a[k] * b[k];
-        left += a[k] * a[k];
-        right += b[k] * b[k];
-      }
-      if (left <= 0 || right <= 0) return false;
-      if (dot / (Math.sqrt(left) * Math.sqrt(right)) < 0.55) return false;
-    }
-  }
-  return true;
-}
-
-async function runScan(scanId, mode) {
-  const video = state.video;
-  const human = state.human;
-  if (!video || !human) throw new Error('Local face engine is not ready');
-  const startedAt = performance.now();
-  let blinkStartedAt = 0;
-  let blinkSeen = false;
-  let embedding = null;
-  let samples = [];
-  const requiredSamples = mode === 'enroll' ? ENROLL_SAMPLES : 1;
-
-  while (state.running && !state.abort && state.scanId === scanId) {
-    if (performance.now() - startedAt > SCAN_TIMEOUT_MS) {
-      throw new Error('Face scan timed out. Try again with better lighting.');
-    }
-    if (!state.windowVisible) throw new Error('The window was hidden');
-    const result = await human.detect(video);
-    disposeLastTensor();
-    const faces = result && Array.isArray(result.face) ? result.face : [];
-    if (faces.length !== 1) {
-      setStatus(mode, 'SHOW ONE FACE IN THE FRAME');
-      await wait(120);
-      continue;
-    }
-    const face = faces[0];
-    if (face.tensor) state.lastTensor = face.tensor;
-    const gestures = faceGestures(result);
-    const blinking = isBlinkGesture(gestures);
-    const now = performance.now();
-    if (blinking && blinkStartedAt === 0) blinkStartedAt = now;
-    if (!blinking && blinkStartedAt > 0) {
-      const duration = now - blinkStartedAt;
-      if (duration >= 10 && duration <= 900) blinkSeen = true;
-      blinkStartedAt = 0;
-    } else if (blinking && blinkStartedAt > 0 && now - blinkStartedAt > 1200) {
-      blinkStartedAt = 0;
-    }
-
-    const checks = faceChecks(face, gestures);
-    if (!checks.confidence) setStatus(mode, 'HOLD STILL · CHECKING FACE');
-    else if (!checks.size) setStatus(mode, 'MOVE A LITTLE CLOSER');
-    else if (!checks.facing) setStatus(mode, 'FACE THE CAMERA');
-    else if (!checks.looking) setStatus(mode, 'LOOK AT THE SCREEN');
-    else if (!checks.real || !checks.live) setStatus(mode, 'LIVENESS CHECK · HOLD STILL');
-    else if (!blinkSeen) setStatus(mode, 'BLINK ONCE TO VERIFY');
-    else if (!checks.embedding) setStatus(mode, 'BUILDING LOCAL EMBEDDING…');
-    else {
-      const nextEmbedding = Array.from(face.embedding);
-      if (mode === 'unlock') {
-        embedding = nextEmbedding;
-        break;
-      }
-      samples.push(nextEmbedding);
-      const progress = Math.round((samples.length / requiredSamples) * 100);
-      setProgress(progress);
-      setStatus(mode, `CAPTURING SAMPLE ${samples.length}/${requiredSamples}`);
-      if (samples.length >= requiredSamples) {
-        if (!pairwiseConsistent(samples)) {
-          samples = [];
-          blinkSeen = false;
-          setProgress(0);
-          setStatus(mode, 'SAMPLES DID NOT MATCH · TRY AGAIN');
-          await wait(500);
-          continue;
-        }
-        break;
-      }
-      await wait(600);
-    }
-    await wait(90);
-  }
-
-  disposeLastTensor();
-  if (state.abort || state.scanId !== scanId) return;
-  if (mode === 'unlock' && embedding) {
-    await finishUnlock(embedding);
-    return;
-  }
-  if (mode === 'enroll' && samples.length >= requiredSamples) {
-    await finishEnrollment(samples);
-    return;
-  }
-  throw new Error('Face scan did not complete. Try again.');
-}
-
-function setStatus(mode, message) {
-  if (mode === 'enroll') setSetupStatus(message);
-  else setAuthStatus(message);
-}
-
-async function finishUnlock(embedding) {
-  setAuthStatus('VERIFYING LOCAL MATCH…');
-  const result = await window.jarvis.faceVerify({ embedding, liveness: true }).catch(error => ({ ok: false, error: String(error) }));
+function finishUnlock(result) {
   state.running = false;
-  state.abort = false;
-  await releaseCamera();
   state.mode = null;
+  state.scanId += 1;
+  showAuthLive(false);
   if (!result || !result.ok) {
     state.autoSuppressed = true;
-    showAuthLive(false);
-    showAuthError(result?.rateLimited
+    const message = result?.rateLimited
       ? 'Too many attempts. Use your PIN or wait 15 minutes.'
-      : 'Face not recognized. Use your PIN or try again.');
+      : (result?.error || 'Face not recognized. Use your PIN or try again.');
+    showAuthError(message);
     setAuthStatus('PIN REQUIRED');
     return;
   }
   state.autoSuppressed = true;
   showAuthError('');
-  showAuthLive(false);
   if (state.booted || !window.Auth || typeof window.Auth._unlock !== 'function') {
     showToast('Identity confirmed. Welcome back, sir.', 'success');
   }
@@ -807,20 +611,13 @@ async function finishUnlock(embedding) {
   }
 }
 
-async function finishEnrollment(samples) {
-  setSetupStatus('ENCRYPTING LOCAL FACE PROFILE…');
-  const result = await window.jarvis.faceEnroll({
-    token: state.enrollToken,
-    embeddings: samples,
-    liveness: true,
-  }).catch(error => ({ ok: false, error: String(error) }));
+function finishEnrollment(result) {
   state.running = false;
-  state.abort = false;
-  await releaseCamera();
   state.mode = null;
-  state.enrollToken = null;
+  state.scanId += 1;
+  showSetupCamera(false);
   if (!result || !result.ok) {
-    setStatus('enroll', 'ENROLLMENT FAILED');
+    setSetupStatus('ENROLLMENT FAILED');
     showSetupError(result?.error || 'Could not save the face profile.');
     return;
   }
@@ -838,85 +635,66 @@ async function finishEnrollment(samples) {
 async function startScan(mode) {
   if (state.running) return;
   if (mode === 'unlock' && !faceConfigured()) return;
-  if (mode === 'enroll' && !state.enrollToken) return;
+  if (mode === 'enroll' && !state.setupActive) return;
+  if (!window.jarvis || typeof window.jarvis.faceStartVerifier !== 'function') {
+    handleScanError(mode, new Error('Trusted face verifier is unavailable'));
+    return;
+  }
   const scanId = ++state.scanId;
   state.running = true;
-  state.abort = false;
   state.mode = mode;
   showAuthError('');
   showSetupError('');
   if (mode === 'unlock') {
     showAuthLive(true);
     setHidden('auth-face-btn', true);
-    setAuthStatus('REQUESTING LOCAL CAMERA…');
+    setAuthStatus('STARTING ISOLATED FACE VERIFIER…');
   } else {
     showSetupCamera(true);
-    setSetupStatus('REQUESTING LOCAL CAMERA…');
+    setSetupStatus('STARTING ISOLATED FACE VERIFIER…');
     setProgress(0);
   }
+  let result;
   try {
-    await armCamera(mode);
-    if (scanId !== state.scanId) return;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: 'user',
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-      },
-    });
-    if (scanId !== state.scanId) {
-      try { stream.getTracks().forEach(track => track.stop()); } catch (_) { /* best effort */ }
-      return;
-    }
-    state.stream = stream;
-    const video = mode === 'enroll' ? $('face-setup-video') : $('auth-face-video');
-    if (!video) throw new Error('Face preview is unavailable');
-    state.video = video;
-    video.srcObject = stream;
-    await video.play();
-    await wait(150);
-    setStatus(mode, 'LOADING LOCAL FACE ENGINE…');
-    await ensureHuman();
-    if (scanId !== state.scanId) return;
-    setStatus(mode, 'POSITION YOUR FACE IN THE FRAME');
-    await runScan(scanId, mode);
+    result = await window.jarvis.faceStartVerifier({ purpose: mode });
   } catch (error) {
-    if (scanId !== state.scanId) return;
-    await handleScanError(mode, error);
-  } finally {
-    if (scanId === state.scanId) {
-      state.running = false;
-      state.mode = null;
-      await releaseCamera();
-      if (mode === 'unlock') {
-        if (authScreenVisible()) {
-          showAuthLive(false);
-          if (!faceConfigured()) setHidden('auth-face-panel', true);
-        }
-      } else if (state.setupActive) {
-        showSetupCamera(false);
-      }
+    result = { ok: false, error: String(error) };
+  }
+  if (scanId !== state.scanId) {
+    if (result && result.ok) {
+      try { await window.jarvis.faceCancelVerifier(); } catch (_) { /* best effort */ }
     }
+    return;
+  }
+  if (!result || !result.ok) {
+    state.running = false;
+    state.mode = null;
+    handleScanError(mode, new Error(result?.error || 'Could not start the local face verifier'));
+    return;
+  }
+  if (mode === 'unlock') {
+    setAuthStatus('SCANNING · ISOLATED LOCAL VERIFIER');
+  } else {
+    setSetupStatus('POSITION YOUR FACE · ISOLATED LOCAL VERIFIER');
   }
 }
 
-async function handleScanError(mode, error) {
+function handleScanError(mode, error) {
   const message = String(error && error.message || error || 'Face scan failed');
   console.warn('[FACE]', message);
   if (mode === 'unlock') {
     state.autoSuppressed = true;
     showAuthLive(false);
-    showAuthError(`Face unlock unavailable. Use your PIN.`);
+    showAuthError('Face unlock unavailable. Use your PIN.');
     setAuthStatus('PIN REQUIRED');
-  } else {
-    setSetupStatus('ENROLLMENT STOPPED');
-    showSetupError(message);
-    await cancelEnrollment(true);
-    if (state.setupActive) {
-      setHidden('face-setup-camera', true);
-    }
+    return;
   }
+  state.running = false;
+  state.mode = null;
+  setSetupStatus('ENROLLMENT STOPPED');
+  showSetupError(message);
+  setProgress(0);
+  try { window.jarvis?.faceCancelEnrollment?.().catch?.(() => {}); } catch (_) { /* best effort */ }
 }
 
 function installFaceSettings() {
@@ -945,6 +723,7 @@ async function init() {
   bindSettings();
   observeModals();
   installVisibilityListeners();
+  installVerifierListeners();
   await installFaceSettings();
   await waitForAuthInit();
   state.booted = window.__jarvisBooted === true || (!authScreenVisible() && !document.getElementById('boot-screen'));

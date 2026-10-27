@@ -164,6 +164,14 @@ const benignHandlers = {
   'ambient-status': { ok: true, supported: true, autoStartEnabled: false, schedulerRunning: true },
   'piper-tts': { ok: true },
   'fs-write': { ok: true },
+  'voice-status': {
+    ok: true,
+    wakeWordEnabled: false,
+    settingsError: null,
+    sessionLocked: false,
+    windowVisible: false,
+    capture: null,
+  },
 };
 for (const [channel, response] of Object.entries(benignHandlers)) {
   ipcMain.handle(channel, async () => response);

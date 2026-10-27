@@ -11,16 +11,26 @@
 //
 // Exits 0 on success, 1 on the first failed check.
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, clipboard } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const registerClipboardController = require('../backend/controllers/ClipboardController');
 
 app.disableHardwareAcceleration();
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-renderer-smoke-'));
 app.setPath('userData', userDataDir);
 
+// Keep the developer's real clipboard out of the smoke run. The controller and
+// renderer bridge still exercise the real write path, but the write is captured
+// here and never reaches the operating system.
+const originalClipboardWriteText = clipboard.writeText;
+const clipboardWrites = [];
+clipboard.writeText = text => { clipboardWrites.push(text); };
+registerClipboardController({ ipcMain, clipboard });
+
 function finish(code) {
+  clipboard.writeText = originalClipboardWriteText;
   try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* best effort */ }
   app.exit(code);
 }
@@ -103,7 +113,6 @@ const benignHandlers = {
   'memory-retrieve': { ok: true, context: '', records: [], chars: 0, budget: { maxChars: 1800, maxRecords: 6 } },
   'memory-record-conversation': { ok: true, episode: null, extractedCount: 0, stats: { total: 0 } },
   'memory-add': { ok: true, record: null, stats: { total: 0 } },
-  'notes-load': { ok: true, content: '' },
   'run-command': { ok: true, stdout: '', stderr: '' },
   'get-runtime-stats': { ok: false },
   'ollama-fetch': { ok: false, error: 'smoke' },
@@ -120,7 +129,15 @@ const benignHandlers = {
     lastResumeAt: null,
   },
   'piper-tts': { ok: true },
-  'fs-write': { ok: true },
+  'renderer-log-write': { ok: true },
+  'voice-status': {
+    ok: true,
+    wakeWordEnabled: false,
+    settingsError: null,
+    sessionLocked: false,
+    windowVisible: false,
+    capture: null,
+  },
 };
 for (const [channel, response] of Object.entries(benignHandlers)) {
   ipcMain.handle(channel, async () => response);
@@ -130,6 +147,70 @@ const historySaves = [];
 ipcMain.handle('history-save', async (_event, id, data = {}) => {
   historySaves.push({ id, data });
   return { ok: true };
+});
+
+const knowledgeCalls = {
+  promptsLoads: 0,
+  promptsSaves: [],
+  snippetsLoads: 0,
+  snippetsSaves: [],
+  notesLoads: 0,
+  notesSaves: [],
+  imageDialogs: 0,
+  binaryReads: [],
+};
+
+ipcMain.handle('prompts-load', async () => {
+  knowledgeCalls.promptsLoads += 1;
+  return {
+    ok: true,
+    data: [{
+      id: 'smoke-prompt',
+      title: 'Smoke Prompt',
+      category: 'Smoke',
+      body: 'Prompt body loaded through the named bridge.',
+    }],
+  };
+});
+ipcMain.handle('prompts-save', async (_event, data = []) => {
+  knowledgeCalls.promptsSaves.push(data);
+  return { ok: true };
+});
+ipcMain.handle('snippets-load', async () => {
+  knowledgeCalls.snippetsLoads += 1;
+  return {
+    ok: true,
+    data: [{
+      id: 'smoke-snippet',
+      title: 'Smoke Snippet',
+      lang: 'javascript',
+      code: 'console.log("smoke snippet");',
+    }],
+  };
+});
+ipcMain.handle('snippets-save', async (_event, data = []) => {
+  knowledgeCalls.snippetsSaves.push(data);
+  return { ok: true };
+});
+ipcMain.handle('notes-load', async () => {
+  knowledgeCalls.notesLoads += 1;
+  return { ok: true, data: 'Smoke notes from main' };
+});
+ipcMain.handle('notes-save', async (_event, content = '') => {
+  knowledgeCalls.notesSaves.push(content);
+  return { ok: true };
+});
+ipcMain.handle('open-image-dialog', async () => {
+  knowledgeCalls.imageDialogs += 1;
+  return { ok: true, filePath: 'C:/smoke/pixel.png' };
+});
+ipcMain.handle('fs-read-binary', async (_event, filePath) => {
+  knowledgeCalls.binaryReads.push(filePath);
+  return {
+    ok: true,
+    data: Buffer.from('smoke-image').toString('base64'),
+    mimeType: 'image/png',
+  };
 });
 
 const ambientAutoStartCalls = [];
@@ -193,6 +274,10 @@ app.whenReady().then(async () => {
     voiceListenOnceType: typeof window.WakeWord?.listenOnce,
     voiceArmMicrophoneType: typeof window.jarvis.voiceArmMicrophone,
     voiceDisarmMicrophoneType: typeof window.jarvis.voiceDisarmMicrophone,
+    voiceStatusType: typeof window.jarvis.voiceStatus,
+    voiceSetWakeWordType: typeof window.jarvis.voiceSetWakeWord,
+    voiceTranscriptionLeaseType: typeof window.jarvis.voiceCreateTranscriptionLease,
+    voiceRevokedEventType: typeof window.jarvis.onVoiceCaptureRevoked,
     voiceFocusWindowType: typeof window.jarvis.focusWindow,
     voiceButtonBound: document.getElementById('voice-btn')?.dataset.localVoiceBound === '1',
     jarvisSecLoadType: typeof window.JarvisSec?.load,
@@ -215,14 +300,17 @@ app.whenReady().then(async () => {
     ambientStartHiddenChecked: document.getElementById('cfg-start-hidden')?.checked === true,
     ambientStatusText: (document.getElementById('ambient-status')?.innerText || '').slice(0, 300),
     faceStatusType: typeof window.jarvis.faceStatus,
-    faceArmCameraType: typeof window.jarvis.faceArmCamera,
+    faceStartVerifierType: typeof window.jarvis.faceStartVerifier,
+    faceVerifierResultType: typeof window.jarvis.faceVerify,
     faceSettingsStatus: (document.getElementById('face-settings-status')?.innerText || '').slice(0, 300),
     faceEnabledChecked: document.getElementById('cfg-face-enabled')?.checked === true,
     faceEnrollText: (document.getElementById('face-enroll-btn')?.innerText || '').trim(),
     faceDeleteDisabled: document.getElementById('face-delete-btn')?.disabled === true,
     faceDeletePinVisible: document.getElementById('face-delete-pin')?.classList.contains('hidden') === false,
     faceLockPanel: Boolean(document.getElementById('auth-face-panel')),
+    faceLockReticle: Boolean(document.querySelector('#auth-face-live .auth-face-reticle')),
     faceSetupModal: Boolean(document.getElementById('face-setup-modal')),
+    faceSetupVisual: Boolean(document.querySelector('#face-setup-camera .face-setup-visual')),
     faceSetupVideo: Boolean(document.getElementById('face-setup-video')),
     toggleGeometry: Array.from(document.querySelectorAll('#settings-modal .toggle-row')).map(row => {
       const track = row.querySelector('.toggle-track');
@@ -295,6 +383,10 @@ app.whenReady().then(async () => {
       && boot.voiceListenOnceType === 'function'
       && boot.voiceArmMicrophoneType === 'function'
       && boot.voiceDisarmMicrophoneType === 'function'
+      && boot.voiceStatusType === 'function'
+      && boot.voiceSetWakeWordType === 'function'
+      && boot.voiceTranscriptionLeaseType === 'function'
+      && boot.voiceRevokedEventType === 'function'
       && boot.voiceFocusWindowType === 'function',
     JSON.stringify(boot)
   );
@@ -356,12 +448,15 @@ app.whenReady().then(async () => {
     JSON.stringify(boot.toggleGeometry)
   );
   check(
-    'local face unlock controls render in settings',
+    'local face unlock controls use the isolated verifier and display-only emblem',
     boot.faceStatusType === 'function'
-      && boot.faceArmCameraType === 'function'
+      && boot.faceStartVerifierType === 'function'
+      && boot.faceVerifierResultType === 'undefined'
       && boot.faceLockPanel === true
+      && boot.faceLockReticle === true
       && boot.faceSetupModal === true
-      && boot.faceSetupVideo === true
+      && boot.faceSetupVisual === true
+      && boot.faceSetupVideo === false
       && boot.faceEnabledChecked === true
       && boot.faceDeleteDisabled === false
       && boot.faceDeletePinVisible === true
@@ -369,6 +464,167 @@ app.whenReady().then(async () => {
       && /3 templates/.test(boot.faceSettingsStatus)
       && /enabled/.test(boot.faceSettingsStatus),
     JSON.stringify(boot)
+  );
+
+  // P1-4: prompt, snippet, notes, image, and clipboard flows must use the named
+  // preload bridge instead of the removed generic invoke. The handlers above
+  // return fixtures so a broken call site becomes a visible failure.
+  const knowledgeUi = await win.webContents.executeJavaScript(`(async () => {
+    const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const close = id => document.querySelector('#' + id + ' .modal-close-btn')?.click();
+    const types = {
+      promptsLoad: typeof window.jarvis.promptsLoad,
+      promptsSave: typeof window.jarvis.promptsSave,
+      snippetsLoad: typeof window.jarvis.snippetsLoad,
+      snippetsSave: typeof window.jarvis.snippetsSave,
+      notesLoad: typeof window.jarvis.notesLoad,
+      notesSave: typeof window.jarvis.notesSave,
+      openImageDialog: typeof window.jarvis.openImageDialog,
+      readFileBinary: typeof window.jarvis.readFileBinary,
+      clipboardWriteText: typeof window.jarvis.clipboardWriteText,
+      clipboardReadText: typeof window.jarvis.clipboardReadText,
+      invoke: typeof window.jarvis.invoke,
+      copyTextToClipboard: typeof window.copyTextToClipboard,
+      copySnip: typeof window.copySnip,
+      copyCodeBlock: typeof window.copyCodeBlock,
+      copyCreative: typeof window.copyCreative,
+    };
+
+    await window.openPromptLibrary();
+    await wait(120);
+    const promptsOpen = document.getElementById('prompts-modal')?.hidden === false;
+    const promptsText = document.getElementById('prompts-grid')?.innerText || '';
+    document.getElementById('prompt-new-title').value = 'Smoke Added Prompt';
+    document.getElementById('prompt-new-cat').value = 'Smoke';
+    document.getElementById('prompt-new-body').value = 'Added through saveNewPrompt.';
+    await window.saveNewPrompt();
+    await wait(120);
+    const promptsAfterSave = document.getElementById('prompts-grid')?.innerText || '';
+    close('prompts-modal');
+    await wait(320);
+
+    await window.openSnippetManager();
+    await wait(120);
+    const snippetsOpen = document.getElementById('snippets-modal')?.hidden === false;
+    const snippetsText = document.getElementById('snippets-list')?.innerText || '';
+    document.getElementById('snip-new-title').value = 'Smoke Added Snippet';
+    document.getElementById('snip-new-lang').value = 'javascript';
+    document.getElementById('snip-new-code').value = 'console.log("added");';
+    await window.saveNewSnippet();
+    await wait(120);
+    const snippetsAfterSave = document.getElementById('snippets-list')?.innerText || '';
+    close('snippets-modal');
+    await wait(320);
+
+    await window.openNotes();
+    await wait(220);
+    const notesValue = document.getElementById('notes-editor')?.value || '';
+    const notesStatus = document.getElementById('notes-status-bar')?.textContent || '';
+    document.getElementById('notes-editor').value = 'Smoke notes updated';
+    await window.saveNotes();
+    await wait(120);
+    close('notes-modal');
+    await wait(320);
+
+    window.openImageAnalysis();
+    await window.pickImage();
+    await wait(180);
+    const imageOpen = document.getElementById('img-modal')?.hidden === false;
+    const previewSrc = document.getElementById('img-preview')?.getAttribute('src') || '';
+    const imageAnalyzeEnabled = document.getElementById('img-analyze-btn')?.disabled === false;
+    const imagePreviewVisible = document.getElementById('img-preview-wrap')?.hidden === false;
+    close('img-modal');
+    await wait(320);
+
+    const emptyCopy = await window.copyTextToClipboard('');
+    const clipboardWrite = await window.jarvis.clipboardWriteText('smoke clipboard payload');
+    const invalidClipboardWrite = await window.jarvis.clipboardWriteText(42);
+
+    return {
+      types,
+      promptsOpen,
+      promptsText,
+      promptsAfterSave,
+      snippetsOpen,
+      snippetsText,
+      snippetsAfterSave,
+      notesValue,
+      notesStatus,
+      imageOpen,
+      previewSrc,
+      imageAnalyzeEnabled,
+      imagePreviewVisible,
+      emptyCopy,
+      clipboardWrite,
+      invalidClipboardWrite,
+      promptsClosed: document.getElementById('prompts-modal')?.hidden === true,
+      snippetsClosed: document.getElementById('snippets-modal')?.hidden === true,
+      notesClosed: document.getElementById('notes-modal')?.hidden === true,
+      imageClosed: document.getElementById('img-modal')?.hidden === true,
+    };
+  })()`);
+
+  check(
+    'P1-4 prompt/snippet/notes/image tools expose their named bridge methods',
+    knowledgeUi.types.promptsLoad === 'function'
+      && knowledgeUi.types.promptsSave === 'function'
+      && knowledgeUi.types.snippetsLoad === 'function'
+      && knowledgeUi.types.snippetsSave === 'function'
+      && knowledgeUi.types.notesLoad === 'function'
+      && knowledgeUi.types.notesSave === 'function'
+      && knowledgeUi.types.openImageDialog === 'function'
+      && knowledgeUi.types.readFileBinary === 'function'
+      && knowledgeUi.types.clipboardWriteText === 'function'
+      && knowledgeUi.types.clipboardReadText === 'undefined'
+      && knowledgeUi.types.invoke === 'undefined',
+    JSON.stringify(knowledgeUi.types)
+  );
+  check(
+    'P1-4 prompt, snippet, notes, and image dialogs load, save, and render',
+    knowledgeUi.promptsOpen === true
+      && /Smoke Prompt/.test(knowledgeUi.promptsText)
+      && /Smoke Added Prompt/.test(knowledgeUi.promptsAfterSave)
+      && knowledgeUi.snippetsOpen === true
+      && /Smoke Snippet/.test(knowledgeUi.snippetsText)
+      && /Smoke Added Snippet/.test(knowledgeUi.snippetsAfterSave)
+      && knowledgeUi.notesValue === 'Smoke notes from main'
+      && /21 chars/.test(knowledgeUi.notesStatus)
+      && /4 words/.test(knowledgeUi.notesStatus)
+      && knowledgeUi.imageOpen === true
+      && knowledgeUi.previewSrc.startsWith('data:image/png;base64,')
+      && knowledgeUi.imagePreviewVisible === true
+      && knowledgeUi.imageAnalyzeEnabled === true
+      && knowledgeUi.promptsClosed === true
+      && knowledgeUi.snippetsClosed === true
+      && knowledgeUi.notesClosed === true
+      && knowledgeUi.imageClosed === true,
+    JSON.stringify(knowledgeUi)
+  );
+  check(
+    'P1-4 named bridge handlers received the prompt, snippet, notes, and image payloads',
+    knowledgeCalls.promptsLoads === 1
+      && knowledgeCalls.promptsSaves.length === 1
+      && knowledgeCalls.promptsSaves[0].some(entry => entry.title === 'Smoke Added Prompt')
+      && knowledgeCalls.snippetsLoads === 1
+      && knowledgeCalls.snippetsSaves.length === 1
+      && knowledgeCalls.snippetsSaves[0].some(entry => entry.title === 'Smoke Added Snippet')
+      && knowledgeCalls.notesLoads === 1
+      && knowledgeCalls.notesSaves.length === 1
+      && knowledgeCalls.notesSaves[0] === 'Smoke notes updated'
+      && knowledgeCalls.imageDialogs === 1
+      && knowledgeCalls.binaryReads.length === 1
+      && knowledgeCalls.binaryReads[0] === 'C:/smoke/pixel.png',
+    JSON.stringify(knowledgeCalls)
+  );
+  check(
+    'P1-4 copy actions use the write-only bridge and never read the clipboard',
+    knowledgeUi.emptyCopy?.ok === false
+      && /Nothing to copy/.test(knowledgeUi.emptyCopy?.error || '')
+      && knowledgeUi.clipboardWrite?.ok === true
+      && knowledgeUi.invalidClipboardWrite?.ok === false
+      && clipboardWrites.length === 1
+      && clipboardWrites[0] === 'smoke clipboard payload',
+    JSON.stringify({ emptyCopy: knowledgeUi.emptyCopy, clipboardWrite: knowledgeUi.clipboardWrite, invalidClipboardWrite: knowledgeUi.invalidClipboardWrite, clipboardWrites })
   );
 
   // P0-4: the settings UI must only display state returned by main. A denied

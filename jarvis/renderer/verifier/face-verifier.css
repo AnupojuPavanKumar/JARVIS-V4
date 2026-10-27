@@ -1,0 +1,25 @@
+/* The verifier window is never shown. The video must still be laid out and
+   playing so Chromium decodes frames for the local model. */
+:root {
+  color-scheme: dark;
+  background: #000;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+#verifier-video {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  pointer-events: none;
+}

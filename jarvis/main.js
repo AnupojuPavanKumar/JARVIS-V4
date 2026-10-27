@@ -6,7 +6,7 @@
 
 const {
   app, BrowserWindow, ipcMain, globalShortcut, session, safeStorage,
-  Tray, Menu, nativeImage, shell, dialog, Notification, powerMonitor
+  Tray, Menu, nativeImage, shell, dialog, Notification, powerMonitor, clipboard
 } = require('electron');
 
 const _path = require('path');
@@ -50,12 +50,14 @@ const { DocumentIndex } = require('./core/documents/document-index');
 const { AmbientService } = require('./backend/ambient/ambient-service');
 const { FaceProfileStore } = require('./backend/face/face-profile-store');
 const { FaceModelServer } = require('./backend/face/face-model-server');
-const { createMicrophoneGate } = require('./backend/voice/microphone-gate');
+const { createFaceVerifierSurface, FACE_VERIFIER_PARTITION } = require('./backend/face/face-verifier');
+const { createVoicePolicy } = require('./backend/voice/voice-policy');
 const { normalizeMediaTypes, decideMediaPermission } = require('./backend/voice/media-permission');
 const { getAuthStatus } = require('./backend/auth/auth-store');
 const { createSessionState } = require('./backend/security/session-state');
 const { createCapabilityStore } = require('./backend/security/capability-store');
 const { createIpcGuard } = require('./backend/security/ipc-guard');
+const { createProjectRegistry } = require('./backend/security/project-registry');
 const { attachRendererSessionGuards } = require('./backend/security/renderer-guards');
 
 // Keep the existing development data directory when running the packaged
@@ -85,8 +87,10 @@ let documentIndex = null;
 let ambientService = null;
 let faceProfileStore = null;
 let faceModelServer = null;
+let faceVerifier = null;
+let faceController = null;
 let faceCameraArmedUntil = 0;
-const voiceMicrophoneGate = createMicrophoneGate();
+let voicePolicy = null;
 const faceEnrollmentState = { active: false, until: 0 };
 let sessionState = null;
 const DEFAULT_TRAY_TOOLTIP = 'JARVIS — AI Operating System  [Ctrl+Space]';
@@ -131,11 +135,18 @@ function secAudit(action, detail, verdict) {
 // the legacy security settings file.
 const capabilityStore = createCapabilityStore({ audit: secAudit });
 
+// Project roots and tokens live only in main. A renderer reload, hide, or lock
+// revokes every token so a stale page cannot keep reading a project.
+const projectRegistry = createProjectRegistry({ audit: secAudit });
+function revokeProjectAccess(reason) {
+  try { projectRegistry.closeAll(reason); } catch (_) {}
+}
+
 // ─── Main-owned session state and default-deny IPC ────────────────────────
 // The exact approved entry document, not a path prefix. Subframes, destroyed
 // frames, unknown channels, and every channel without a policy entry are denied.
 const _approvedRendererUrl = _url.pathToFileURL(_path.join(__dirname, 'renderer', 'index.html')).href;
-global.workspaceTokens = {};
+const _approvedVerifierUrl = _url.pathToFileURL(_path.join(__dirname, 'renderer', 'verifier', 'face-verifier.html')).href;
 
 sessionState = createSessionState({
   initial: 'booting',
@@ -146,6 +157,8 @@ const ipcGuard = createIpcGuard({
   ipcMain,
   getMainWindow: () => mainWindow,
   approvedRendererUrl: _approvedRendererUrl,
+  getVerifierWebContents: () => (faceVerifier ? faceVerifier.getWebContents() : null),
+  approvedVerifierUrl: _approvedVerifierUrl,
   sessionState,
   audit: secAudit,
   strictPolicy: !app.isPackaged,
@@ -180,8 +193,7 @@ function installMediaPermissionHandlers() {
       permission,
       isMainRenderer,
       mediaTypes,
-      faceCameraArmed: faceCameraIsArmed(),
-      microphoneArmed: voiceMicrophoneGate.isArmed(),
+      microphoneArmed: !!voicePolicy && voicePolicy.isCaptureActive({ webContentsId: webContents.id }),
     });
     if (!allowed) {
       secAudit('PERMISSION_BLOCK', permission || 'unknown', 'BLOCKED');
@@ -194,46 +206,76 @@ function installMediaPermissionHandlers() {
       permission,
       isMainRenderer,
       mediaTypes: normalizeMediaTypes(details),
-      faceCameraArmed: faceCameraIsArmed(),
-      microphoneArmed: voiceMicrophoneGate.isArmed(),
+      microphoneArmed: !!voicePolicy && voicePolicy.isCaptureActive({ webContentsId: webContents.id }),
     });
   });
 }
 
-// Renderer-facing microphone gate. The renderer can request capture for a
-// persisted wake-word session while the lock screen is showing, but only in
-// wake-phrase-only mode. One-shot capture and all other requests stay blocked
-// until the session is unlocked. The gate still expires on its own.
-ipcMain.handle('voice-arm-microphone', async (_event, payload = {}) => {
-  const lockScreenWake = !!(payload && typeof payload === 'object' && payload.lockScreen === true);
-  const sessionLocked = sessionState && sessionState.locked === true;
-  if (sessionLocked && !lockScreenWake) {
-    secAudit('VOICE_MIC_ARM', 'session locked', 'BLOCKED');
-    return { ok: false, error: 'Unlock JARVIS before enabling the microphone' };
-  }
-  const durationMs = typeof payload === 'number' ? payload : payload.durationMs;
-  const result = voiceMicrophoneGate.arm(durationMs);
-  secAudit(
-    'VOICE_MIC_ARM',
-    lockScreenWake
-      ? `wake-word capture${sessionLocked ? ' (lock screen)' : ''} ${result.durationMs}ms`
-      : `local capture ${result.durationMs}ms`,
-    'ALLOW'
-  );
-  return result;
-});
+// The verifier has its own ephemeral session. Only the exact hidden verifier
+// webContents may receive camera permission, and only while the main-owned
+// camera lease is active. The main renderer never reaches this handler.
+function installVerifierMediaPermissionHandlers() {
+  if (!faceVerifier) return false;
+  const ses = faceVerifier.getSession();
+  if (!ses || typeof ses.setPermissionRequestHandler !== 'function') return false;
+  const decide = (webContents, permission, details = {}) => {
+    const isVerifier = faceVerifier.isSender(webContents);
+    const allowed = decideMediaPermission({
+      permission,
+      isMainRenderer: false,
+      isVerifier,
+      mediaTypes: normalizeMediaTypes(details),
+      cameraArmed: faceCameraIsArmed(),
+    });
+    if (!allowed) {
+      secAudit('PERMISSION_BLOCK', `verifier:${permission || 'unknown'}`, 'BLOCKED');
+    }
+    return allowed;
+  };
+  ses.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {
+    callback(decide(webContents, permission, details));
+  });
+  ses.setPermissionCheckHandler((webContents, permission, _requestingOrigin, details = {}) => (
+    decide(webContents, permission, details)
+  ));
+  return true;
+}
 
-ipcMain.handle('voice-disarm-microphone', async () => {
-  voiceMicrophoneGate.disarm();
-  secAudit('VOICE_MIC_DISARM', 'local capture stopped', 'OK');
-  return { ok: true };
-});
+function initializeFaceVerifier() {
+  try {
+    faceVerifier = createFaceVerifierSurface({
+      BrowserWindow,
+      session: session.fromPartition(FACE_VERIFIER_PARTITION),
+      rootDir: __dirname,
+      logger: console,
+      onUnexpectedStop: reason => {
+        try { faceController?.handleVerifierStopped?.(reason); } catch (error) {
+          secAudit('FACE_VERIFIER_STOP', error.message, 'ERROR');
+        }
+      },
+    });
+    if (!installVerifierMediaPermissionHandlers()) {
+      faceVerifier = null;
+      secAudit('FACE_VERIFIER_INIT', 'permission handler unavailable', 'ERROR');
+    }
+  } catch (error) {
+    faceVerifier = null;
+    secAudit('FACE_VERIFIER_INIT', error.message, 'ERROR');
+  }
+}
 
 function sendRenderer(channel, payload) {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
   try {
     mainWindow.webContents.send(channel, payload);
   } catch (_) { /* window may be closing */ }
+}
+
+// Main-owned microphone revocation. The renderer is told to tear down its
+// stream or re-arm only when the main policy still permits wake-word capture.
+function revokeVoiceAccess(reason) {
+  try { voicePolicy?.revokeAll(reason); } catch (_) { /* best effort */ }
+  sendRenderer('voice-capture-revoked', { reason });
 }
 
 function sendAuthState() {
@@ -257,6 +299,8 @@ function broadcastAppVisibility() {
 
 function lockSessionForHide() {
   capabilityStore.revokeAll('window hidden');
+  revokeProjectAccess('window hidden');
+  revokeVoiceAccess('window-hidden');
   if (!sessionState || !sessionState.locked) {
     if (sessionState && sessionState.state === 'unlocked') {
       sessionState.lock('window hidden');
@@ -266,8 +310,7 @@ function lockSessionForHide() {
   faceEnrollmentState.active = false;
   faceEnrollmentState.until = 0;
   disarmFaceCamera();
-  try { voiceMicrophoneGate.disarm(); } catch (_) {}
-  sendRenderer('face-camera-stop');
+  try { faceController?.cancelVerifier?.('window-hidden'); } catch (_) { /* best effort */ }
   sendRenderer('auth-lock');
   sendAuthState();
 }
@@ -279,8 +322,9 @@ if (sessionState) {
       faceEnrollmentState.active = false;
       faceEnrollmentState.until = 0;
       disarmFaceCamera();
-      try { voiceMicrophoneGate.disarm(); } catch (_) {}
-      sendRenderer('face-camera-stop');
+      revokeProjectAccess('session locked');
+      try { faceController?.cancelVerifier?.('session-locked'); } catch (_) { /* best effort */ }
+      revokeVoiceAccess('session-locked');
       sendRenderer('auth-lock');
     }
     sendRenderer('auth-state', view);
@@ -301,11 +345,15 @@ function createWindow({ startHidden = false } = {}) {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // The trusted renderer must not be able to attach guest web content.
+      // renderer-guards also denies will-attach-webview as a second barrier.
+      webviewTag: false,
       // CRIT-01 fix: webSecurity restored. Ollama API is called via IPC not
       // directly from the renderer, so this will not break core functionality.
       webSecurity: true,
-      // Phase 5A: the local VAD/recorder must keep running when JARVIS is
-      // minimized or hidden in the tray. This does not affect the camera gate.
+      // Keep the local VAD timer responsive while JARVIS is visible but not
+      // focused. Main-owned microphone policy still denies capture while the
+      // window is hidden, so the renderer tears the stream down on hide.
       backgroundThrottling: false,
     },
     show: false,
@@ -320,12 +368,14 @@ function createWindow({ startHidden = false } = {}) {
     isQuitting: () => app.isQuitting,
     onBoundary: reason => {
       capabilityStore.revokeAll(`renderer boundary: ${reason}`);
+      revokeProjectAccess(`renderer boundary: ${reason}`);
     },
     onLock: reason => {
       faceEnrollmentState.active = false;
       faceEnrollmentState.until = 0;
       disarmFaceCamera();
-      try { voiceMicrophoneGate.disarm(); } catch (_) {}
+      try { faceController?.cancelVerifier?.('renderer-boundary'); } catch (_) { /* best effort */ }
+      revokeVoiceAccess('renderer-boundary');
       secAudit('SESSION_BOUNDARY_LOCK', reason, 'LOCK');
     },
   }).install();
@@ -622,6 +672,24 @@ app.whenReady().then(async () => {
   const histDir = path.join(app.getPath('userData'), 'history');
   fs.mkdirSync(histDir, { recursive: true });
 
+  // The local voice opt-in, capture grants, and transcription leases live in
+  // main. The renderer can never supply a lock-screen flag or its own duration.
+  try {
+    voicePolicy = createVoicePolicy({
+      baseDir: app.getPath('userData'),
+      audit: secAudit,
+      getSessionLocked: () => !!(sessionState && sessionState.locked),
+      isWindowVisible: () => !!(
+        mainWindow
+        && !mainWindow.isDestroyed()
+        && mainWindow.isVisible()
+      ),
+    });
+  } catch (error) {
+    voicePolicy = null;
+    secAudit('VOICE_POLICY_INIT', error.message, 'ERROR');
+  }
+
   // Background presence is initialized before the window so a login launch can
   // honor the "start hidden" preference. The scheduler is attached later, once
   // the durable runtime has been registered.
@@ -688,6 +756,7 @@ app.whenReady().then(async () => {
     secAudit('SESSION_LOCK_INIT', error.message, 'ERROR');
   }
   installMediaPermissionHandlers();
+  initializeFaceVerifier();
 
   // Register IPC controllers only after the unified store exists. Registering
   // at module load would capture a null store before app.whenReady().
@@ -788,7 +857,9 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  try { voiceMicrophoneGate.disarm(); } catch (_) {}
+  try { voicePolicy?.revokeAll('app-quit'); } catch (_) {}
+  try { faceController?.cancelVerifier?.('app-quit'); } catch (_) {}
+  try { faceVerifier?.stop?.('app-quit'); } catch (_) {}
   try { ambientService?.dispose(); } catch (_) {}
   try { scheduler?.shutdown(); } catch (_) {}
   try { browserDriver?.close(); } catch (_) {}
@@ -819,6 +890,8 @@ const registerSchedulerController = require('./backend/controllers/SchedulerCont
 const registerSecurityController = require('./backend/controllers/SecurityController');
 const registerSystemController = require('./backend/controllers/SystemController');
 const registerWindowController = require('./backend/controllers/WindowController');
+const registerClipboardController = require('./backend/controllers/ClipboardController');
+const registerVoiceController = require('./backend/controllers/VoiceController');
 
 async function registerControllersAndScheduler() {
   const mainWindowProvider = () => mainWindow;
@@ -889,7 +962,25 @@ async function registerControllersAndScheduler() {
     secAudit,
   });
 
-  registerAIController({ ipcMain, app, mainWindowProvider, secAudit, secCheckRate });
+  registerAIController({
+    ipcMain,
+    app,
+    mainWindowProvider,
+    secAudit,
+    secCheckRate,
+    voicePolicy,
+  });
+  if (voicePolicy) {
+    registerVoiceController({
+      ipcMain,
+      voicePolicy,
+      mainWindowProvider,
+      secAudit,
+      sendRenderer,
+    });
+  } else {
+    secAudit('VOICE_CONTROLLER_INIT', 'voice policy unavailable', 'ERROR');
+  }
   const agentControllerApi = registerAgentController({
     ipcMain, app, mainWindowProvider, secAudit, secCheckRate,
     onAgentEvent: handleAgentEvent,
@@ -919,7 +1010,13 @@ async function registerControllersAndScheduler() {
     autoStart: false,
   });
 
-  registerFileController({ ipcMain, app, mainWindowProvider, secAudit });
+  registerFileController({
+    ipcMain,
+    app,
+    mainWindowProvider,
+    secAudit,
+    projectRegistry,
+  });
   registerKnowledgeController({ ipcMain, app, secAudit, secCheckRate });
   registerMemoryController({
     ipcMain,
@@ -939,7 +1036,7 @@ async function registerControllersAndScheduler() {
     faceStore: faceProfileStore,
     capabilityStore,
   });
-  registerFaceController({
+  faceController = registerFaceController({
     ipcMain,
     app,
     faceStore: faceProfileStore,
@@ -948,8 +1045,11 @@ async function registerControllersAndScheduler() {
     faceEnrollmentState,
     secAudit,
     mainWindowProvider,
+    verifier: faceVerifier,
     armCamera: armFaceCamera,
     disarmCamera: disarmFaceCamera,
+    isCameraArmed: faceCameraIsArmed,
+    sendRenderer,
   });
   registerSystemController({
     ipcMain,
@@ -959,6 +1059,7 @@ async function registerControllersAndScheduler() {
     secCheckRate,
     capabilityStore,
     sessionState,
+    projectRegistry,
   });
   registerWindowController({
     ipcMain,
@@ -968,6 +1069,7 @@ async function registerControllersAndScheduler() {
     capabilityStore,
     sessionState,
   });
+  registerClipboardController({ ipcMain, clipboard });
 
   // Initialize the headless scheduler after the agent controller so a due job
   // always has a live task runtime handle. It stays resident in the tray.

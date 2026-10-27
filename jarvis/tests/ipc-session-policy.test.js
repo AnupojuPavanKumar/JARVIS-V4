@@ -40,19 +40,40 @@ test('IPC policy: locked state allows only the lock-screen allowlist', () => {
     'auth-load',
     'auth-verify',
     'face-status',
-    'face-verify',
-    'face-arm-camera',
-    'face-disarm-camera',
+    'face-start-verifier',
+    'face-cancel-verifier',
     'face-cancel-enrollment',
+    'voice-status',
+    'voice-set-wake-word',
     'voice-arm-microphone',
     'voice-disarm-microphone',
+    'voice-create-transcription-lease',
+    'transcribe-audio',
   ].sort();
   assert.deepEqual([...LOCKED_ALLOWED_CHANNELS].sort(), expected);
 });
 
+test('IPC policy: verifier-only face channels are bound to the verifier surface', () => {
+  for (const channel of ['face-verifier-result', 'face-verifier-progress']) {
+    const policy = getIpcPolicy(channel);
+    assert.equal(policy.surface, 'verifier', channel);
+    assert.equal(isChannelAllowed(channel, SESSION_STATES.LOCKED), true, channel);
+    assert.equal(LOCKED_ALLOWED_CHANNELS.includes(channel), false, channel);
+  }
+  for (const channel of ['face-verify', 'face-enroll', 'face-arm-camera', 'face-disarm-camera']) {
+    assert.equal(getIpcPolicy(channel), null, channel);
+  }
+  assert.equal(
+    LOCKED_ALLOWED_CHANNELS.includes('face-begin-enrollment'),
+    false,
+    'enrollment must require an unlocked session'
+  );
+});
+
 test('IPC policy: privileged data and action channels are denied in every non-unlocked state', () => {
   const privileged = [
-    'fs-read', 'fs-write', 'run-command', 'capture-screen', 'open-external',
+    'project-read-file', 'renderer-log-write', 'run-command', 'capture-screen', 'open-external',
+    'clipboard-write-text',
     'get-user-data-path', 'sec-audit-read', 'history-load', 'memory-load',
     'agent-task-start', 'agent-task-approve', 'scheduler-add', 'documents-add-folder',
     'browser-emergency-stop', 'integrations-revoke', 'ollama-fetch',

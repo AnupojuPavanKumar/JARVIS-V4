@@ -5,6 +5,25 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Visibility is observed by more than one renderer module (lock screen and the
+// local voice loop). Use a single IPC subscription and fan out to each caller
+// instead of letting the last registration remove the other listeners.
+const appVisibilityListeners = new Set();
+let appVisibilityBound = false;
+function subscribeAppVisibility(callback) {
+  if (typeof callback !== 'function') return () => {};
+  appVisibilityListeners.add(callback);
+  if (!appVisibilityBound) {
+    appVisibilityBound = true;
+    ipcRenderer.on('app-visibility', (_event, payload) => {
+      for (const listener of [...appVisibilityListeners]) {
+        try { listener(payload || {}); } catch (_) { /* renderer owns its errors */ }
+      }
+    });
+  }
+  return () => appVisibilityListeners.delete(callback);
+}
+
 contextBridge.exposeInMainWorld('jarvis', {
 
   // â”€â”€â”€ Window Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -17,9 +36,10 @@ contextBridge.exposeInMainWorld('jarvis', {
   onWindowState: (cb) => { ipcRenderer.removeAllListeners('window-state'); ipcRenderer.on('window-state', (_, state) => cb(state)); },
 
   // â”€â”€â”€ File System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  readFile:    (filePath, token)          => ipcRenderer.invoke('fs-read', filePath, token),
-  writeFile:   (filePath, content) => ipcRenderer.invoke('fs-write', filePath, content),
-  listDir:     (dirPath, token)           => ipcRenderer.invoke('fs-list', dirPath, token),
+  // There is deliberately no arbitrary read/write/list bridge. File content
+  // enters the renderer only from a project token, a document dialog, or an
+  // image dialog.
+  writeRendererLog: (content)      => ipcRenderer.invoke('renderer-log-write', content),
   saveDialog:  (name, content)     => ipcRenderer.invoke('fs-dialog-save', name, content),
   openDocDialog: ()                => ipcRenderer.invoke('fs-dialog-open-doc'),
   readPdf:     (filePath)          => ipcRenderer.invoke('read-pdf', filePath),
@@ -32,7 +52,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   deleteHistory: (id)       => ipcRenderer.invoke('history-delete', id),
 
   // â”€â”€â”€ Terminal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  runCommand: (cmd, cwd, timeout) => ipcRenderer.invoke('run-command', cmd, cwd, timeout),
+  // Commands run only in main-owned context: the open project token or the app
+  // workspace. There is no raw cwd argument and no unlimited timeout.
+  runCommand: (cmd, options = {}) => ipcRenderer.invoke('run-command', cmd, options),
 
   // â”€â”€â”€ System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   getSystemInfo:   ()          => ipcRenderer.invoke('get-system-info'),
@@ -41,9 +63,11 @@ contextBridge.exposeInMainWorld('jarvis', {
   systemCommand:   (action, target) => ipcRenderer.invoke('system-command', action, target),
   quitApp:         ()          => ipcRenderer.send('quit-app'),
 
-  // â”€â”€â”€ Dev Pack â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  openFolderDialog: ()         => ipcRenderer.invoke('open-folder-dialog'),
-  readProject:      () => ipcRenderer.invoke('read-project'),
+  // â”€â”€â”€ Main-owned Project Context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  projectOpen:     ()       => ipcRenderer.invoke('project-open'),
+  projectList:     (payload) => ipcRenderer.invoke('project-list', payload),
+  projectReadFile: (payload) => ipcRenderer.invoke('project-read-file', payload),
+  projectClose:    (payload) => ipcRenderer.invoke('project-close', payload),
   memoryLoad:       ()         => ipcRenderer.invoke('memory-load'),
   memorySave:       (facts)    => ipcRenderer.invoke('memory-save', facts),
   memoryAdd:        (input, options) => ipcRenderer.invoke('memory-add', input, options),
@@ -72,6 +96,12 @@ contextBridge.exposeInMainWorld('jarvis', {
   // â”€â”€â”€ Image & Binary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   openImageDialog:  ()           => ipcRenderer.invoke('open-image-dialog'),
   readFileBinary:   (fp)         => ipcRenderer.invoke('fs-read-binary', fp),
+
+  // Write-only clipboard bridge. File-origin renderers cannot rely on the
+  // browser clipboard permission, and reading the clipboard exposes unrelated
+  // user data. The main process performs the write and returns an explicit
+  // success/failure result.
+  clipboardWriteText: (text) => ipcRenderer.invoke('clipboard-write-text', text),
 
   // â”€â”€â”€ Snippets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   snippetsLoad: ()       => ipcRenderer.invoke('snippets-load'),
@@ -159,28 +189,33 @@ contextBridge.exposeInMainWorld('jarvis', {
   authRecoverReset:  ()       => ipcRenderer.invoke('auth-recover-reset'),
 
   // â”€â”€â”€ Local Face Unlock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // The renderer runs local inference and sends only numeric embeddings. Raw
-  // camera frames are never sent over IPC or persisted.
+  // Capture, liveness, and embedding generation run in a separate sandboxed
+  // verifier webContents. This bridge can only start/cancel that verifier and
+  // receive display-only status. It never supplies embeddings or asserts
+  // liveness.
   faceStatus:             ()       => ipcRenderer.invoke('face-status'),
   faceBeginEnrollment:    ()       => ipcRenderer.invoke('face-begin-enrollment'),
   faceCancelEnrollment:   ()       => ipcRenderer.invoke('face-cancel-enrollment'),
-  faceEnroll:             (payload)=> ipcRenderer.invoke('face-enroll', payload),
-  faceVerify:             (payload)=> ipcRenderer.invoke('face-verify', payload),
   faceDelete:             (payload)=> ipcRenderer.invoke('face-delete', payload),
   faceSetEnabled:         (payload)=> ipcRenderer.invoke('face-set-enabled', payload),
-  faceArmCamera:          (payload)=> ipcRenderer.invoke('face-arm-camera', payload),
-  faceDisarmCamera:       ()       => ipcRenderer.invoke('face-disarm-camera'),
+  faceStartVerifier:      (payload)=> ipcRenderer.invoke('face-start-verifier', payload),
+  faceCancelVerifier:     ()       => ipcRenderer.invoke('face-cancel-verifier'),
   onAuthLock: (cb) => {
     ipcRenderer.removeAllListeners('auth-lock');
     ipcRenderer.on('auth-lock', () => cb());
   },
-  onAppVisibility: (cb) => {
-    ipcRenderer.removeAllListeners('app-visibility');
-    ipcRenderer.on('app-visibility', (_, payload) => cb(payload || {}));
+  onAppVisibility: (cb) => subscribeAppVisibility(cb),
+  onFaceVerifierStatus: (cb) => {
+    ipcRenderer.removeAllListeners('face-verifier-status');
+    ipcRenderer.on('face-verifier-status', (_, payload) => cb(payload || {}));
   },
-  onFaceCameraStop: (cb) => {
-    ipcRenderer.removeAllListeners('face-camera-stop');
-    ipcRenderer.on('face-camera-stop', () => cb());
+  onFaceVerifierOutcome: (cb) => {
+    ipcRenderer.removeAllListeners('face-verifier-outcome');
+    ipcRenderer.on('face-verifier-outcome', (_, payload) => cb(payload || {}));
+  },
+  onFaceVerifierStop: (cb) => {
+    ipcRenderer.removeAllListeners('face-verifier-stop');
+    ipcRenderer.on('face-verifier-stop', (_, payload) => cb(payload || {}));
   },
 
   // â”€ Security Boundary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -191,16 +226,26 @@ contextBridge.exposeInMainWorld('jarvis', {
   secClassifyCmd:  (cmd)    => ipcRenderer.invoke('sec-classify-command', cmd),
 
   // â”€â”€â”€ Local Voice (Phase 5A) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // The renderer runs the VAD and records a short local segment. The main
-  // process only grants microphone permission while this explicit gate is
-  // armed, and transcription stays on the local Whisper server.
-  voiceArmMicrophone: (payload = {}) => ipcRenderer.invoke('voice-arm-microphone', payload),
-  voiceDisarmMicrophone: () => ipcRenderer.invoke('voice-disarm-microphone'),
+  // The renderer runs the VAD and records a short local segment. Main owns the
+  // persisted opt-in, capture purpose, lease duration, and transcription
+  // leases. A renderer-supplied lockScreen flag or duration is never accepted.
+  voiceStatus: () => ipcRenderer.invoke('voice-status'),
+  voiceSetWakeWord: (enabled) => ipcRenderer.invoke('voice-set-wake-word', { enabled: enabled === true }),
+  voiceArmMicrophone: (purpose) => ipcRenderer.invoke('voice-arm-microphone', { purpose }),
+  voiceDisarmMicrophone: (captureId) => ipcRenderer.invoke(
+    'voice-disarm-microphone',
+    typeof captureId === 'string' && captureId ? { captureId } : {}
+  ),
+  voiceCreateTranscriptionLease: () => ipcRenderer.invoke('voice-create-transcription-lease'),
+  onVoiceCaptureRevoked: (cb) => {
+    ipcRenderer.removeAllListeners('voice-capture-revoked');
+    ipcRenderer.on('voice-capture-revoked', (_, payload) => cb(payload || {}));
+  },
   focusWindow: () => ipcRenderer.invoke('focus-window'),
 
   // â”€ Screen Capture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   captureScreen:   ()       => ipcRenderer.invoke('capture-screen'),
-  transcribeAudio: (buffer) => ipcRenderer.invoke('transcribe-audio', buffer),
+  transcribeAudio: (payload) => ipcRenderer.invoke('transcribe-audio', payload),
 
   // â”€â”€â”€ Piper TTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   piperTTS:        (text)   => ipcRenderer.invoke('piper-tts', text),

@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { isSecretProjectFile } = require('../../backend/security/secret-files');
 
 const INDEX_VERSION = 1;
 const DEFAULT_MAX_FILES = 5000;
@@ -450,9 +451,11 @@ class DocumentIndex {
         }
         if (!entry.isFile()) continue;
         if (entry.name.startsWith('.')) continue;
+        const filePath = path.join(directory, entry.name);
+        const relativePath = path.relative(folder.path, filePath).split(path.sep).join('/');
+        if (isSecretProjectFile(relativePath)) continue;
         const extension = path.extname(entry.name).toLowerCase();
         if (!ALLOWED_EXTENSIONS.has(extension)) continue;
-        const filePath = path.join(directory, entry.name);
         let info;
         try {
           info = await fs.promises.stat(filePath);

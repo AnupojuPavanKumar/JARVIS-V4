@@ -4279,6 +4279,9 @@ html.font-xl{font-size:18px}
   background: #01070d;
   box-shadow: 0 0 24px rgba(0,212,255,0.18), inset 0 0 26px rgba(0,0,0,0.7);
   z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 #auth-face-live::after {
   content: '';
@@ -4289,15 +4292,45 @@ html.font-xl{font-size:18px}
   pointer-events: none;
 }
 #auth-face-live.hidden { display: none; }
-#auth-face-video,
-#face-setup-video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform: scaleX(-1);
-  display: block;
-  opacity: 0.88;
+.auth-face-reticle {
+  position: absolute;
+  inset: 13px;
+  border: 1px dashed rgba(0,212,255,0.34);
+  border-radius: 50%;
+  animation: face-reticle-spin 7s linear infinite;
+  pointer-events: none;
 }
+.auth-face-reticle::before,
+.auth-face-reticle::after {
+  content: '';
+  position: absolute;
+  background: rgba(0,212,255,0.5);
+  box-shadow: 0 0 8px rgba(0,212,255,0.35);
+}
+.auth-face-reticle::before {
+  left: 50%;
+  top: -3px;
+  width: 1px;
+  height: 6px;
+  transform: translateX(-50%);
+}
+.auth-face-reticle::after {
+  top: 50%;
+  left: -3px;
+  width: 6px;
+  height: 1px;
+  transform: translateY(-50%);
+}
+.auth-face-glyph {
+  position: relative;
+  font-size: 24px;
+  color: var(--cyan, #00d4ff);
+  text-shadow: 0 0 16px rgba(0,212,255,0.75);
+  animation: auth-pulse 1.8s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+@keyframes face-reticle-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .auth-face-scanline {
   position: absolute;
   left: 0;
@@ -4409,11 +4442,38 @@ html.font-xl{font-size:18px}
 .face-setup-box { width: 420px; max-width: 92vw; }
 #face-setup-camera { position: relative; }
 #face-setup-camera.hidden, #face-setup-pin.hidden, #face-setup-done.hidden { display: none; }
-#face-setup-video {
+#face-setup-camera .auth-face-status {
+  position: static;
+  margin-top: 8px;
+}
+.face-setup-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 260px;
+  overflow: hidden;
   border: 1px solid rgba(0,212,255,0.28);
   border-radius: 6px;
-  background: #01070d;
+  background: radial-gradient(circle at 50% 46%, rgba(0,212,255,0.08), transparent 58%), #01070d;
+}
+.face-setup-reticle {
+  position: absolute;
+  width: 176px;
+  height: 176px;
+  border: 1px dashed rgba(0,212,255,0.34);
+  border-radius: 50%;
+  animation: face-reticle-spin 7s linear infinite;
+  pointer-events: none;
+}
+.face-setup-glyph {
+  position: relative;
+  font-size: 42px;
+  color: var(--cyan, #00d4ff);
+  text-shadow: 0 0 26px rgba(0,212,255,0.7);
+  animation: auth-pulse 1.8s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
 }
 .face-progress {
   height: 3px;

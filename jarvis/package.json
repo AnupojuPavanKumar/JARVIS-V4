@@ -10,7 +10,7 @@
     "package:win": "electron-builder --win --x64 --dir",
     "package:win:installer": "electron-builder --win --x64",
     "test": "node --test",
-    "test:electron": "electron tests/electron-renderer-smoke.js && electron tests/electron-agent-smoke.js && electron tests/electron-phase1-smoke.js && electron tests/electron-phase2-smoke.js && electron tests/electron-main-smoke.js && electron tests/electron-phase4-smoke.js",
+    "test:electron": "electron tests/electron-renderer-smoke.js && electron tests/electron-agent-smoke.js && electron tests/electron-phase1-smoke.js && electron tests/electron-phase2-smoke.js && electron tests/electron-main-smoke.js && electron tests/electron-phase4-smoke.js && electron tests/electron-face-verifier-smoke.js",
     "eval:phase3": "node scripts/phase3-eval.js",
     "eval:phase3:real": "node scripts/phase3-eval.js --real",
     "ollama:gpu": "powershell -ExecutionPolicy Bypass -File ./start-ollama-gpu.ps1",

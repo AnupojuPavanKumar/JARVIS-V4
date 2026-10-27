@@ -27,21 +27,72 @@ test('local voice: shared helpers load before the wake-word module', () => {
   assert.ok(utils < wake, 'voiceUtils.js loads before wakeWord.js');
 });
 
-test('local voice: main process gates microphone access and registers IPC', () => {
+test('local voice: main owns the opt-in, capture policy, and microphone permission', () => {
   const main = read('main.js');
-  assert.match(main, /createMicrophoneGate/);
+  assert.match(main, /createVoicePolicy/);
+  assert.match(main, /voicePolicy\.isCaptureActive/);
+  assert.match(main, /voicePolicy\??\.revokeAll/);
+  assert.match(main, /voice-capture-revoked/);
+  assert.match(main, /registerVoiceController/);
   assert.match(main, /installMediaPermissionHandlers/);
-  assert.match(main, /voice-arm-microphone/);
-  assert.match(main, /voice-disarm-microphone/);
   assert.match(main, /backgroundThrottling:\s*false/);
-  assert.match(main, /payload\.lockScreen === true/);
-  assert.match(main, /wake-word capture/);
+  assert.doesNotMatch(main, /createMicrophoneGate/);
+  assert.doesNotMatch(main, /payload\.lockScreen/);
+  assert.doesNotMatch(main, /voiceMicrophoneGate/);
 });
 
-test('local voice: main process normalizes IPC audio before writing the temp file', () => {
-  const source = read('backend/controllers/AIController.js');
-  assert.match(source, /normalizeAudioPayload/);
-  assert.match(source, /writeFileSync\(resolvedPath, audioBuffer\)/);
+test('local voice: renderer accepts only main-owned capture purposes and leases', () => {
+  const source = read('renderer/modules/wakeWord.js');
+  assert.match(source, /voiceStatus/);
+  assert.match(source, /voiceSetWakeWord/);
+  assert.match(source, /voiceCreateTranscriptionLease/);
+  assert.match(source, /voiceArmMicrophone\(purpose\)/);
+  assert.match(source, /voiceDisarmMicrophone\(staleCaptureId\)/);
+  assert.match(source, /leaseId:\s*lease\.leaseId/);
+  assert.match(source, /audio:\s*audioPayload/);
+  assert.match(source, /onVoiceCaptureRevoked/);
+  assert.match(source, /onAppVisibility/);
+  assert.doesNotMatch(source, /localStorage/);
+  assert.doesNotMatch(source, /lockScreen/);
+  assert.doesNotMatch(source, /durationMs:\s*4\s*\*\s*60/);
+  assert.doesNotMatch(source, /allowLocked/);
+});
+
+test('local voice: main revokes capture on hide, lock, reload, and quit', () => {
+  const main = read('main.js');
+  assert.match(main, /revokeVoiceAccess\('window-hidden'\)/);
+  assert.match(main, /revokeVoiceAccess\('session-locked'\)/);
+  assert.match(main, /revokeVoiceAccess\('renderer-boundary'\)/);
+  assert.match(main, /voicePolicy\?\.revokeAll\('app-quit'\)/);
+});
+
+test('local voice: transcription is lease-gated and strictly validated', () => {
+  const ai = read('backend/controllers/AIController.js');
+  assert.match(ai, /createTranscriptionService/);
+  assert.match(ai, /voicePolicy/);
+  assert.doesNotMatch(ai, /normalizeAudioPayload/);
+  assert.doesNotMatch(ai, /transcribe-audio[\s\S]{0,200}fs\.writeFileSync/);
+
+  const service = read('backend/voice/transcription-service.js');
+  assert.match(service, /consumeTranscriptionLease/);
+  assert.match(service, /normalizeAudioPayload/);
+  assert.match(service, /validateWavPayload/);
+  assert.match(service, /finally\s*\{/);
+  assert.match(service, /unlinkSync/);
+  assert.match(service, /audioBuffer\.fill\(0\)/);
+});
+
+test('local voice: locked wake-word capture is main-policy driven, not renderer-asserted', () => {
+  const policy = read('backend/voice/voice-policy.js');
+  assert.match(policy, /purpose === 'one-shot' && locked/);
+  assert.match(policy, /purpose === 'wake-word' && !wakeWordEnabled/);
+  assert.match(policy, /isWindowVisible\(\)/);
+  assert.match(policy, /NONCE_RE/);
+  assert.match(policy, /leases\.delete\(leaseId\)/);
+
+  const ipc = read('backend/security/ipc-session-policy.js');
+  assert.match(ipc, /'voice-create-transcription-lease'/);
+  assert.match(ipc, /'transcribe-audio': entry\(\[S\.LOCKED, S\.UNLOCKED, S\.NO_LOCK\]/);
 });
 
 test('local voice: captured PCM is encoded as WAV before local transcription', () => {
@@ -60,22 +111,17 @@ test('local voice: Whisper server decodes PCM WAV without requiring ffmpeg', () 
   assert.match(source, /looks_like_wav/);
 });
 
-test('local voice: preload exposes the permission gate and tray focus bridge', () => {
+test('local voice: preload exposes only the named voice bridges', () => {
   const preload = read('preload.js');
-  assert.match(preload, /voiceArmMicrophone/);
+  assert.match(preload, /voiceStatus/);
+  assert.match(preload, /voiceSetWakeWord/);
+  assert.match(preload, /voiceArmMicrophone:\s*\(purpose\)/);
   assert.match(preload, /voiceDisarmMicrophone/);
+  assert.match(preload, /voiceCreateTranscriptionLease/);
+  assert.match(preload, /onVoiceCaptureRevoked/);
   assert.match(preload, /focusWindow/);
   const windows = read('backend/controllers/WindowController.js');
   assert.match(windows, /focus-window/);
-});
-
-test('local voice: persisted wake word can start while locked but commands stay gated', () => {
-  const source = read('renderer/modules/wakeWord.js');
-  assert.match(source, /allowLocked:\s*true/);
-  assert.match(source, /if \(locked && !options\.allowLocked\)/);
-  assert.match(source, /ensureCapture\(\{ lockScreen: options\.allowLocked === true \}\)/);
-  assert.match(source, /armMicrophone\(\{ lockScreen: options\.lockScreen === true \}\)/);
-  assert.match(source, /if \(locked\) \{\s*const wake = matchWakePhrase/);
 });
 
 test('local voice: renderer exposes a barge-in stop path and speech events', () => {

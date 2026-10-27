@@ -6,6 +6,11 @@
 // (details.mediaTypes) and the check handler (details.mediaType). Normalize
 // both and make the decision in one place so audio and video can never be
 // granted by accident.
+//
+// Camera access is verifier-only. The main renderer has no camera path even
+// while the face camera lease is armed. The isolated verifier gets video only
+// while that main-owned lease is active. Microphone use remains on the main
+// renderer and is controlled by the separate microphone gate.
 function normalizeMediaTypes(details = {}) {
   const raw = Array.isArray(details.mediaTypes)
     ? details.mediaTypes
@@ -18,12 +23,17 @@ function normalizeMediaTypes(details = {}) {
 
 function decideMediaPermission({
   permission,
-  isMainRenderer,
+  isMainRenderer = false,
+  isVerifier = false,
   mediaTypes = [],
-  faceCameraArmed = false,
+  cameraArmed = false,
   microphoneArmed = false,
 } = {}) {
-  if (permission !== 'media' || !isMainRenderer) return false;
+  if (permission !== 'media') return false;
+  if (!isMainRenderer && !isVerifier) return false;
+
+  // A single webContents can never be both the main renderer and the verifier.
+  if (isMainRenderer && isVerifier) return false;
 
   const types = Array.isArray(mediaTypes)
     ? mediaTypes.map(value => String(value || '').toLowerCase().trim()).filter(Boolean)
@@ -33,12 +43,15 @@ function decideMediaPermission({
 
   // A combined request would need both gates and is never used by JARVIS.
   if (wantsAudio && wantsVideo) return false;
-  if (wantsVideo) return Boolean(faceCameraArmed);
-  if (wantsAudio) return Boolean(microphoneArmed);
 
-  // Legacy Electron requests can omit media types. Preserve the old
-  // camera-only behavior; never infer microphone access from an empty list.
-  return Boolean(faceCameraArmed);
+  if (isVerifier) {
+    return wantsVideo && !wantsAudio && Boolean(cameraArmed);
+  }
+
+  // Main renderer: camera is always denied. Microphone keeps its explicit gate.
+  if (wantsVideo) return false;
+  if (wantsAudio) return Boolean(microphoneArmed);
+  return false;
 }
 
 module.exports = { normalizeMediaTypes, decideMediaPermission };
