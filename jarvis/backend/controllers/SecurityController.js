@@ -17,6 +17,16 @@ const {
   isCapabilityId,
 } = require('../security/capability-store');
 
+// Durable audit evidence is required only for capabilities that create
+// terminal, screen, or file-export effects. Microphone and face camera paths
+// stay independent so PIN/face unlock remains available when audit storage is
+// degraded.
+const AUDIT_SCOPED_CAPABILITIES = Object.freeze([
+  'terminal',
+  'screen-capture',
+  'export-save',
+]);
+
 module.exports = function registerSecurityController({
   ipcMain,
   app,
@@ -27,6 +37,7 @@ module.exports = function registerSecurityController({
   faceStore = null,
   capabilityStore = null,
   pinRateLimiter = null,
+  auditStatus = null,
 }) {
   const state = sessionState;
   const capabilities = capabilityStore || createCapabilityStore({ audit: secAudit });
@@ -65,20 +76,52 @@ module.exports = function registerSecurityController({
   const securityPreferencesFile = () => path.join(app.getPath('userData'), 'security-preferences.json');
   const LEGACY_NOTICE_KEY = 'legacyCapabilityNoticeAcknowledged';
 
-  const capabilityPayload = extra => ({
-    ok: true,
-    state: currentState(),
-    capabilities: capabilities.snapshot(),
-    ...extra,
-  });
+  const auditStatusView = () => {
+    if (typeof auditStatus === 'function') {
+      try {
+        return auditStatus();
+      } catch (error) {
+        return Object.freeze({
+          durable: false,
+          mode: 'memory',
+          integrity: 'unavailable',
+          warning: `Audit status could not be read: ${error.message}`,
+          reason: error.message,
+        });
+      }
+    }
+    return auditStatus && typeof auditStatus === 'object' ? auditStatus : null;
+  };
 
-  const capabilityDenied = (error, extra = {}) => ({
-    ok: false,
-    error,
-    state: currentState(),
-    capabilities: capabilities.snapshot(),
-    ...extra,
-  });
+  const auditUnavailable = () => {
+    const view = auditStatusView();
+    return !!(view && view.durable === false);
+  };
+
+  const scopedByAudit = capabilityId => AUDIT_SCOPED_CAPABILITIES.includes(capabilityId);
+
+  const capabilityPayload = extra => {
+    const audit = auditStatusView();
+    return {
+      ok: true,
+      state: currentState(),
+      capabilities: capabilities.snapshot(),
+      ...(audit ? { audit } : {}),
+      ...extra,
+    };
+  };
+
+  const capabilityDenied = (error, extra = {}) => {
+    const audit = auditStatusView();
+    return {
+      ok: false,
+      error,
+      state: currentState(),
+      capabilities: capabilities.snapshot(),
+      ...(audit ? { audit } : {}),
+      ...extra,
+    };
+  };
 
   async function readJsonFile(filePath) {
     try {
@@ -181,6 +224,10 @@ module.exports = function registerSecurityController({
       secAudit('CAPABILITY_REQUEST', String(capabilityId), 'DENIED');
       return capabilityDenied('Unknown capability');
     }
+    if (scopedByAudit(capabilityId) && auditUnavailable()) {
+      secAudit('CAPABILITY_REQUEST', `${capabilityId}: durable audit unavailable`, 'DENIED');
+      return capabilityDenied('Audit logging is unavailable; this capability is disabled');
+    }
     const current = capabilities.status(capabilityId);
     if (!current.requestable) {
       secAudit('CAPABILITY_REQUEST', capabilityId, 'DENIED');
@@ -217,6 +264,11 @@ module.exports = function registerSecurityController({
     if (!approved) {
       secAudit('CAPABILITY_DENY', capabilityId, 'DENIED');
       return capabilityDenied('Permission denied', { denied: true });
+    }
+
+    if (scopedByAudit(capabilityId) && auditUnavailable()) {
+      secAudit('CAPABILITY_REQUEST', `${capabilityId}: durable audit unavailable after consent`, 'DENIED');
+      return capabilityDenied('Audit logging became unavailable; this capability was not granted');
     }
 
     capabilities.grant(capabilityId);

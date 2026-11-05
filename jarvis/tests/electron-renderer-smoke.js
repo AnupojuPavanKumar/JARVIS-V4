@@ -654,6 +654,14 @@ app.whenReady().then(async () => {
       state: 'no-lock',
       capabilities: capabilityState(),
       legacy: { detected: false },
+      audit: {
+        durable: true,
+        mode: 'durable',
+        integrity: 'ok',
+        files: 1,
+        bytes: 1024,
+        lastWrite: '2026-11-04T12:00:00.000Z',
+      },
     };
   });
   ipcMain.removeHandler('security-request');
@@ -700,6 +708,19 @@ app.whenReady().then(async () => {
     await window.JarvisSec.load();
     window.JarvisSec.render();
     const mainChecked = Boolean(terminal.checked);
+    const durableStatus = document.getElementById('sec-audit-status')?.textContent || '';
+
+    const originalAudit = window.JarvisSec.state.audit;
+    window.JarvisSec.state.audit = {
+      durable: false,
+      mode: 'memory',
+      reason: 'smoke encryption unavailable',
+      warning: 'memory-only',
+    };
+    window.JarvisSec.render();
+    const memoryStatus = document.getElementById('sec-audit-status')?.textContent || '';
+    window.JarvisSec.state.audit = originalAudit;
+    window.JarvisSec.render();
 
     terminal.checked = false;
     terminal.dispatchEvent(new Event('change', { bubbles: true }));
@@ -719,6 +740,8 @@ app.whenReady().then(async () => {
       mainChecked,
       revokedChecked,
       screenStatus,
+      durableStatus,
+      memoryStatus,
     };
   })()`);
 
@@ -729,7 +752,10 @@ app.whenReady().then(async () => {
       && securityUi.deniedChecked === false
       && securityUi.mainChecked === true
       && securityUi.revokedChecked === false
-      && /APPROVAL REQUIRED/.test(securityUi.screenStatus),
+      && /APPROVAL REQUIRED/.test(securityUi.screenStatus)
+      && /Durable audit active/.test(securityUi.durableStatus)
+      && /Memory-only audit/.test(securityUi.memoryStatus)
+      && /smoke encryption unavailable/.test(securityUi.memoryStatus),
     JSON.stringify(securityUi)
   );
   check(

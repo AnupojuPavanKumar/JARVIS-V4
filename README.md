@@ -107,9 +107,19 @@ The renderer only starts tasks, sends approvals/cancellations, and renders task 
 - **Face camera boundary:** Camera permission is granted only for an armed unlock or enrollment attempt, video-only, with a short expiry. Raw frames stay in the renderer and are discarded after inference. Face verification changes only the local session lock and is not connected to approvals or privileged IPC.
 - **Microphone boundary:** Audio capture is denied by default and granted only after an explicit wake-word or push-to-talk activation, audio-only, through a bounded main-process gate. Camera and microphone requests are separate; combined audio+video requests are denied. Voice segments are sent only to the local Whisper sidecar child process and are deleted after transcription. If the session is locked, wake-word audio can focus the lock screen but commands are not executed until PIN or face unlock succeeds.
 - **Browser boundary:** Only loopback origins are allowed by default. External origins must be explicitly added with `JARVIS_BROWSER_ALLOWED_ORIGINS`. Downloads, popups, webviews, and permission requests are denied.
-- **Auditability:** Security decisions, browser actions, integrations, scheduler runs, and ambient changes are recorded locally with bounded retention.
+- **Auditability:** Security decisions, browser actions, integrations, scheduler runs, and ambient changes are recorded locally. The in-memory view keeps the last 1,000 events; the durable trail is stored under `userData/security-audit/` as encrypted JSONL with an encrypted head checkpoint and a SHA-256 hash chain. Rotation is 5 MB per file, 7 files, and 35 MB total. Reads return at most 500 records and only after unlock. If OS encryption is unavailable, JARVIS keeps a memory-only warning and disables terminal, screen capture, and export-save. This is tamper-evident, not tamper-proof.
 
 This is a desktop agent with real system access. Review approval requests and only enable integrations, folders, and external origins you intend to use.
+
+### Security Audit Log
+
+- **Location:** `%APPDATA%\jarvis-ai-os\security-audit\audit-YYYYMMDD.jsonl`, with `-01`, `-02`, and later parts created when a file reaches the size limit. The encrypted chain checkpoint is `audit-head.bin`.
+- **Encryption:** Every record is encrypted with Electron `safeStorage` (Windows DPAPI on this build) before it is written. JARVIS never falls back to a plaintext audit file. Copying the directory to another Windows user or machine makes the records unreadable.
+- **Integrity:** Each record has a monotonic sequence number and a SHA-256 hash chain. The encrypted head checkpoint lets JARVIS detect a truncated tail. Missing, corrupt, or mismatched head state is reported; if no readable prior chain exists, JARVIS starts a new chain with an explicit `AUDIT_CHAIN_RESET` record. This is tamper-evident, not tamper-proof; a user who controls this Windows account can still delete the whole directory or rewrite it.
+- **Retention:** At most 7 audit files and 35 MB are retained. The oldest matching audit files are removed by design; unrelated files in the directory are never touched. The renderer has no delete, rewrite, or clear channel for the audit log.
+- **Redaction:** PINs, common secret assignments (`password=`, `token=`, `api_key=`, bearer tokens), URL credentials, and home/userData path prefixes are redacted before an event reaches the in-memory ring, console, or disk. Callers are still expected to keep raw audio, embeddings, file contents, and credentials out of audit details.
+- **Fail-closed scope:** If durable audit is unavailable, JARVIS displays a warning in the Security panel and after unlock, and disables **terminal**, **screen capture**, and **export-save**. Microphone capture and face camera/verification are intentionally unaffected; PIN and face unlock remain available.
+- **Read access:** `sec-audit-read` is privileged, denied while locked, and capped at the newest 500 records. The Security panel still displays the last 20.
 
 ## Getting Started
 

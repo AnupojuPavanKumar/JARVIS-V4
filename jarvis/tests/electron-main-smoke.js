@@ -171,6 +171,35 @@ app.whenReady().then(async () => {
         && audits?.entries?.some(entry => entry.action === 'WINDOW_OPEN_BLOCK') === true,
       JSON.stringify(audits?.entries?.slice(-5))
     );
+    check(
+      'the real main process reads the durable encrypted audit log',
+      audits?.durable === true && audits?.integrity === 'ok',
+      JSON.stringify({ durable: audits?.durable, integrity: audits?.integrity, warning: audits?.warning })
+    );
+    const securityStatus = await win.webContents.executeJavaScript('window.jarvis.securityGet()');
+    check(
+      'security-get exposes durable audit status to the Security panel',
+      securityStatus?.ok === true && securityStatus?.audit?.durable === true,
+      JSON.stringify(securityStatus?.audit)
+    );
+    const auditDir = path.join(userDataDir, 'security-audit');
+    const auditFiles = fs.existsSync(auditDir)
+      ? fs.readdirSync(auditDir).filter(name => /^audit-\d{8}(?:-\d{2})?\.jsonl$/.test(name))
+      : [];
+    check(
+      'the durable audit directory has an encrypted JSONL file and head checkpoint',
+      auditFiles.length > 0 && fs.existsSync(path.join(auditDir, 'audit-head.bin')),
+      auditFiles.join(',')
+    );
+    const auditRaw = auditFiles.length > 0
+      ? fs.readFileSync(path.join(auditDir, auditFiles[0]), 'utf8')
+      : '';
+    check(
+      'the durable audit file does not store action names in plaintext',
+      auditRaw.length > 0
+        && auditRaw.includes('NAVIGATION_BLOCK') === false
+        && auditRaw.includes('WINDOW_OPEN_BLOCK') === false
+    );
 
     win.show();
     await waitFor(() => win.isVisible(), 3000);

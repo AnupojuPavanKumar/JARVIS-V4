@@ -1429,7 +1429,7 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
       }
     }, 600);
     Auth._showError(res && res.error || "Incorrect PIN.");
-  }, _showError: function (e) { const t = document.getElementById("auth-error"); t && (t.textContent = e, t.classList.remove("hidden")) }, _unlock: function () { Auth._keyHandler && (document.removeEventListener("keydown", Auth._keyHandler), Auth._keyHandler = null); const e = document.getElementById("auth-screen"); e && (e.classList.add("unlocking"), showToast("Identity confirmed. Welcome back, sir.", "success"), setTimeout(function () { e.classList.add("hidden") }, 600), setTimeout(() => { if (window._runBootSequence) window._runBootSequence(triggerLLMGreeting); else triggerLLMGreeting(); }, 650)) }, skip: async function () {
+  }, _showError: function (e) { const t = document.getElementById("auth-error"); t && (t.textContent = e, t.classList.remove("hidden")) }, _unlock: function () { Auth._keyHandler && (document.removeEventListener("keydown", Auth._keyHandler), Auth._keyHandler = null); const e = document.getElementById("auth-screen"); e && (e.classList.add("unlocking"), showToast("Identity confirmed. Welcome back, sir.", "success"), setTimeout(function () { e.classList.add("hidden") }, 600), setTimeout(() => { if (window._runBootSequence) window._runBootSequence(triggerLLMGreeting); else triggerLLMGreeting(); }, 650), setTimeout(function () { if (window.JarvisSec && typeof window.JarvisSec.load === "function") { window.JarvisSec.load().then(function (result) { if (result && result.ok) window.JarvisSec.render(); }); } }, 900)) }, skip: async function () {
     if (!window.jarvis || !window.jarvis.authSkip) {
       Auth._showError("Auth service unavailable.");
       return;
@@ -1489,7 +1489,8 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
   closeModal("change-pin-modal");
   showToast("PIN updated successfully, sir.", "success");
 } window.submitChangePin = submitChangePin; async function refreshDiagnostics() { const e = document.getElementById("diag-grid"), t = document.getElementById("diag-skills-list"), n = document.getElementById("diag-queue-list"); e && (e.innerHTML = '<div class="panel-placeholder">Loading...</div>'); try { let s = null; if (window.jarvis && window.jarvis.getRuntimeStats && (s = await window.jarvis.getRuntimeStats()), e && s && s.ok) { const o = s.process, i = s.system, a = s.jarvis, c = Math.round(parseFloat(o.heap_used_mb) / parseFloat(o.heap_total_mb) * 100), r = Math.round((parseFloat(i.total_mem_gb) - parseFloat(i.free_mem_gb)) / parseFloat(i.total_mem_gb) * 100); e.innerHTML = ['<div class="diag-card">', '<div class="diag-card-title">PROCESS</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">UPTIME</span><span class="diag-stat-val">' + o.uptime_human + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP USED</span><span class="diag-stat-val">' + o.heap_used_mb + " MB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP TOTAL</span><span class="diag-stat-val">' + o.heap_total_mb + " MB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">HEAP %</span><span class="diag-stat-val ' + (c > 80 ? "warn" : "ok") + '">' + c + "%</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RSS</span><span class="diag-stat-val">' + o.rss_mb + " MB</span></div>", "</div>", '<div class="diag-card">', '<div class="diag-card-title">SYSTEM</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">SYS UPTIME</span><span class="diag-stat-val">' + i.uptime_human + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM FREE</span><span class="diag-stat-val">' + i.free_mem_gb + " GB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM TOTAL</span><span class="diag-stat-val">' + i.total_mem_gb + " GB</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">RAM USED</span><span class="diag-stat-val ' + (r > 85 ? "warn" : "ok") + '">' + r + "%</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">CPU CORES</span><span class="diag-stat-val">' + i.cpu_cores + "</span></div>", "</div>", '<div class="diag-card">', '<div class="diag-card-title">JARVIS</div>', '<div class="diag-stat-row"><span class="diag-stat-lbl">OLLAMA</span><span class="diag-stat-val ' + (a.ollama_running ? "ok" : "err") + '">' + (a.ollama_running ? "ONLINE" : "OFFLINE") + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">SKILLS</span><span class="diag-stat-val">' + a.skill_count + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">SESSIONS</span><span class="diag-stat-val">' + a.session_count + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">ELECTRON</span><span class="diag-stat-val">' + a.electron_ver + "</span></div>", '<div class="diag-stat-row"><span class="diag-stat-lbl">NODE</span><span class="diag-stat-val">' + a.node_ver + "</span></div>", "</div>"].join("") } else e && (e.innerHTML = '<div class="panel-placeholder">Could not fetch diagnostics.</div>') } catch (s) { e && (e.innerHTML = '<div class="panel-placeholder">Error: ' + (s.message || "unknown") + "</div>") } if (t) if (!Skills._manifest.length) t.innerHTML = '<div class="panel-placeholder">No skills loaded.</div>'; else { const s = { get_datetime: "\u23F0", calculator: "\u{1F9F8}", system_status: "\u{1F4BB}", web_search: "\u{1F310}" }; t.innerHTML = Skills._manifest.map(function (o) { return '<div class="diag-skill-chip"><span class="diag-skill-icon">' + (s[o.id] || "\u2B21") + '</span><div><div class="diag-skill-name">' + escHtml(o.name) + '</div><div class="diag-skill-desc">' + escHtml(o.description) + "</div></div></div>" }).join("") } if (n) { const s = TaskQueue.getQueue(); s.length ? n.innerHTML = s.map(function (o, i) { return '<div class="diag-queue-item"><span class="diag-qi-pos">#' + (i + 1) + '</span><span class="diag-qi-text">' + escHtml(o) + "</span></div>" }).join("") : n.innerHTML = '<div class="panel-placeholder">Queue empty \u2014 JARVIS is ready.</div>' } } window.refreshDiagnostics = refreshDiagnostics; function openDiagnosticsModal() { openModal("diag-modal"), refreshDiagnostics() } window.openDiagnosticsModal = openDiagnosticsModal, document.addEventListener("DOMContentLoaded", async function () { await Skills.load(); try { typeof WakeWord !== "undefined" && WakeWord.init() } catch (err) { console.warn("[WakeWord] Init failed:", err) } await Auth.init(), document.addEventListener("keydown", function (e) { e.ctrlKey && e.key === "d" && (e.preventDefault(), openDiagnosticsModal()) }), console.log("[JARVIS] New features initialized: TaskQueue, Skills, Auth, WakeWord, Diagnostics") }); const JarvisSec = {
-  state: { ok: false, capabilities: {}, legacy: null },
+  state: { ok: false, capabilities: {}, legacy: null, audit: null },
+  _auditWarningShown: false,
   capability(id) {
     const capabilities = this.state && this.state.capabilities;
     return capabilities && capabilities[id] ? capabilities[id] : null;
@@ -1497,11 +1498,61 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
   async load() {
     try {
       const result = await window.jarvis.securityGet();
-      if (result && result.ok) this.state = result;
+      if (result && result.ok) {
+        this.state = result;
+        this.notifyAuditWarning();
+      }
       return result;
     } catch (error) {
       return { ok: false, error: error.message };
     }
+  },
+  notifyAuditWarning() {
+    const audit = this.state && this.state.audit;
+    if (!audit || audit.durable !== false || this._auditWarningShown) return;
+    this._auditWarningShown = true;
+    if (typeof window.showToast === "function") {
+      window.showToast(
+        "Audit logging is unavailable. Terminal, screen capture, and export saving are disabled.",
+        "error"
+      );
+    }
+  },
+  renderAuditStatus(readState) {
+    const el = document.getElementById("sec-audit-status");
+    if (!el) return;
+    const audit = this.state && this.state.audit;
+    if (readState && readState.durable === false) {
+      const reason = (readState.warning || (audit && (audit.reason || audit.warning)) || "OS-backed encryption is unavailable");
+      el.textContent = `Memory-only audit \u2014 terminal, screen capture, and export saving are disabled: ${reason}`;
+      el.className = "sec-audit-status sec-log-blocked";
+      return;
+    }
+    if (!audit) {
+      el.textContent = "Durable audit status is unavailable.";
+      el.className = "sec-audit-status sec-log-warn";
+      return;
+    }
+    if (audit.durable === true) {
+      const files = Number.isFinite(audit.files) ? audit.files : 0;
+      const bytes = Number.isFinite(audit.bytes) ? audit.bytes : 0;
+      const last = audit.lastWrite ? `last write ${audit.lastWrite}` : "no records yet";
+      let text = `Durable audit active \u2014 ${files} file(s), ${Math.round(bytes / 1024)} KB, ${last}.`;
+      if (audit.integrity && audit.integrity !== "ok") text += ` Integrity: ${audit.integrity}.`;
+      if (readState && readState.integrity && readState.integrity !== "ok") {
+        text += ` Integrity: ${readState.integrity}.`;
+      }
+      if (readState && readState.warning) text += ` ${readState.warning}`;
+      else if (audit.warning) text += ` ${audit.warning}`;
+      el.textContent = text;
+      const warn = (audit.integrity && audit.integrity !== "ok")
+        || (readState && ((readState.integrity && readState.integrity !== "ok") || readState.warning));
+      el.className = `sec-audit-status ${warn ? "sec-log-warn" : "sec-log-ok"}`;
+      return;
+    }
+    const reason = audit.reason || audit.warning || "OS-backed encryption is unavailable";
+    el.textContent = `Memory-only audit \u2014 terminal, screen capture, and export saving are disabled: ${reason}`;
+    el.className = "sec-audit-status sec-log-blocked";
   },
   async request(id) {
     try {
@@ -1541,6 +1592,7 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
         legacy.hidden = true;
       }
     }
+    this.renderAuditStatus();
   },
 }; window.openSecurityModal = function () {
     let e = document.getElementById("security-modal"); e || (e = document.createElement("div"), e.id = "security-modal", e.className = "modal", e.setAttribute("role", "dialog"), e.setAttribute("aria-modal", "true"), e.innerHTML = `
@@ -1608,6 +1660,7 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
           </div>
 
           <div class="sec-section-title" style="margin-top:16px">AUDIT LOG (Last 20 entries)</div>
+          <div class="sec-audit-status" id="sec-audit-status">Checking durable audit status\u2026</div>
           <div class="sec-audit-log" id="sec-audit-log">Loading\u2026</div>
           <button class="micro-btn" data-action="refreshSecAudit" style="margin-top:6px">\u21BB REFRESH LOG</button>
 
@@ -1638,10 +1691,27 @@ ${e}\u26A0 Note: ${state.model} is not a vision model. Switch to llava or moondr
       showToast(effective ? "Terminal access granted for this session." : "Terminal access revoked.", effective ? "success" : "info");
     }
   }, window.refreshSecAudit = async function () {
-    const e = document.getElementById("sec-audit-log"); if (e) try {
-      const t = await window.jarvis.secAuditRead(); if (!t.ok || !t.data) { e.textContent = "No audit log entries yet."; return } const n = t.data.split(`
-`).filter(Boolean).slice(-20).reverse(); e.innerHTML = n.map(s => { const o = s.includes("[BLOCKED]") || s.includes("[RATE_LIMITED]"), i = s.includes("[WARN"); return `<div class="sec-log-entry ${o ? "sec-log-blocked" : i ? "sec-log-warn" : "sec-log-ok"}">${escHtml(s)}</div>` }).join("")
-    } catch { e.textContent = "Error loading audit log." }
+    const e = document.getElementById("sec-audit-log");
+    if (!e) return;
+    try {
+      const t = await window.jarvis.secAuditRead();
+      JarvisSec.renderAuditStatus(t);
+      if (!t || !t.ok || !t.data) {
+        e.textContent = (t && t.error)
+          ? t.error
+          : ((t && t.warning) ? t.warning : "No audit log entries yet.");
+        return;
+      }
+      const n = t.data.split(`
+`).filter(Boolean).slice(-20).reverse();
+      e.innerHTML = n.map(s => {
+        const o = s.includes("[BLOCKED]") || s.includes("[RATE_LIMITED]") || s.includes("[FAIL_CLOSED]");
+        const i = s.includes("[WARN");
+        return `<div class="sec-log-entry ${o ? "sec-log-blocked" : i ? "sec-log-warn" : "sec-log-ok"}">${escHtml(s)}</div>`;
+      }).join("");
+    } catch {
+      e.textContent = "Error loading audit log.";
+    }
   }, window.captureScreenForAnalysis = async function () {
     const consent = await JarvisSec.request("screen-capture");
     if (!consent || !consent.ok) {

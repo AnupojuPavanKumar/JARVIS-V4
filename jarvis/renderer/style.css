@@ -5015,6 +5015,18 @@ html.font-xl{font-size:18px}
   color: var(--text-secondary);
   line-height: 1.4;
 }
+.sec-audit-status {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
 .sec-audit-log {
   background: rgba(0, 0, 0, 0.5);
   border: 1px solid var(--border);

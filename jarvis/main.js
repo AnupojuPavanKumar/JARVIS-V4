@@ -56,6 +56,8 @@ const { normalizeMediaTypes, decideMediaPermission } = require('./backend/voice/
 const { getAuthStatus } = require('./backend/auth/auth-store');
 const { createSessionState } = require('./backend/security/session-state');
 const { createCapabilityStore } = require('./backend/security/capability-store');
+const { createAuditLogStore } = require('./backend/security/audit-log-store');
+const { createAuditRedactor } = require('./backend/security/audit-redaction');
 const { createIpcGuard } = require('./backend/security/ipc-guard');
 const { createProjectRegistry } = require('./backend/security/project-registry');
 const { attachRendererSessionGuards } = require('./backend/security/renderer-guards');
@@ -122,18 +124,66 @@ function secCheckRate(action, limitPerMin) {
   return true;
 }
 
-// ─── Security Audit Log (ring-buffer, max 1000 entries) ─────────────
+// ─── Security Audit Log ─────────────────────────────────────────────
+// The 1,000-entry ring backs the fast last-20 UI. Every sanitized record is
+// also queued for the encrypted durable store under userData/security-audit.
 const _secAuditLog = [];
+const AUDIT_FAIL_CLOSED_CAPABILITIES = Object.freeze([
+  'terminal',
+  'screen-capture',
+  'export-save',
+]);
+
+const auditUserDataPath = (() => {
+  try { return app.getPath('userData'); } catch (_) {
+    return path.join(os.homedir(), 'AppData', 'Roaming', 'jarvis-ai-os');
+  }
+})();
+
+const auditRedactor = createAuditRedactor({
+  homeDir: os.homedir(),
+  userDataPath: auditUserDataPath,
+});
+
+const auditLogStore = createAuditLogStore({
+  userDataPath: auditUserDataPath,
+  safeStorage,
+  logger: console,
+  onFailure: (error, status) => handleAuditFailure(error, status),
+});
+
+// Declared before the audit store can initialize so a startup failure can
+// safely revoke the scoped capabilities without a temporal-dead-zone error.
+let capabilityStore = null;
+
+function handleAuditFailure(error, status = null) {
+  const reason = error && error.message
+    ? error.message
+    : (status && status.reason) || 'durable audit unavailable';
+  for (const capabilityId of AUDIT_FAIL_CLOSED_CAPABILITIES) {
+    try { capabilityStore?.revoke(capabilityId, 'audit log unavailable'); } catch (_) {}
+  }
+  try {
+    secAudit(
+      'AUDIT_FAIL_CLOSED',
+      `${reason}; terminal, screen-capture, and export-save disabled`,
+      'FAIL_CLOSED'
+    );
+  } catch (_) {}
+}
+
 function secAudit(action, detail, verdict) {
-  const entry = { ts: new Date().toISOString(), action, detail: String(detail).slice(0, 500), verdict };
+  const sanitized = auditRedactor.sanitizeAuditEntry(action, detail, verdict);
+  const entry = { ts: new Date().toISOString(), ...sanitized };
   _secAuditLog.push(entry);
   if (_secAuditLog.length > 1000) _secAuditLog.shift(); // ring-buffer cap
-  console.log(`[SEC] ${verdict} | ${action} | ${entry.detail}`);
+  console.log(`[SEC] ${entry.verdict} | ${entry.action} | ${entry.detail}`);
+  try { auditLogStore.append(entry); } catch (_) {}
 }
 
 // Grants live only in main memory. They are never loaded from renderer data or
 // the legacy security settings file.
-const capabilityStore = createCapabilityStore({ audit: secAudit });
+capabilityStore = createCapabilityStore({ audit: secAudit });
 
 // Project roots and tokens live only in main. A renderer reload, hide, or lock
 // revokes every token so a stale page cannot keep reading a project.
@@ -672,6 +722,28 @@ app.whenReady().then(async () => {
   const histDir = path.join(app.getPath('userData'), 'history');
   fs.mkdirSync(histDir, { recursive: true });
 
+  // Start the durable audit log before any controller can grant a sensitive
+  // capability. If OS encryption is unavailable, the store stays memory-only
+  // and SecurityController denies terminal, screen capture, and export-save.
+  try {
+    const auditStatus = await auditLogStore.init();
+    if (auditStatus && auditStatus.durable) {
+      secAudit(
+        'AUDIT_STORE_READY',
+        `${auditStatus.files} file(s), ${auditStatus.bytes} bytes`,
+        'OK'
+      );
+    } else {
+      secAudit(
+        'AUDIT_STORE_UNAVAILABLE',
+        (auditStatus && (auditStatus.reason || auditStatus.warning)) || 'unknown reason',
+        'FAIL_CLOSED'
+      );
+    }
+  } catch (error) {
+    secAudit('AUDIT_STORE_INIT', error.message, 'FAIL_CLOSED');
+  }
+
   // The local voice opt-in, capture grants, and transcription leases live in
   // main. The renderer can never supply a lock-screen flag or its own duration.
   try {
@@ -857,6 +929,10 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  // before-quit emits capability revocations. Flush after those events so a
+  // clean quit does not drop the final audit records.
+  try { auditLogStore.flushSync(); } catch (_) {}
+  try { auditLogStore.dispose(); } catch (_) {}
   try { voicePolicy?.revokeAll('app-quit'); } catch (_) {}
   try { faceController?.cancelVerifier?.('app-quit'); } catch (_) {}
   try { faceVerifier?.stop?.('app-quit'); } catch (_) {}
@@ -1036,6 +1112,7 @@ async function registerControllersAndScheduler() {
     sessionState,
     faceStore: faceProfileStore,
     capabilityStore,
+    auditStatus: () => auditLogStore.status(),
   });
   faceController = registerFaceController({
     ipcMain,
@@ -1088,11 +1165,38 @@ async function registerControllersAndScheduler() {
   registerAmbientController({ ipcMain, ambientService });
 
   ipcMain.handle('sec-audit-read', async () => {
-    return {
-      ok: true,
-      entries: [..._secAuditLog],
-      data: _secAuditLog.map(e => `[${e.ts}] [${e.verdict}] ${e.action}: ${e.detail}`).join('\n')
-    };
+    // The IPC policy already limits this channel to privileged sessions. Keep
+    // the handler-level check as defense in depth for direct/unit callers.
+    if (!sessionState || sessionState.canUsePrivileges !== true) {
+      return {
+        ok: false,
+        error: 'Unlock JARVIS before reading the audit log',
+        entries: [],
+        data: '',
+      };
+    }
+
+    try {
+      const result = auditLogStore.read({ limit: 500 });
+      if (result && result.ok) return result;
+      return {
+        ok: true,
+        entries: [..._secAuditLog],
+        data: _secAuditLog.map(e => `[${e.ts}] [${e.verdict}] ${e.action}: ${e.detail}`).join('\n'),
+        durable: false,
+        integrity: (result && result.integrity) || 'unavailable',
+        warning: (result && result.warning) || auditLogStore.status().warning,
+      };
+    } catch (error) {
+      return {
+        ok: true,
+        entries: [..._secAuditLog],
+        data: _secAuditLog.map(e => `[${e.ts}] [${e.verdict}] ${e.action}: ${e.detail}`).join('\n'),
+        durable: false,
+        integrity: 'unavailable',
+        warning: error.message,
+      };
+    }
   });
 }
 
